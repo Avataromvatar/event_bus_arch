@@ -1,13 +1,5 @@
-This Event Bus with Event Bus Master(single tone) what collect other EventController divided into layers/group by prefix. EventDTO have uuid and you can use it for sorting,logging, tracing and other.
+import 'package:dart_event_bus/dart_event_bus.dart';
 
-Event type and event name(optionally) create topic what used for holding event node. 
-
-## Getting started
-
-## Usage
-
-## Example
-```dart
 class TestEventHandlerGroup implements EventBusHandlersGroup {
   IEventBusHandler? _bus;
   @override
@@ -90,6 +82,3 @@ Future<void> main() async {
   print('Model String ${modelControler.lastEvent<String>()}');
   print('Model int ${modelControler.lastEvent<int>()}');
 }
-```
-
-

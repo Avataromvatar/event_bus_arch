@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:dart_event_bus/src/event_controller.dart';
 import 'package:dart_event_bus/src/event_dto.dart';
 
 abstract class IEventBusMaster {
+  ///key: prefix bus, value: connect or disconnect
+  Stream<MapEntry<String, bool>> get changes;
   EventBus? getEventBus<T>({String? prefix});
   EventBus? getEventBusByPrefix(String prefix);
-  List<String> get controllersPrefix;
+  List<String> get busPrefixes;
   void add<T>(EventBus bus);
   void remove<T>(EventBus bus);
 
@@ -20,14 +24,19 @@ abstract class IEventBusMaster {
 }
 
 class EventBusMaster implements IEventBusMaster {
-  List<EventBus> _list = [];
+  final List<EventBus> _list = [];
+  final StreamController<MapEntry<String, bool>> _changes = StreamController<MapEntry<String, bool>>.broadcast();
+  @override
+  Stream<MapEntry<String, bool>> get changes => _changes.stream;
   static EventBusMaster _instance = EventBusMaster._();
   static IEventBusMaster get instance => _instance;
   EventBusMaster._() {}
   factory EventBusMaster() {
     return _instance;
   }
-  List<String> get controllersPrefix => _list.where((element) => element.prefix != null).map((e) => e.prefix!).toList();
+  @override
+  List<String> get busPrefixes => _list.where((element) => element.prefix != null).map((e) => e.prefix!).toList();
+  @override
   EventBus? getEventBus<T>({String? prefix}) {
     for (var element in _list) {
       if (element is T && (prefix == element.prefix || prefix == null)) {
@@ -36,6 +45,7 @@ class EventBusMaster implements IEventBusMaster {
     }
   }
 
+  @override
   EventBus? getEventBusByPrefix(String prefix) {
     for (var element in _list) {
       if (prefix == element.prefix) {
@@ -45,6 +55,7 @@ class EventBusMaster implements IEventBusMaster {
   }
 
   ///repeat last event by topic
+  @override
   bool repeat<T>({String? eventName, String? uuid, String? prefix}) {
     for (var element in _list) {
       if (element is T && (prefix == element.prefix || prefix == null)) {
@@ -54,14 +65,17 @@ class EventBusMaster implements IEventBusMaster {
     return false;
   }
 
+  @override
   void add<T>(EventBus bus) {
     _list.add(bus);
   }
 
+  @override
   void remove<T>(EventBus bus) {
     _list.remove(bus);
   }
 
+  @override
   T? lastEvent<T>({String? eventName, String? prefix}) {
     for (var element in _list) {
       if ((prefix != null && element.prefix == prefix) /*&&
@@ -72,6 +86,7 @@ class EventBusMaster implements IEventBusMaster {
     }
   }
 
+  @override
   bool send<T>(T event, {String? eventName, String? uuid, String? prefix}) {
     bool ret = false;
     for (var element in _list) {
@@ -86,19 +101,23 @@ class EventBusMaster implements IEventBusMaster {
   }
 
   ///Возвращает поток события. Если нужно повторить предыдуще событие используйте [repeatLastEvent]
+  @override
   Stream<EventDTO<T>>? listenEventDTO<T>({String? eventName, bool repeatLastEvent = false, String? prefix}) {
     for (var element in _list) {
       if ((prefix != null && element.prefix == prefix) && element.contain<T>(eventName)) {
         return element.listenEventDTO<T>(eventName: eventName, repeatLastEvent: repeatLastEvent);
       }
     }
+    return null;
   }
 
+  @override
   Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix}) {
     for (var element in _list) {
       if ((prefix != null && element.prefix == prefix) && element.contain<T>(eventName)) {
         return element.listenEvent<T>(eventName: eventName, repeatLastEvent: repeatLastEvent);
       }
     }
+    return null;
   }
 }

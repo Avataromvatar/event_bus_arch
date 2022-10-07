@@ -18,10 +18,16 @@ abstract class IEventBusMaster {
   bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration});
   T? lastEvent<T>({String? eventName, String? prefix});
 
-  ///Возвращает поток события. Если нужно повторить предыдуще событие используйте [repeatLastEvent]
+  ///Use [repeatLastEvent] if need send lastEvent. @attention event be sended after wait 1 millisecond or [Duration]
+  ///
+  ///return null if prefix != bus.prefix
   Stream<EventDTO<T>>? listenEventDTO<T>(
       {String? eventName, bool repeatLastEvent = false, String? prefix, Duration? duration});
-  Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix});
+
+  ///Use [repeatLastEvent] if need send lastEvent. @attention event be sended after wait 1 millisecond or [Duration]
+  ///
+  ///return null if prefix != bus.prefix
+  Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix, Duration? duration});
 }
 
 class EventBusMaster implements IEventBusMaster {
@@ -108,7 +114,7 @@ class EventBusMaster implements IEventBusMaster {
   Stream<EventDTO<T>>? listenEventDTO<T>(
       {String? eventName, bool repeatLastEvent = false, String? prefix, Duration? duration}) {
     for (var element in _list) {
-      if ((prefix != null && element.prefix == prefix) && element.contain<T>(eventName)) {
+      if ((/*prefix != null &&*/ element.prefix == prefix) /*&& element.contain<T>(eventName)*/) {
         return element.listenEventDTO<T>(eventName: eventName, repeatLastEvent: repeatLastEvent, duration: duration);
       }
     }
@@ -118,7 +124,7 @@ class EventBusMaster implements IEventBusMaster {
   @override
   Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix, Duration? duration}) {
     for (var element in _list) {
-      if ((prefix != null && element.prefix == prefix) && element.contain<T>(eventName)) {
+      if ((/*prefix != null &&*/ element.prefix == prefix) /* && element.contain<T>(eventName)*/) {
         return element.listenEvent<T>(eventName: eventName, repeatLastEvent: repeatLastEvent, duration: duration);
       }
     }

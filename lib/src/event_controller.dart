@@ -65,7 +65,7 @@ abstract class EventBus {
   String? get prefix;
   Type get type;
 
-  /// проверяет есть ли те кто слушают событие
+  ///check if there is a listener on the bus
   bool contain<T>(String? eventName);
 
   ///return true if hasListener
@@ -113,7 +113,6 @@ abstract class EventBus {
 
 typedef EventEmitter<T> = void Function(T data);
 
-///if need notify about event call emit
 typedef EventHandler<T> = Future<void> Function(
   EventDTO<T> event,
 
@@ -122,6 +121,7 @@ typedef EventHandler<T> = Future<void> Function(
   EventBus? bus,
 });
 
+///Interface for add/remove handlers
 abstract class EventBusHandler {
   void addHandler<T>(EventHandler<T> handler, {String? eventName});
   void removeHandler<T>({String? eventName});

@@ -8,4 +8,4 @@ export 'src/event_controller.dart'
         EventModelController,
         EventBusHandlersGroup;
 export 'src/event_dto.dart';
-export 'src/event_master.dart' show EventBusMaster;
+export 'src/event_master.dart';

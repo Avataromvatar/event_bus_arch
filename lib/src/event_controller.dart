@@ -287,7 +287,7 @@ class EventController implements EventBus, EventBusHandler {
         return true;
       }
     } else {
-      return EventBusMaster().repeat(eventName: eventName, uuid: uuid, prefix: prefix);
+      return EventBusMaster().repeat(eventName: eventName, uuid: uuid, prefix: prefix, duration: duration);
     }
     return false;
   }

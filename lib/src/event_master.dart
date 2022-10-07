@@ -15,11 +15,12 @@ abstract class IEventBusMaster {
   bool send<T>(T event, {String? eventName, String? uuid, String? prefix});
 
   ///repeat last event by topic
-  bool repeat<T>({String? eventName, String? uuid, String? prefix});
+  bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration});
   T? lastEvent<T>({String? eventName, String? prefix});
 
   ///Возвращает поток события. Если нужно повторить предыдуще событие используйте [repeatLastEvent]
-  Stream<EventDTO<T>>? listenEventDTO<T>({String? eventName, bool repeatLastEvent = false, String? prefix});
+  Stream<EventDTO<T>>? listenEventDTO<T>(
+      {String? eventName, bool repeatLastEvent = false, String? prefix, Duration? duration});
   Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix});
 }
 
@@ -56,10 +57,10 @@ class EventBusMaster implements IEventBusMaster {
 
   ///repeat last event by topic
   @override
-  bool repeat<T>({String? eventName, String? uuid, String? prefix}) {
+  bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration}) {
     for (var element in _list) {
       if (element is T && (prefix == element.prefix || prefix == null)) {
-        return element.repeat(eventName: eventName, uuid: uuid, prefix: prefix);
+        return element.repeat(eventName: eventName, uuid: uuid, prefix: prefix, duration: duration);
       }
     }
     return false;
@@ -102,20 +103,21 @@ class EventBusMaster implements IEventBusMaster {
 
   ///Возвращает поток события. Если нужно повторить предыдуще событие используйте [repeatLastEvent]
   @override
-  Stream<EventDTO<T>>? listenEventDTO<T>({String? eventName, bool repeatLastEvent = false, String? prefix}) {
+  Stream<EventDTO<T>>? listenEventDTO<T>(
+      {String? eventName, bool repeatLastEvent = false, String? prefix, Duration? duration}) {
     for (var element in _list) {
       if ((prefix != null && element.prefix == prefix) && element.contain<T>(eventName)) {
-        return element.listenEventDTO<T>(eventName: eventName, repeatLastEvent: repeatLastEvent);
+        return element.listenEventDTO<T>(eventName: eventName, repeatLastEvent: repeatLastEvent, duration: duration);
       }
     }
     return null;
   }
 
   @override
-  Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix}) {
+  Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix, Duration? duration}) {
     for (var element in _list) {
       if ((prefix != null && element.prefix == prefix) && element.contain<T>(eventName)) {
-        return element.listenEvent<T>(eventName: eventName, repeatLastEvent: repeatLastEvent);
+        return element.listenEvent<T>(eventName: eventName, repeatLastEvent: repeatLastEvent, duration: duration);
       }
     }
     return null;

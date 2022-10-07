@@ -2,11 +2,11 @@ import 'package:dart_event_bus/src/event_controller.dart';
 import 'package:dart_event_bus/src/event_dto.dart';
 
 abstract class IEventBusMaster {
-  IEventBus? getEventBus<T>({String? prefix});
-  IEventBus? getEventBusByPrefix(String prefix);
+  EventBus? getEventBus<T>({String? prefix});
+  EventBus? getEventBusByPrefix(String prefix);
   List<String> get controllersPrefix;
-  void add<T>(IEventBus bus);
-  void remove<T>(IEventBus bus);
+  void add<T>(EventBus bus);
+  void remove<T>(EventBus bus);
 
   bool send<T>(T event, {String? eventName, String? uuid, String? prefix});
 
@@ -20,7 +20,7 @@ abstract class IEventBusMaster {
 }
 
 class EventBusMaster implements IEventBusMaster {
-  List<IEventBus> _list = [];
+  List<EventBus> _list = [];
   static EventBusMaster _instance = EventBusMaster._();
   static IEventBusMaster get instance => _instance;
   EventBusMaster._() {}
@@ -28,7 +28,7 @@ class EventBusMaster implements IEventBusMaster {
     return _instance;
   }
   List<String> get controllersPrefix => _list.where((element) => element.prefix != null).map((e) => e.prefix!).toList();
-  IEventBus? getEventBus<T>({String? prefix}) {
+  EventBus? getEventBus<T>({String? prefix}) {
     for (var element in _list) {
       if (element is T && (prefix == element.prefix || prefix == null)) {
         return element;
@@ -36,7 +36,7 @@ class EventBusMaster implements IEventBusMaster {
     }
   }
 
-  IEventBus? getEventBusByPrefix(String prefix) {
+  EventBus? getEventBusByPrefix(String prefix) {
     for (var element in _list) {
       if (prefix == element.prefix) {
         return element;
@@ -54,11 +54,11 @@ class EventBusMaster implements IEventBusMaster {
     return false;
   }
 
-  void add<T>(IEventBus bus) {
+  void add<T>(EventBus bus) {
     _list.add(bus);
   }
 
-  void remove<T>(IEventBus bus) {
+  void remove<T>(EventBus bus) {
     _list.remove(bus);
   }
 

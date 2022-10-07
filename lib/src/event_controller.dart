@@ -68,22 +68,34 @@ abstract class EventBus {
   ///check if there is a listener on the bus
   bool contain<T>(String? eventName);
 
-  ///return true if hasListener
-  ///if uuid not set be use default uuid
+  ///return true if hasListener.
+  ///
+  ///if uuid not set, be use default uuid
+  ///
   ///if prefix set - event send to EventMaster.
+  ///
   ///You can use for example send(10) -> event topic = int
   bool send<T>(T event, {String? eventName, String? uuid, String? prefix});
 
-  ///repeat last event by topic
-  bool repeat<T>({String? eventName, String? uuid, String? prefix});
+  ///repeat last event by topic.
+  ///If set duration event be repeated when duration time end
+  bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration});
 
-  ///Use [repeatLastEvent] if need send lastEvent.
+  ///Use [repeatLastEvent] if need send lastEvent. @attention event be sended after wait 1 millisecond or [Duration]
+  ///
   ///if prefix set and he != bus.prefix, event search be in EventMaster and @attention EventMaster can return null
-  Stream<EventDTO<T>>? listenEventDTO<T>({String? eventName, bool repeatLastEvent = false, String? prefix});
+  Stream<EventDTO<T>>? listenEventDTO<T>(
+      {String? eventName, bool repeatLastEvent = false, Duration? duration, String? prefix});
 
-  ///Use [repeatLastEvent] if need send lastEvent.
+  ///Use [repeatLastEvent] if need send lastEvent. @attention event be sended after wait 1 millisecond or [Duration]
+  ///
   ///if prefix set and he != bus.prefix, event search be in EventMaster and @attention EventMaster can return null
-  Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix});
+  Stream<T>? listenEvent<T>({
+    String? eventName,
+    bool repeatLastEvent = false,
+    Duration? duration,
+    String? prefix,
+  });
 
   ///return the last event
   T? lastEvent<T>({String? eventName, String? prefix});
@@ -143,7 +155,7 @@ class EventNode<T> extends EventBusTopic {
   EventHandler<T>? _handler;
   Function(String topic)? onCancel;
   T? lastEvent;
-
+  String? _lastUUID;
   EventNode(
     String topic,
     this._handler,
@@ -156,6 +168,7 @@ class EventNode<T> extends EventBusTopic {
   Future<void> call(EventDTO<T> event, {bool isRepeat = false}) async {
     if (!_isDispose) {
       lastEvent = event.data;
+      _lastUUID = event.uuid;
       if (_handler != null) {
         _handler!.call(event, (event) {
           if (_streamController.hasListener) {
@@ -177,13 +190,16 @@ class EventNode<T> extends EventBusTopic {
     }
   }
 
-  Future<void> repeat({String? uuid}) async {
+  Future<void> repeat({String? uuid, Duration? duration}) async {
     String u = '';
     if (lastEvent != null) {
       if (uuid != null) {
         u = uuid;
       } else {
-        u = Uuid().v1();
+        u = _lastUUID!; // Uuid().v1();
+      }
+      if (duration != null) {
+        await Future.delayed(duration);
       }
       await call(EventDTO<T>(topic, lastEvent!, u), isRepeat: true);
     }
@@ -203,8 +219,10 @@ class EventNode<T> extends EventBusTopic {
 
 class EventController implements EventBus, EventBusHandler {
   String? _prefix;
+  @override
   String? get prefix => _prefix;
   Map<String, EventNode> _eventsNode = {};
+  @override
   Type get type => runtimeType;
 
   ///This handler use for event what not have special handler but hasListener.
@@ -214,19 +232,23 @@ class EventController implements EventBus, EventBusHandler {
   EventController({String? prefix, this.defaultHandler}) : _prefix = prefix {
     EventBusMaster.instance.add(this);
   }
+  @override
   void connect(EventBusHandlersGroup externHandlers) {
     externHandlers.connect(this);
   }
 
+  @override
   void disconnect(EventBusHandlersGroup externHandlers) {
     externHandlers.disconnect(this);
   }
 
+  @override
   bool contain<T>(String? eventName) {
     final _topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
     return _eventsNode.containsKey(_topic);
   }
 
+  @override
   T? lastEvent<T>({String? eventName, String? prefix}) {
     if (prefix == null || prefix == this.prefix) {
       final _topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
@@ -236,7 +258,7 @@ class EventController implements EventBus, EventBusHandler {
     }
   }
 
-  // bool sendToTopic(String topic, dynamic data) {}
+  @override
   bool send<T>(T event, {String? eventName, String? uuid, String? prefix}) {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
@@ -250,12 +272,18 @@ class EventController implements EventBus, EventBusHandler {
     }
   }
 
-  bool repeat<T>({String? eventName, String? uuid, String? prefix}) {
+  @override
+  bool repeat<T>({
+    String? eventName,
+    String? uuid,
+    String? prefix,
+    Duration? duration,
+  }) {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
       var s = _eventsNode[topic];
       if (s != null) {
-        s.repeat(uuid: uuid);
+        s.repeat(uuid: uuid, duration: duration);
         return true;
       }
     } else {
@@ -265,13 +293,25 @@ class EventController implements EventBus, EventBusHandler {
   }
 
   //Can return null only if set prefix != controller.prefix and EventBusMaster no have controller with this prefix
-  Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix}) {
-    return listenEventDTO<T>(eventName: eventName, prefix: prefix, repeatLastEvent: repeatLastEvent)
+  @override
+  Stream<T>? listenEvent<T>({
+    String? eventName,
+    bool repeatLastEvent = false,
+    String? prefix,
+    Duration? duration,
+  }) {
+    return listenEventDTO<T>(eventName: eventName, prefix: prefix, repeatLastEvent: repeatLastEvent, duration: duration)
         ?.map((event) => event.data!);
   }
 
   //Can return null only if set prefix != controller.prefix and EventBusMaster no have controller with this prefix
-  Stream<EventDTO<T>>? listenEventDTO<T>({String? eventName, bool repeatLastEvent = false, String? prefix}) {
+  @override
+  Stream<EventDTO<T>>? listenEventDTO<T>({
+    String? eventName,
+    bool repeatLastEvent = false,
+    String? prefix,
+    Duration? duration,
+  }) {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
       var s = _eventsNode[topic];
@@ -291,7 +331,7 @@ class EventController implements EventBus, EventBusHandler {
       }
 
       if (repeatLastEvent) {
-        _eventsNode[topic]?.repeat();
+        _eventsNode[topic]?.repeat(duration: duration ?? Duration(milliseconds: 1));
       }
       return _eventsNode[topic]!.stream as Stream<EventDTO<T>>;
     } else {
@@ -318,7 +358,7 @@ class EventController implements EventBus, EventBusHandler {
     });
   }
 
-  ///Добавляет обработчик к узлу.
+  @override
   void addHandler<T>(EventHandler<T> handler, {String? eventName}) {
     final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
     if (!_eventsNode.containsKey(topic)) {
@@ -329,6 +369,7 @@ class EventController implements EventBus, EventBusHandler {
     t._handler = handler;
   }
 
+  @override
   void removeHandler<T>({String? eventName}) {
     final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
     if (_eventsNode.containsKey(topic)) {

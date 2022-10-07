@@ -4,8 +4,8 @@ import 'package:dart_event_bus/src/event_controller.dart';
 import 'package:dart_event_bus/src/event_dto.dart';
 
 abstract class IEventBusMaster {
-  ///key: prefix bus, value: connect or disconnect
-  Stream<MapEntry<String, bool>> get changes;
+  ///key: bus, value: connect or disconnect EventController
+  Stream<MapEntry<EventBus, bool>> get changes;
   EventBus? getEventBus<T>({String? prefix});
   EventBus? getEventBusByPrefix(String prefix);
   List<String> get busPrefixes;
@@ -26,9 +26,9 @@ abstract class IEventBusMaster {
 
 class EventBusMaster implements IEventBusMaster {
   final List<EventBus> _list = [];
-  final StreamController<MapEntry<String, bool>> _changes = StreamController<MapEntry<String, bool>>.broadcast();
+  final StreamController<MapEntry<EventBus, bool>> _changes = StreamController<MapEntry<EventBus, bool>>.broadcast();
   @override
-  Stream<MapEntry<String, bool>> get changes => _changes.stream;
+  Stream<MapEntry<EventBus, bool>> get changes => _changes.stream;
   static EventBusMaster _instance = EventBusMaster._();
   static IEventBusMaster get instance => _instance;
   EventBusMaster._() {}
@@ -69,11 +69,13 @@ class EventBusMaster implements IEventBusMaster {
   @override
   void add<T>(EventBus bus) {
     _list.add(bus);
+    _changes.add(MapEntry(bus, true));
   }
 
   @override
   void remove<T>(EventBus bus) {
     _list.remove(bus);
+    _changes.add(MapEntry(bus, false));
   }
 
   @override

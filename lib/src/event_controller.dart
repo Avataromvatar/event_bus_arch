@@ -300,8 +300,20 @@ class EventController implements EventBus, EventBusHandler {
     String? prefix,
     Duration? duration,
   }) {
-    return listenEventDTO<T>(eventName: eventName, prefix: prefix, repeatLastEvent: repeatLastEvent, duration: duration)
-        ?.map((event) => event.data!);
+    var s =
+        listenEventDTO<T>(eventName: eventName, prefix: prefix, repeatLastEvent: repeatLastEvent, duration: duration);
+    if (s != null) {
+      var str = StreamController<T>();
+      var l = s.listen((event) {
+        str.add(event.data);
+      }, onDone: () => str.sink.close());
+      str.onCancel = () {
+        l.cancel();
+      };
+      return str.stream;
+    }
+    // return listenEventDTO<T>(eventName: eventName, prefix: prefix, repeatLastEvent: repeatLastEvent, duration: duration)
+    //     ?.map((event) => event.data!);
   }
 
   //Can return null only if set prefix != controller.prefix and EventBusMaster no have controller with this prefix

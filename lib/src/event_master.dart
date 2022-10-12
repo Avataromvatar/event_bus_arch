@@ -12,7 +12,12 @@ abstract class IEventBusMaster {
   void add<T>(EventBus bus);
   void remove<T>(EventBus bus);
 
-  bool send<T>(T event, {String? eventName, String? uuid, String? prefix});
+  ///return true if hasListener.
+  ///
+  ///if uuid not set, be use default uuid
+  ///
+  ///Master can have many Events what use same prefix and all they get event
+  bool send<T>(T event, {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent});
 
   ///repeat last event by topic
   bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration});
@@ -96,13 +101,14 @@ class EventBusMaster implements IEventBusMaster {
   }
 
   @override
-  bool send<T>(T event, {String? eventName, String? uuid, String? prefix}) {
+  bool send<T>(T event, {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent}) {
     bool ret = false;
     for (var element in _list) {
       if ((prefix != null && element.prefix == prefix) /*&&
           element.contain<T>(eventName)*/
           ) {
-        element.send<T>(event, eventName: eventName);
+        element.send<T>(event,
+            eventName: eventName, uuid: uuid, prefix: prefix, afterEvent: afterEvent, afterTime: afterTime);
         ret = true;
       }
     }

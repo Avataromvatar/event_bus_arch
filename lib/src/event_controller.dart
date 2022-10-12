@@ -75,7 +75,7 @@ abstract class EventBus {
   ///if prefix set - event send to EventMaster.
   ///
   ///You can use for example send(10) -> event topic = int
-  bool send<T>(T event, {String? eventName, String? uuid, String? prefix});
+  bool send<T>(T event, {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent});
 
   ///repeat last event by topic.
   ///If set duration event be repeated when duration time end
@@ -89,7 +89,7 @@ abstract class EventBus {
 
   ///Use [repeatLastEvent] if need send lastEvent. @attention event be sended after wait 1 millisecond or [Duration]
   ///
-  ///if prefix set and he != bus.prefix, event search be in EventMaster and @attention EventMaster can return null
+  ///if prefix set and they != bus.prefix, event search in EventMaster and @attention EventMaster can return null
   Stream<T>? listenEvent<T>({
     String? eventName,
     bool repeatLastEvent = false,
@@ -259,11 +259,22 @@ class EventController implements EventBus, EventBusHandler {
   }
 
   @override
-  bool send<T>(T event, {String? eventName, String? uuid, String? prefix}) {
+  bool send<T>(T event, {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent}) {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
       if (_eventsNode.containsKey(topic)) {
-        _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1()));
+        //Duration
+        if (afterTime != null) {
+          Future.delayed(afterTime)
+              .then((value) => _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
+        } else if (afterEvent != null) {
+          afterEvent.first.then((value) => _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
+          // afterEvent.listen((event1) {
+          //   _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1()));
+          // });
+        } else {
+          _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1()));
+        }
         return true;
       }
       return false;
@@ -272,6 +283,7 @@ class EventController implements EventBus, EventBusHandler {
     }
   }
 
+  // Future<void> _callAfterTime(Duration afterTime,EventNode node, {})
   @override
   bool repeat<T>({
     String? eventName,
@@ -400,11 +412,12 @@ class EventModelController extends EventController {
     String? prefix,
   }) : super(prefix: prefix);
   @override
-  bool send<T>(T event, {String? eventName, String? uuid, String? prefix}) {
+  bool send<T>(T event, {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent}) {
     if (!contain<T>(eventName)) {
       listenEventDTO<T>(eventName: eventName);
     }
-    return super.send<T>(event, eventName: eventName, uuid: uuid, prefix: prefix);
+    return super
+        .send<T>(event, eventName: eventName, uuid: uuid, prefix: prefix, afterEvent: afterEvent, afterTime: afterTime);
   }
 
   @override

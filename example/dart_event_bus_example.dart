@@ -74,8 +74,15 @@ Future<void> main() async {
   var ls = serviceEBus.listenEvent<String>()!.listen((event) {
     print('Service Get Event $event');
   });
-  appEBus.send<String>('Yhohohoh');
+  // var ls1 = serviceEBus.listenEvent<String>()!.listen((event) {
+  //   print('Service2 Get Event $event');
+  // });
+  appEBus.send<String>('Yhohohoh before server Yhooo');
+  appEBus.send<String>('Yhohohoh after server Yhooo', afterEvent: serviceEBus.listenEvent<String>());
+  appEBus.send<String>('Yhohohoh after 2 sec', afterTime: Duration(seconds: 2));
   serviceEBus.send<String>('Yhohohoh');
+  await Future.delayed(Duration(seconds: 1));
+  serviceEBus.send<String>('Yhohohoh111');
   appEBus.send(1111);
   appEBus.clearNotUseListeners();
   await Future.delayed(Duration(seconds: 1));

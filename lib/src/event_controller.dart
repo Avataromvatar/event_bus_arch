@@ -75,7 +75,8 @@ abstract class EventBus {
   ///if prefix set - event send to EventMaster.
   ///
   ///You can use for example send(10) -> event topic = int
-  bool send<T>(T event, {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent});
+  bool send<T>(T event,
+      {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis});
 
   ///repeat last event by topic.
   ///If set duration event be repeated when duration time end
@@ -259,12 +260,14 @@ class EventController implements EventBus, EventBusHandler {
   }
 
   @override
-  bool send<T>(T event, {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent}) {
+  bool send<T>(T event,
+      {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis}) {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
       if (_eventsNode.containsKey(topic)) {
-        //Duration
-        if (afterTime != null) {
+        if (afterThis != null) {
+          afterThis.then((value) => _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
+        } else if (afterTime != null) {
           Future.delayed(afterTime)
               .then((value) => _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
         } else if (afterEvent != null) {
@@ -412,12 +415,18 @@ class EventModelController extends EventController {
     String? prefix,
   }) : super(prefix: prefix);
   @override
-  bool send<T>(T event, {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent}) {
+  bool send<T>(T event,
+      {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis}) {
     if (!contain<T>(eventName)) {
       listenEventDTO<T>(eventName: eventName);
     }
-    return super
-        .send<T>(event, eventName: eventName, uuid: uuid, prefix: prefix, afterEvent: afterEvent, afterTime: afterTime);
+    return super.send<T>(event,
+        eventName: eventName,
+        uuid: uuid,
+        prefix: prefix,
+        afterEvent: afterEvent,
+        afterTime: afterTime,
+        afterThis: afterThis);
   }
 
   @override

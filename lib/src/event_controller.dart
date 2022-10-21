@@ -61,7 +61,7 @@ abstract class EventBusHandlersGroup {
 }
 
 abstract class EventBus {
-  /// Префикс контроллера
+  /// prefix used for indentificator bus
   String? get prefix;
   Type get type;
 

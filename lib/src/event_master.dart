@@ -17,8 +17,16 @@ abstract class IEventBusMaster {
   ///if uuid not set, be use default uuid
   ///
   ///Master can have many Events what use same prefix and all they get event
+  ///
+  ///If prefix not set and [isBroadcastEvent]==true all bus get event
   bool send<T>(T event,
-      {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis});
+      {String? eventName,
+      String? uuid,
+      String? prefix,
+      Duration? afterTime,
+      Stream? afterEvent,
+      Future? afterThis,
+      bool isBroadcastEvent = false});
 
   ///repeat last event by topic
   bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration});
@@ -103,12 +111,16 @@ class EventBusMaster implements IEventBusMaster {
 
   @override
   bool send<T>(T event,
-      {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis}) {
+      {String? eventName,
+      String? uuid,
+      String? prefix,
+      Duration? afterTime,
+      Stream? afterEvent,
+      Future? afterThis,
+      bool isBroadcastEvent = false}) {
     bool ret = false;
     for (var element in _list) {
-      if ((prefix != null && element.prefix == prefix) /*&&
-          element.contain<T>(eventName)*/
-          ) {
+      if (element.prefix == prefix || (prefix == null && isBroadcastEvent)) {
         element.send<T>(event,
             eventName: eventName,
             uuid: uuid,

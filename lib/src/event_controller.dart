@@ -429,6 +429,12 @@ class EventModelController extends EventController {
         afterThis: afterThis);
   }
 
+  @override
+  void _cancelEventNode(String topic) {
+    // _eventsNode[topic]?.dispose();
+    // _eventsNode.remove(topic);
+    // clearNotUseListeners();
+  }
   bool clearModel<T>({String? eventName}) {
     final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
     var node = _eventsNode[topic];

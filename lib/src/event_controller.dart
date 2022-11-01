@@ -266,12 +266,12 @@ class EventController implements EventBus, EventBusHandler {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
       if (_eventsNode.containsKey(topic)) {
         if (afterThis != null) {
-          afterThis.then((value) => _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
+          afterThis.then((value) => _eventsNode[topic]?.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
         } else if (afterTime != null) {
           Future.delayed(afterTime)
-              .then((value) => _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
+              .then((value) => _eventsNode[topic]?.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
         } else if (afterEvent != null) {
-          afterEvent.first.then((value) => _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
+          afterEvent.first.then((value) => _eventsNode[topic]?.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
           // afterEvent.listen((event1) {
           //   _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1()));
           // });

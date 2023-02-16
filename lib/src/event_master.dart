@@ -43,7 +43,13 @@ abstract class IEventBusMaster {
   ///
   ///return null if prefix != bus.prefix
   Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix, Duration? duration});
+
+  ///set function to logging for all EventBus. If set [cb] null log canceled
+  ///#t - topic, #u - uuid #d - date #s - status true or not(have listener or not)
   void setLoggerToAll({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat});
+
+  ///set uuid generator. Default EventBus use Uuid().v1()
+  void setUUIDGeneratorToAll({String Function(String topic)? uuidGenerator});
 }
 
 class EventBusMaster implements IEventBusMaster {
@@ -161,6 +167,12 @@ class EventBusMaster implements IEventBusMaster {
   void setLoggerToAll({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat}) {
     _list.forEach((element) {
       element.setLogger(cb: cb, format: format, dateFormat: dateFormat);
+    });
+  }
+
+  void setUUIDGeneratorToAll({String Function(String topic)? uuidGenerator}) {
+    _list.forEach((element) {
+      element.setUUIDGenerator(uuidGenerator: uuidGenerator);
     });
   }
 }

@@ -53,6 +53,14 @@ class _Logger {
   }
 }
 
+class _UUIDGenerator {
+  final String Function(String topic)? uuidGenerator;
+  _UUIDGenerator({this.uuidGenerator});
+  String getUuid(String topic) {
+    return uuidGenerator != null ? uuidGenerator!.call(topic) : Uuid().v1();
+  }
+}
+
 class EventBusTopic extends Equatable {
   static const String divider = '^';
   late final String type;
@@ -190,6 +198,9 @@ abstract class EventBus {
   ///set function to log. If set [cb] null log canceled
   ///#t - topic, #u - uuid #d - date #s - status true or not(have listener or not)
   void setLogger({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat});
+
+  ///set uuid generator. Default EventBus use Uuid().v1()
+  void setUUIDGenerator({String Function(String topic)? uuidGenerator});
 }
 
 typedef EventEmitter<T> = void Function(T data);
@@ -294,6 +305,7 @@ class EventController implements EventBus, EventBusHandler {
   @override
   Type get type => runtimeType;
   _Logger? _logger;
+  _UUIDGenerator _uuid = _UUIDGenerator();
 
   ///This handler use for event what not have special handler but hasListener.
   ///use bus for
@@ -333,7 +345,7 @@ class EventController implements EventBus, EventBusHandler {
       {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis}) {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
-      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid ?? Uuid().v1());
+      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid ?? _uuid.getUuid(topic));
       if (_eventsNode.containsKey(topic)) {
         if (afterThis != null) {
           afterThis.then((value) => _eventsNode[topic]?.call(eventDTO));
@@ -484,6 +496,10 @@ class EventController implements EventBus, EventBusHandler {
     } else {
       _logger = null;
     }
+  }
+
+  void setUUIDGenerator({String Function(String topic)? uuidGenerator}) {
+    _uuid = _UUIDGenerator(uuidGenerator: uuidGenerator);
   }
 }
 

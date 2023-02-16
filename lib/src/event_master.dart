@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dart_event_bus/src/event_controller.dart';
 import 'package:dart_event_bus/src/event_dto.dart';
+import 'package:intl/intl.dart';
 
 abstract class IEventBusMaster {
   ///key: bus, value: connect or disconnect EventController
@@ -42,6 +43,7 @@ abstract class IEventBusMaster {
   ///
   ///return null if prefix != bus.prefix
   Stream<T>? listenEvent<T>({String? eventName, bool repeatLastEvent = false, String? prefix, Duration? duration});
+  void setLoggerToAll({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat});
 }
 
 class EventBusMaster implements IEventBusMaster {
@@ -154,5 +156,11 @@ class EventBusMaster implements IEventBusMaster {
       }
     }
     return null;
+  }
+
+  void setLoggerToAll({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat}) {
+    _list.forEach((element) {
+      element.setLogger(cb: cb, format: format, dateFormat: dateFormat);
+    });
   }
 }

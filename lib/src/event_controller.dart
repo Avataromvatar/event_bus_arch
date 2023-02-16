@@ -3,8 +3,55 @@ import 'dart:async';
 import 'package:dart_event_bus/src/event_dto.dart';
 import 'package:dart_event_bus/src/event_master.dart';
 import 'package:equatable/equatable.dart';
+import 'package:intl/intl.dart';
 
 import 'package:uuid/uuid.dart';
+
+class _Logger {
+  final void Function(String) cb;
+
+  ///#t - topic, #u - uuid #d - date
+  final String format;
+  late final DateFormat dateFormat;
+
+  _Logger(this.cb, {this.format = '#d #t--#u--#s', DateFormat? dateFormat}) {
+    this.dateFormat = dateFormat ?? DateFormat('dd.MM hh:mm:ss');
+  }
+  void log(EventDTO event, bool hasListeners) {
+    cb.call(_getMessage(event, hasListeners));
+  }
+
+  String _getMessage(EventDTO event, bool hasListeners) {
+    String ret = '';
+    var t = DateTime.now();
+    for (var i = 0; i < format.length; i++) {
+      if (format[i] == '#' && i + 1 < format.length) {
+        if (format[i + 1] == 'd') {
+          ret += dateFormat.format(t);
+          i++;
+        } else if (format[i + 1] == 'u') {
+          ret += event.uuid;
+          i++;
+        } else if (format[i + 1] == 't') {
+          ret += event.topic;
+          i++;
+        } else if (format[i + 1] == 's') {
+          ret += hasListeners.toString();
+          i++;
+        } else {
+          ret += format[i];
+        }
+      } else {
+        ret += format[i];
+      }
+    }
+
+    // ret = ret.replaceAll('#d', _dateFormat.format(t));
+    // ret = ret.replaceAll('#b', body);
+    // ret = ret.replaceAll('#m', t.millisecond.toString());
+    return ret;
+  }
+}
 
 class EventBusTopic extends Equatable {
   static const String divider = '^';
@@ -53,15 +100,28 @@ class EventBusTopic extends Equatable {
 abstract class EventBusHandlersGroup {
   bool get isConnected;
 
-  ///Handler class must addHandler to bus
+  ///Handler class must addHandler to bus. For example:
+  ///
+  /// ```
+  ///void connect(EventBusHandler bus) {
+  ///_busHandler = bus;
+  /// _busHandler!.addHandler<void>(init, eventName: eAppNamedEvent.init.name);
+  /// }
+  /// ```
   void connect(EventBusHandler bus);
 
   ///Handler class must removeHandler from bus
+  ///
+  /// ```
+  /// void disconnect(EventBusHandler bus) {
+  ///   bus!.removeHandler<void>(eventName: eAppNamedEvent.init.name);
+  /// }
+  /// ```
   void disconnect(EventBusHandler bus);
 }
 
 abstract class EventBus {
-  /// prefix used for indentificator bus
+  /// prefix used for indentificator bus in EventBusMaster
   String? get prefix;
   Type get type;
 
@@ -73,6 +133,12 @@ abstract class EventBus {
   ///if uuid not set, be use default uuid
   ///
   ///if prefix set - event send to EventMaster.
+  ///
+  ///if use afterEvent you Event will be sending when get event from afterEvent - One time
+  ///
+  ///if use afterThis you Event will be sending when future be comleted
+  ///
+  ///if you use afterTime, Event will be send after Duration
   ///
   ///You can use for example send(10) -> event topic = int
   bool send<T>(T event,
@@ -121,7 +187,9 @@ abstract class EventBus {
     }
   }
   // static  final tes1 = topicCreate(10.runtimeType, eventName: 'Test');
-
+  ///set function to log. If set [cb] null log canceled
+  ///#t - topic, #u - uuid #d - date #s - status true or not(have listener or not)
+  void setLogger({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat});
 }
 
 typedef EventEmitter<T> = void Function(T data);
@@ -225,6 +293,7 @@ class EventController implements EventBus, EventBusHandler {
   Map<String, EventNode> _eventsNode = {};
   @override
   Type get type => runtimeType;
+  _Logger? _logger;
 
   ///This handler use for event what not have special handler but hasListener.
   ///use bus for
@@ -264,22 +333,24 @@ class EventController implements EventBus, EventBusHandler {
       {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis}) {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
+      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid ?? Uuid().v1());
       if (_eventsNode.containsKey(topic)) {
         if (afterThis != null) {
-          afterThis.then((value) => _eventsNode[topic]?.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
+          afterThis.then((value) => _eventsNode[topic]?.call(eventDTO));
         } else if (afterTime != null) {
-          Future.delayed(afterTime)
-              .then((value) => _eventsNode[topic]?.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
+          Future.delayed(afterTime).then((value) => _eventsNode[topic]?.call(eventDTO));
         } else if (afterEvent != null) {
-          afterEvent.first.then((value) => _eventsNode[topic]?.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1())));
+          afterEvent.first.then((value) => _eventsNode[topic]?.call(eventDTO));
           // afterEvent.listen((event1) {
           //   _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1()));
           // });
         } else {
-          _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1()));
+          _eventsNode[topic]!.call(eventDTO);
         }
+        _logger?.log(eventDTO, true);
         return true;
       }
+      _logger?.log(eventDTO, false);
       return false;
     } else {
       return EventBusMaster.instance.send<T>(event, eventName: eventName, uuid: uuid, prefix: prefix);
@@ -404,6 +475,14 @@ class EventController implements EventBus, EventBusHandler {
     if (_eventsNode.containsKey(topic)) {
       var t = _eventsNode[topic] as EventNode<T>;
       t._handler = null;
+    }
+  }
+
+  void setLogger({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat}) {
+    if (cb != null) {
+      _logger = _Logger(cb, format: format, dateFormat: dateFormat);
+    } else {
+      _logger = null;
     }
   }
 }

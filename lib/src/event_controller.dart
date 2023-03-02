@@ -150,7 +150,13 @@ abstract class EventBus {
   ///
   ///You can use for example send(10) -> event topic = int
   bool send<T>(T event,
-      {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis});
+      {String? eventName,
+      String? uuid,
+      String? prefix,
+      Duration? afterTime,
+      Stream? afterEvent,
+      Future? afterThis,
+      bool needLog});
 
   ///repeat last event by topic.
   ///If set duration event be repeated when duration time end
@@ -342,7 +348,13 @@ class EventController implements EventBus, EventBusHandler {
 
   @override
   bool send<T>(T event,
-      {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis}) {
+      {String? eventName,
+      String? uuid,
+      String? prefix,
+      Duration? afterTime,
+      Stream? afterEvent,
+      Future? afterThis,
+      bool needLog = true}) {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
       EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid ?? _uuid.getUuid(topic));
@@ -359,10 +371,14 @@ class EventController implements EventBus, EventBusHandler {
         } else {
           _eventsNode[topic]!.call(eventDTO);
         }
-        _logger?.log(eventDTO, true);
+        if (needLog) {
+          _logger?.log(eventDTO, true);
+        }
         return true;
       }
-      _logger?.log(eventDTO, false);
+      if (needLog) {
+        _logger?.log(eventDTO, false);
+      }
       return false;
     } else {
       return EventBusMaster.instance.send<T>(event, eventName: eventName, uuid: uuid, prefix: prefix);
@@ -511,7 +527,13 @@ class EventModelController extends EventController {
   }) : super(prefix: prefix);
   @override
   bool send<T>(T event,
-      {String? eventName, String? uuid, String? prefix, Duration? afterTime, Stream? afterEvent, Future? afterThis}) {
+      {String? eventName,
+      String? uuid,
+      String? prefix,
+      Duration? afterTime,
+      Stream? afterEvent,
+      Future? afterThis,
+      bool needLog = true}) {
     if (!contain<T>(eventName)) {
       listenEventDTO<T>(eventName: eventName);
     }
@@ -521,7 +543,8 @@ class EventModelController extends EventController {
         prefix: prefix,
         afterEvent: afterEvent,
         afterTime: afterTime,
-        afterThis: afterThis);
+        afterThis: afterThis,
+        needLog: needLog);
   }
 
   @override

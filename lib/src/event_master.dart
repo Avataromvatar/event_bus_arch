@@ -27,7 +27,8 @@ abstract class IEventBusMaster {
       Duration? afterTime,
       Stream? afterEvent,
       Future? afterThis,
-      bool isBroadcastEvent = false});
+      bool isBroadcastEvent = false,
+      bool needLog});
 
   ///repeat last event by topic
   bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration});
@@ -125,7 +126,8 @@ class EventBusMaster implements IEventBusMaster {
       Duration? afterTime,
       Stream? afterEvent,
       Future? afterThis,
-      bool isBroadcastEvent = false}) {
+      bool isBroadcastEvent = false,
+      bool needLog = true}) {
     bool ret = false;
     for (var element in _list) {
       if (element.prefix == prefix || (prefix == null && isBroadcastEvent)) {
@@ -135,7 +137,8 @@ class EventBusMaster implements IEventBusMaster {
             prefix: prefix,
             afterEvent: afterEvent,
             afterTime: afterTime,
-            afterThis: afterThis);
+            afterThis: afterThis,
+            needLog: needLog);
         ret = true;
       }
     }

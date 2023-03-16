@@ -10,7 +10,7 @@ import 'package:uuid/uuid.dart';
 class _Logger {
   final void Function(String) cb;
 
-  ///#t - topic, #u - uuid #d - date
+  ///#t - topic, #u - uuid #d - date #s - hasListener
   final String format;
   late final DateFormat dateFormat;
 
@@ -200,7 +200,7 @@ abstract class EventBus {
       return EventController(prefix: prefix, defaultHandler: defaultHandler);
     }
   }
-  // static  final tes1 = topicCreate(10.runtimeType, eventName: 'Test');
+
   ///set function to log. If set [cb] null log canceled
   ///#t - topic, #u - uuid #d - date #s - status true or not(have listener or not)
   void setLogger({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat});

@@ -1,3 +1,5 @@
+## 1.3.0+4  
+-  change scripts and some code style fix  
 ## 1.3.0
 -  !! change EventHandler (need customer code fix)!!
 -  add method "call" to EventBus and EvenBusMaster

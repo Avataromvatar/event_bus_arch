@@ -403,6 +403,7 @@ class EventController implements EventBus, EventBusHandler {
     }
   }
 
+  @override
   Future<dynamic> call<T>(T event,
       {String? eventName,
       String? uuid,
@@ -532,11 +533,17 @@ class EventController implements EventBus, EventBusHandler {
   ///Очищает узлы события если в них нет слушателей и обработчиков
   void clearNotUseListeners() {
     List<String> toDel = [];
-    _eventsNode.forEach((key, value) {
-      if (!value.hasListener && !value.hasHandler) {
+    for (var key in _eventsNode.keys) {
+      var element = _eventsNode[key]!;
+      if (!element.hasListener && !element.hasHandler) {
         toDel.add(key);
       }
-    });
+    }
+    // _eventsNode.forEach((key, value) {
+    //   if (!value.hasListener && !value.hasHandler) {
+    //     toDel.add(key);
+    //   }
+    // });
     for (var element in toDel) {
       _eventsNode[element]?.dispose();
       _eventsNode.remove(element);

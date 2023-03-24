@@ -1,3 +1,5 @@
+## 1.3.0+6  
+-  change package name  
 ## 1.3.0+5  
 -  remove warning from eventDTO  
 ## 1.3.0+4  

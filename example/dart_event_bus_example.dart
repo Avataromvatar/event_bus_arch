@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:dart_event_bus/dart_event_bus.dart';
+import 'package:event_bus_arch/event_bus_arch.dart';
 
 class TestEventHandlerGroup implements EventBusHandlersGroup {
   EventBusHandler? _bus;

@@ -1,2 +1,3 @@
+.dart_tool/
 build_script.sh
 pubspec_changer.dart

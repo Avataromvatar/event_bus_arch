@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:dart_event_bus/src/event_controller.dart';
-import 'package:dart_event_bus/src/event_dto.dart';
+import 'package:event_bus_arch/src/event_controller.dart';
+import 'package:event_bus_arch/src/event_dto.dart';
 import 'package:intl/intl.dart';
 
 abstract class IEventBusMaster {

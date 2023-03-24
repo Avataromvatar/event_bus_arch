@@ -5,6 +5,7 @@ EventDTO class transporting Event in bus, but user can use clear data without Ev
 ```dart
 EventBus bus = EventBus();
 //----- Without EventDTO
+///listenEvent return Stream
 ///topic = 'int' 
 ///bus.listenEvent<int>()! can return null only if you set prefix becouse bus be search other EventBus with prefix in EventBusMaster
 bus.listenEvent<int>()!.listen((event)=>print('int event:$event'));
@@ -86,5 +87,11 @@ If event have handler, handler can processing **needCompleter** and complety it.
 if event no have handler or handler dont support **needCompleter** Future complete with Error
 ```dart
 //wait result or error
+try{
 var r = await bus1.call('Hello');
+}
+catch (e)
+{
+      print(e);
+}
 ```

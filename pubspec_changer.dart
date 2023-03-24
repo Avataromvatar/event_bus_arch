@@ -3,6 +3,7 @@ import 'dart:io';
 void main(List<String> args) async {
   var r = await Process.run('git', ['describe', '--tags'], runInShell: false);
   var str = r.stdout.toString();
+  str = str.replaceAll('\n', '');
   var l = str.split('');
   var result = '';
   //v0.8.0-10-g12160cd

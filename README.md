@@ -1,5 +1,7 @@
 This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events.  
 ## Simple Usage 
+![simply_usage](event_bus_arch.drawio.png)
+
 The event(EventDTO) consists of 3 parts: a header (topic), a unique identifier and data. The topic consists of the type of the transmitted object (required) and the name of the event.  
 EventDTO class transporting Event in bus, but user can use clear data without EventDTO for example:
 ```dart

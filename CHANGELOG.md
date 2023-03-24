@@ -1,3 +1,5 @@
+## 1.3.0+8  
+-  change in pubignore  
 ## 1.3.0+7  
 -  change readme  
 ## 1.3.0+6  

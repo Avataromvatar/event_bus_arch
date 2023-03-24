@@ -1,3 +1,5 @@
 .dart_tool/
+*.png
+
 build_script.sh
 pubspec_changer.dart

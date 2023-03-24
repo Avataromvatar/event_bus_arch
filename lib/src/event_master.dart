@@ -6,7 +6,13 @@ import 'package:intl/intl.dart';
 
 abstract class IEventBusMaster {
   ///key: bus, value: connect or disconnect EventController
-  Stream<MapEntry<EventBus, bool>> get changes;
+  // Stream<MapEntry<EventBus, bool>> get changes;
+
+  ///check if there is a listener on the bus,
+  bool contain<T>(
+    String prefix, {
+    String? eventName,
+  });
   EventBus? getEventBus<T>({String? prefix});
   EventBus? getEventBusByPrefix(String prefix);
   List<String> get busPrefixes;
@@ -29,6 +35,14 @@ abstract class IEventBusMaster {
       Future? afterThis,
       bool isBroadcastEvent = false,
       bool needLog});
+
+  ///can return value if handler do it or cancel if handler not complete Future or this even not have a handler
+  ///
+  ///if uuid not set, be use default uuid
+  ///
+  ///
+  Future<dynamic> call<T>(T event, String prefix,
+      {String? eventName, String? uuid, Duration? afterTime, Stream? afterEvent, Future? afterThis, bool needLog});
 
   ///repeat last event by topic
   bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration});
@@ -84,7 +98,15 @@ class EventBusMaster implements IEventBusMaster {
     }
   }
 
-  ///repeat last event by topic
+  @override
+  bool contain<T>(
+    String prefix, {
+    String? eventName,
+  }) {
+    var bus = getEventBusByPrefix(prefix);
+    return bus?.contain<T>(eventName) ?? false;
+  }
+
   @override
   bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration}) {
     for (var element in _list) {
@@ -143,6 +165,27 @@ class EventBusMaster implements IEventBusMaster {
       }
     }
     return ret;
+  }
+
+  @override
+  Future<dynamic> call<T>(T event, String prefix,
+      {String? eventName,
+      String? uuid,
+      Duration? afterTime,
+      Stream? afterEvent,
+      Future? afterThis,
+      bool needLog = true}) async {
+    var bus = getEventBusByPrefix(prefix);
+    if (bus != null) {
+      return bus.call(event,
+          afterEvent: afterEvent,
+          afterThis: afterThis,
+          afterTime: afterTime,
+          eventName: eventName,
+          needLog: needLog,
+          uuid: uuid);
+    }
+    throw Exception('No EventBus with prefix: $prefix');
   }
 
   ///Возвращает поток события. Если нужно повторить предыдуще событие используйте [repeatLastEvent]

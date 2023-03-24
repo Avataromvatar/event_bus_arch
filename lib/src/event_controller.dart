@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:dart_event_bus/src/event_dto.dart';
 import 'package:dart_event_bus/src/event_master.dart';
-import 'package:equatable/equatable.dart';
+// import 'package:equatable/equatable.dart';
 import 'package:intl/intl.dart';
 
 import 'package:uuid/uuid.dart';
@@ -61,7 +61,7 @@ class _UUIDGenerator {
   }
 }
 
-class EventBusTopic extends Equatable {
+class EventBusTopic /*extends Equatable*/ {
   static const String divider = '^';
   late final String type;
   late final String? name;
@@ -87,16 +87,15 @@ class EventBusTopic extends Equatable {
   }
   EventBusTopic.create(Type type, {this.name, this.prefix}) {
     this.type = '$type';
-    String? _eventTypeAndName = name != null ? '$type${EventBusTopic.divider}$name' : '$type';
+    String? eventTypeAndName = name != null ? '$type${EventBusTopic.divider}$name' : '$type';
     if (prefix != null) {
-      topic = '$prefix${EventBusTopic.divider}$_eventTypeAndName';
+      topic = '$prefix${EventBusTopic.divider}$eventTypeAndName';
     } else {
-      topic = _eventTypeAndName;
+      topic = eventTypeAndName;
     }
   }
-  @override
-  // TODO: implement props
-  List<Object?> get props => [topic];
+  // @override
+  // List<Object?> get props => [topic];
 }
 
 // abstract class IEventNode<T> implements EventBusTopic {
@@ -158,6 +157,18 @@ abstract class EventBus {
       Future? afterThis,
       bool needLog});
 
+  ///can return value if handler do it or cancel if handler not complete Future or this even not have a handler
+  ///
+  ///
+  Future<dynamic> call<T>(T event,
+      {String? eventName,
+      String? uuid,
+      String? prefix,
+      Duration? afterTime,
+      Stream? afterEvent,
+      Future? afterThis,
+      bool needLog});
+
   ///repeat last event by topic.
   ///If set duration event be repeated when duration time end
   bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration});
@@ -183,10 +194,10 @@ abstract class EventBus {
 
   ///create unique topic
   static String topicCreate(Type type, {String? eventName, String? prefix}) {
-    String? _eventTypeAndName = eventName != null ? '${type}${EventBusTopic.divider}$eventName' : '$type';
-    if (prefix != null) return '$prefix${EventBusTopic.divider}$_eventTypeAndName';
+    String? eventTypeAndName = eventName != null ? '$type${EventBusTopic.divider}$eventName' : '$type';
+    if (prefix != null) return '$prefix${EventBusTopic.divider}$eventTypeAndName';
 
-    return _eventTypeAndName;
+    return eventTypeAndName;
   }
 
   ///if you whant add/remove Handlers or connect HandlerGroup use [EventBusHandler]
@@ -212,12 +223,12 @@ abstract class EventBus {
 typedef EventEmitter<T> = void Function(T data);
 
 typedef EventHandler<T> = Future<void> Function(
-  EventDTO<T> event,
+    EventDTO<T> event,
 
-  ///send event to other listener
-  EventEmitter<EventDTO<T>>? emit, {
-  EventBus? bus,
-});
+    ///send event to other listener
+    EventEmitter<EventDTO<T>>? emit,
+    {EventBus? bus,
+    Completer<dynamic>? needComplete});
 
 ///Interface for add/remove handlers
 abstract class EventBusHandler {
@@ -251,7 +262,7 @@ class EventNode<T> extends EventBusTopic {
   }) : super.parse(topic) {
     _streamController = StreamController<EventDTO<T>>.broadcast(onCancel: _onCancel);
   }
-  Future<void> call(EventDTO<T> event, {bool isRepeat = false}) async {
+  Future<void> call(EventDTO<T> event, {bool isRepeat = false, Completer<dynamic>? needComplete}) async {
     if (!_isDispose) {
       lastEvent = event.data;
       _lastUUID = event.uuid;
@@ -263,11 +274,18 @@ class EventNode<T> extends EventBusTopic {
           } else {
             // if (needLogging) _loggingHasNoListener(event.topic, 'send');
           }
-        }, bus: bus);
+        }, bus: bus, needComplete: needComplete).then((value) {
+          if (needComplete != null && !needComplete.isCompleted) {
+            needComplete.completeError('$topic Handler not complete call');
+          }
+        });
       } else {
         if (_streamController.hasListener) {
           // if (needLogging) _logging(event, 'send');
           _streamController.add(event);
+          if (needComplete != null) {
+            needComplete.completeError('No handlers');
+          }
         } else {
           // if (needLogging) _loggingHasNoListener(event.topic, 'send');
         }
@@ -304,10 +322,10 @@ class EventNode<T> extends EventBusTopic {
 }
 
 class EventController implements EventBus, EventBusHandler {
-  String? _prefix;
+  final String? _prefix;
   @override
   String? get prefix => _prefix;
-  Map<String, EventNode> _eventsNode = {};
+  final Map<String, EventNode> _eventsNode = {};
   @override
   Type get type => runtimeType;
   _Logger? _logger;
@@ -332,15 +350,15 @@ class EventController implements EventBus, EventBusHandler {
 
   @override
   bool contain<T>(String? eventName) {
-    final _topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
-    return _eventsNode.containsKey(_topic);
+    final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
+    return _eventsNode.containsKey(topic);
   }
 
   @override
   T? lastEvent<T>({String? eventName, String? prefix}) {
     if (prefix == null || prefix == this.prefix) {
-      final _topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
-      return _eventsNode[_topic]?.lastEvent;
+      final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
+      return _eventsNode[topic]?.lastEvent;
     } else {
       return EventBusMaster.instance.lastEvent<T>(eventName: eventName, prefix: prefix);
     }
@@ -382,6 +400,45 @@ class EventController implements EventBus, EventBusHandler {
       return false;
     } else {
       return EventBusMaster.instance.send<T>(event, eventName: eventName, uuid: uuid, prefix: prefix);
+    }
+  }
+
+  Future<dynamic> call<T>(T event,
+      {String? eventName,
+      String? uuid,
+      String? prefix,
+      Duration? afterTime,
+      Stream? afterEvent,
+      Future? afterThis,
+      bool needLog = true}) async {
+    if (prefix == null || prefix == this.prefix) {
+      final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
+      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid ?? _uuid.getUuid(topic));
+      if (_eventsNode.containsKey(topic)) {
+        Completer completer = Completer<dynamic>();
+
+        if (afterThis != null) {
+          afterThis.then((value) => _eventsNode[topic]?.call(eventDTO, needComplete: completer));
+        } else if (afterTime != null) {
+          Future.delayed(afterTime).then((value) => _eventsNode[topic]?.call(eventDTO, needComplete: completer));
+        } else if (afterEvent != null) {
+          afterEvent.first.then((value) => _eventsNode[topic]?.call(eventDTO, needComplete: completer));
+          // afterEvent.listen((event1) {
+          //   _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1()));
+          // });
+        } else {
+          _eventsNode[topic]!.call(eventDTO, needComplete: completer);
+        }
+        if (needLog) {
+          _logger?.log(eventDTO, true);
+        }
+        return completer.future;
+      }
+      if (needLog) {
+        _logger?.log(eventDTO, false);
+      }
+    } else {
+      // return EventBusMaster.instance.call<T>(event, eventName: eventName, uuid: uuid, prefix: prefix);
     }
   }
 
@@ -445,10 +502,10 @@ class EventController implements EventBus, EventBusHandler {
         _eventsNode[topic] = EventNode<T>(
             topic,
             defaultHandler != null
-                ? (event, emit, {bus}) async {
+                ? (event, emit, {bus, needComplete}) async {
                     defaultHandler!.call(event, (data) {
                       emit?.call(data as EventDTO<T>);
-                    }, bus: bus);
+                    }, bus: bus, needComplete: needComplete);
                   }
                 : null,
             this,
@@ -480,10 +537,10 @@ class EventController implements EventBus, EventBusHandler {
         toDel.add(key);
       }
     });
-    toDel.forEach((element) {
+    for (var element in toDel) {
       _eventsNode[element]?.dispose();
       _eventsNode.remove(element);
-    });
+    }
   }
 
   @override
@@ -506,6 +563,7 @@ class EventController implements EventBus, EventBusHandler {
     }
   }
 
+  @override
   void setLogger({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat}) {
     if (cb != null) {
       _logger = _Logger(cb, format: format, dateFormat: dateFormat);
@@ -514,6 +572,7 @@ class EventController implements EventBus, EventBusHandler {
     }
   }
 
+  @override
   void setUUIDGenerator({String Function(String topic)? uuidGenerator}) {
     _uuid = _UUIDGenerator(uuidGenerator: uuidGenerator);
   }
@@ -566,7 +625,6 @@ class EventModelController extends EventController {
 
   @override
   void clearNotUseListeners() {
-    // TODO: implement clearNotUseListeners
     // super.clearNotUseListeners();
   }
 }

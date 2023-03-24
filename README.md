@@ -1,4 +1,4 @@
-This package is a part of Event-driven architecture providing sending, listening, processing and receiving the last event. 
+This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events.  
 ## Simple Usage 
 The event(EventDTO) consists of 3 parts: a header (topic), a unique identifier and data. The topic consists of the type of the transmitted object (required) and the name of the event.  
 EventDTO class transporting Event in bus, but user can use clear data without EventDTO for example:
@@ -6,6 +6,7 @@ EventDTO class transporting Event in bus, but user can use clear data without Ev
 EventBus bus = EventBus();
 //----- Without EventDTO
 ///topic = 'int' 
+///bus.listenEvent<int>()! can return null only if you set prefix becouse bus be search other EventBus with prefix in EventBusMaster
 bus.listenEvent<int>()!.listen((event)=>print('int event:$event'));
 ///topic = 'int^test' 
 bus.listenEvent<int>(eventName:'test')!.listen((event)=>print('int^test event:$event'));
@@ -47,11 +48,21 @@ Services and ServicesModel , respectively.
 
 ## EventBus for Model
 By default EventBus, clear not use(where event listeners ==0) event node, but if you add flag 'isBusForModel' in constructor, you get EventBus(EventModelController) what not clear event node.
-This EventModelController can be used by hold and update object(models, providers, command, interface and other). 
+This EventModelController can be used by hold(resource manager) and update object(models, providers, command, interface and other).  
 
 ## EventBus Handler
 EventBusHandlersGroup this interface for handler group. You can connect  EventBusHandlersGroup to you event bus
 ```dart
+///Event handler
+typedef EventHandler<T> = Future<void> Function(
+    EventDTO<T> event,
+
+    ///send event to other listener
+    EventEmitter<EventDTO<T>>? emit,
+    {EventBus? bus,
+    Completer<dynamic>? needComplete});
+
+
 class TestHandlers implements EventBusHandlersGroup {
 void connect(EventBusHandler bus) {
 ///if you have many void handler need use eventName
@@ -68,4 +79,12 @@ void main()
   bus.send<void>(null,eventName:'getMasterData');//call getMasterData fn
   bus.send(Test());//call test fn
 }
+```
+
+## Method: Call 
+If event have handler, handler can processing **needCompleter** and complety it. Result of complety return from future.  
+if event no have handler or handler dont support **needCompleter** Future complete with Error
+```dart
+//wait result or error
+var r = await bus1.call('Hello');
 ```

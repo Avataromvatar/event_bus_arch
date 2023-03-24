@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dart_event_bus/dart_event_bus.dart';
 
 class TestEventHandlerGroup implements EventBusHandlersGroup {
@@ -16,20 +18,32 @@ class TestEventHandlerGroup implements EventBusHandlersGroup {
   void disconnect(EventBusHandler bus) {
     // TODO: implement disconnect
   }
-  Future<void> plusNoEmit(EventDTO<int> event, EventEmitter<EventDTO<int>>? emit, {EventBus? bus}) async {
+  Future<void> plusNoEmit(EventDTO<int> event, EventEmitter<EventDTO<int>>? emit,
+      {EventBus? bus, Completer? needComplete}) async {
     print('plusNoEmit: ${event.data + 1}');
   }
 
-  Future<void> plusEmit(EventDTO<int> event, EventEmitter<EventDTO<int>>? emit, {EventBus? bus}) async {
+  Future<void> plusEmit(EventDTO<int> event, EventEmitter<EventDTO<int>>? emit,
+      {EventBus? bus, Completer? needComplete}) async {
     var e = event.copy(data: event.data + 1);
     print('plusEmit: ${e.data}');
     emit?.call(e);
   }
 }
 
-Future<void> externPlusEmit(EventDTO<int> event, EventEmitter<EventDTO<int>>? emit, {EventBus? bus}) async {
+Future<void> externPlusEmit(EventDTO<int> event, EventEmitter<EventDTO<int>>? emit,
+    {EventBus? bus, Completer? needComplete}) async {
   var e = event.copy(data: event.data + 1);
   print('Extern plusEmit: ${e.data}');
+  emit?.call(e);
+}
+
+Future<void> externPlusComplete(EventDTO<int> event, EventEmitter<EventDTO<int>>? emit,
+    {EventBus? bus, Completer? needComplete}) async {
+  var i = event.data + 1;
+  var e = event.copy(data: i);
+  print('Extern Complete plusEmit: ${e.data}');
+  needComplete?.complete(i);
   emit?.call(e);
 }
 
@@ -37,13 +51,22 @@ Future<void> main() async {
   //You can create many bus with prefix. Use for example, prefix for layer divider
   var appEBus = EventController(
     prefix: 'app',
-    defaultHandler: (event, emit, {bus}) async {
+    defaultHandler: (event, emit, {bus, needComplete}) async {
       print('App Def Event ${event.topic} uuid:${event.uuid} data:${event.data}');
       emit?.call(event);
     },
   );
-  appEBus.addHandler(externPlusEmit);
+  appEBus.addHandler(externPlusEmit, eventName: 'no emit');
+  appEBus.addHandler(externPlusComplete);
+  var r = await appEBus.call(1);
+  try {
+    r = await appEBus.call(1, eventName: 'no emit');
+  } catch (e) {
+    print(e);
+  }
+
   appEBus.connect(TestEventHandlerGroup());
+
   var serviceEBus = EventController(
     prefix: 'service',
     // defaultHandler: (event, emit, {bus}) async {

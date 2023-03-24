@@ -1,13 +1,13 @@
 name: dart_event_bus
-description: EventBus for Dart.   
-version: 1.2.0
+description: This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events.  
+version: 1.2.1
 repository: https://github.com/Avataromvatar/dart_event_bus
-publish_to: none
+# publish_to: none
 environment:
   sdk: '>=2.18.2 <3.0.0'
 
 dependencies:
-  equatable: ^2.0.0
+  # equatable: ^2.0.0
   uuid: ^3.0.6
   intl: ^0.18.0
 

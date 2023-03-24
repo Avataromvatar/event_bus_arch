@@ -1,6 +1,6 @@
 name: dart_event_bus
 description: This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events.  
-version: 1.3.0+4
+version: 1.3.0+5
 
 
 

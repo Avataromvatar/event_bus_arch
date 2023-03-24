@@ -9,10 +9,14 @@ abstract class EventDTO<T> {
 }
 
 class BasicEventDTO<T> implements EventDTO<T> {
+  @override
   String topic;
+  @override
   T data;
+  @override
   String uuid;
   BasicEventDTO(this.topic, this.data, this.uuid);
+  @override
   EventDTO<T> copy({String? topic, T? data, String? uuid}) {
     return BasicEventDTO(topic ?? this.topic, data ?? this.data, uuid ?? this.uuid);
   }

@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 
 abstract class IEventBusMaster {
   ///key: bus, value: connect or disconnect EventController
-  // Stream<MapEntry<EventBus, bool>> get changes;
+  Stream<MapEntry<EventBus, bool>> get changes;
 
   ///check if there is a listener on the bus,
   bool contain<T>(

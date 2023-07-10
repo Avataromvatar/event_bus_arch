@@ -157,7 +157,7 @@ abstract class EventBus {
       Future? afterThis,
       bool needLog});
 
-  ///can return value if handler do it or cancel if handler not complete Future or this even not have a handler
+  ///can return value if handler do it(call needComplete) or cancel if handler not complete Future or this even not have a handler
   ///
   ///
   Future<dynamic> call<T>(T event,
@@ -191,6 +191,13 @@ abstract class EventBus {
 
   ///return the last event
   T? lastEvent<T>({String? eventName, String? prefix});
+
+  ///Return map where:
+  ///
+  ///key = topic name from [EventBusTopic]
+  ///
+  ///value = last event
+  Map<String, dynamic> getAllTopics();
 
   ///create unique topic
   static String topicCreate(Type type, {String? eventName, String? prefix}) {
@@ -352,6 +359,11 @@ class EventController implements EventBus, EventBusHandler {
   bool contain<T>(String? eventName) {
     final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
     return _eventsNode.containsKey(topic);
+  }
+
+  @override
+  Map<String, dynamic> getAllTopics() {
+    return _eventsNode.map((key, value) => MapEntry(key, value.lastEvent));
   }
 
   @override

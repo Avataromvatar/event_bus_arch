@@ -87,6 +87,7 @@ class EventBusMaster implements IEventBusMaster {
         return element;
       }
     }
+    return null;
   }
 
   @override
@@ -96,6 +97,7 @@ class EventBusMaster implements IEventBusMaster {
         return element;
       }
     }
+    return null;
   }
 
   @override
@@ -138,6 +140,7 @@ class EventBusMaster implements IEventBusMaster {
         return element.lastEvent<T>(eventName: eventName);
       }
     }
+    return null;
   }
 
   @override

@@ -1,3 +1,7 @@
+## 1.3.1+1  
+-  change version  
+## 1.3.1  
+-  add new method getAllTopics
 ## 1.3.0+8  
 -  change in pubignore  
 ## 1.3.0+7  

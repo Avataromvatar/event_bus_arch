@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:async/async.dart';
 import 'package:event_bus_arch/src/event_dto.dart';
 import 'package:event_bus_arch/src/event_master.dart';
 // import 'package:equatable/equatable.dart';
@@ -198,6 +199,8 @@ abstract class EventBus {
   ///
   ///value = last event
   Map<String, dynamic> getAllTopics();
+
+  Stream<dynamic> groupListen(List<Stream> streams);
 
   ///create unique topic
   static String topicCreate(Type type, {String? eventName, String? prefix}) {
@@ -595,6 +598,11 @@ class EventController implements EventBus, EventBusHandler {
   void setUUIDGenerator({String Function(String topic)? uuidGenerator}) {
     _uuid = _UUIDGenerator(uuidGenerator: uuidGenerator);
   }
+
+  @override
+  Stream groupListen(List<Stream> streams) {
+    return StreamGroup.mergeBroadcast(streams);
+  }
 }
 
 ///This class always have inner listener if you send a event
@@ -640,6 +648,19 @@ class EventModelController extends EventController {
       return true;
     }
     return false;
+  }
+
+  bool clearAll() {
+    var l = _eventsNode.keys;
+    l.forEach((element) {
+      var node = _eventsNode[element];
+      if (node != null) {
+        node.dispose();
+        _eventsNode.remove(element);
+      }
+    });
+
+    return true;
   }
 
   @override

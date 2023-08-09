@@ -214,14 +214,14 @@ class EventBusMaster implements IEventBusMaster {
   }
 
   void setLoggerToAll({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat}) {
-    _list.forEach((element) {
+    for (var element in _list) {
       element.setLogger(cb: cb, format: format, dateFormat: dateFormat);
-    });
+    }
   }
 
   void setUUIDGeneratorToAll({String Function(String topic)? uuidGenerator}) {
-    _list.forEach((element) {
+    for (var element in _list) {
       element.setUUIDGenerator(uuidGenerator: uuidGenerator);
-    });
+    }
   }
 }

@@ -58,6 +58,7 @@ Future<void> main() async {
   );
   appEBus.addHandler(externPlusEmit, eventName: 'no emit');
   appEBus.addHandler(externPlusComplete);
+  // ignore: unused_local_variable
   var r = await appEBus.call(1);
   try {
     r = await appEBus.call(1, eventName: 'no emit');
@@ -91,6 +92,7 @@ Future<void> main() async {
   await Future.delayed(Duration(seconds: 1));
   //You can use only type for event
   //This event <String> not have special handler and controller use default handler
+  // ignore: unused_local_variable
   var la = appEBus.listenEvent<String>()!.listen((event) {
     print('App Get Event $event');
   });

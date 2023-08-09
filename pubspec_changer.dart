@@ -43,7 +43,7 @@ Future<String> getVersion() async {
   if (l[0] == 'v') {
     result = str.substring(1);
     result = result.replaceFirst('-', '+');
-    result = result.substring(0, result.indexOf('-'));
+    // result = result.substring(0, result.indexOf('-'));
   }
   return result;
 }

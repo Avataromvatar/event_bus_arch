@@ -31,7 +31,7 @@ class _Logger {
           ret += dateFormat.format(t);
           i++;
         } else if (format[i + 1] == 'u') {
-          ret += event.uuid;
+          ret += event.uuid ?? '';
           i++;
         } else if (format[i + 1] == 't') {
           ret += event.topic;
@@ -214,11 +214,12 @@ abstract class EventBus {
   ///```
   ///EventBusHandler busHandlers = eventBus as EventBusHandler;
   ///```
-  factory EventBus({String? prefix, EventHandler? defaultHandler, bool isBusForModel = false}) {
+  factory EventBus(
+      {String? prefix, EventHandler? defaultHandler, bool isBusForModel = false, bool addToMaster = true}) {
     if (isBusForModel) {
       return EventModelController(prefix: prefix);
     } else {
-      return EventController(prefix: prefix, defaultHandler: defaultHandler);
+      return EventController(prefix: prefix, defaultHandler: defaultHandler, addToMaster: addToMaster);
     }
   }
 
@@ -315,7 +316,7 @@ class EventNode<T> extends EventBusTopic {
       if (duration != null) {
         await Future.delayed(duration);
       }
-      await call(EventDTO<T>(topic, lastEvent!, u), isRepeat: true);
+      await call(EventDTO<T>(topic, lastEvent!, uuid: u), isRepeat: true);
     }
   }
 
@@ -345,8 +346,10 @@ class EventController implements EventBus, EventBusHandler {
   ///use bus for
   EventHandler? defaultHandler;
 
-  EventController({String? prefix, this.defaultHandler}) : _prefix = prefix {
-    EventBusMaster.instance.add(this);
+  EventController({String? prefix, this.defaultHandler, bool addToMaster = true}) : _prefix = prefix {
+    if (addToMaster) {
+      EventBusMaster.instance.add(this);
+    }
   }
   @override
   void connect(EventBusHandlersGroup externHandlers) {
@@ -390,7 +393,7 @@ class EventController implements EventBus, EventBusHandler {
       bool needLog = true}) {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
-      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid ?? _uuid.getUuid(topic));
+      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid: uuid ?? _uuid.getUuid(topic));
       if (_eventsNode.containsKey(topic)) {
         if (afterThis != null) {
           afterThis.then((value) => _eventsNode[topic]?.call(eventDTO));
@@ -429,7 +432,7 @@ class EventController implements EventBus, EventBusHandler {
       bool needLog = true}) async {
     if (prefix == null || prefix == this.prefix) {
       final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
-      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid ?? _uuid.getUuid(topic));
+      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid: uuid ?? _uuid.getUuid(topic));
       if (_eventsNode.containsKey(topic)) {
         Completer completer = Completer<dynamic>();
 
@@ -652,13 +655,13 @@ class EventModelController extends EventController {
 
   bool clearAll() {
     var l = _eventsNode.keys;
-    l.forEach((element) {
+    for (var element in l) {
       var node = _eventsNode[element];
       if (node != null) {
         node.dispose();
         _eventsNode.remove(element);
       }
-    });
+    }
 
     return true;
   }

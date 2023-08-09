@@ -1,3 +1,7 @@
+## 1.3.2  
+-  add groupListen method to EventBus   
+-  add getAllTopic method to EventBus   
+-  add clearAll method to EvenModelController
 ## 1.3.1+1  
 -  change version  
 ## 1.3.1  

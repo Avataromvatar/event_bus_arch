@@ -93,18 +93,28 @@ abstract class EventBus {
   ///value = last event
   Map<Topic, dynamic> lastEventAll();
   List<Topic> getAllTopic();
-  Future<void> Function(EventDTO event)? onEvent;
-  Future<void> Function(EventDTO event, dynamic result)? onCall;
 
-  factory EventBus(String name,
-      {bool isModelBus = false,
-      bool addToMaster = true,
-      Future<void> Function(EventDTO<dynamic>, dynamic)? onCall,
-      Future<void> Function(EventDTO<dynamic>)? onEvent}) {
+  ///$1 event and $2 result after call
+  Stream<(EventDTO, dynamic)> get allCallStream;
+  Stream<EventDTO> get allSendStream;
+  // Future<void> Function(EventDTO event)? onEvent;
+  // Future<void> Function(EventDTO event, dynamic result)? onCall;
+
+  factory EventBus(
+    String name, {
+    bool isModelBus = false,
+    bool addToMaster = true,
+  }) {
     if (isModelBus) {
-      return EventModelBusController(name: name, addToMaster: addToMaster, onCall: onCall, onEvent: onEvent);
+      return EventModelBusController(
+        name: name,
+        addToMaster: addToMaster,
+      );
     } else {
-      return EventBusController(name: name, addToMaster: addToMaster, onCall: onCall, onEvent: onEvent);
+      return EventBusController(
+        name: name,
+        addToMaster: addToMaster,
+      );
     }
   }
 }
@@ -145,7 +155,7 @@ class _EventNode<T> {
       lastEvent = event;
       return ret;
     } else {
-      if (event is EventDTO<T>) {
+      if (event.topic != topic) {
         throw EventBusException('Topic:$topic is dispose');
       } else {
         throw EventBusException('Node $topic != ${event.topic}');
@@ -221,11 +231,10 @@ class _EventNode<T> {
 }
 
 class EventBusController implements EventBus, EventBusHandler {
-  @override
-  Future<void> Function(EventDTO event, dynamic result)? onCall;
-
-  @override
-  Future<void> Function(EventDTO event)? onEvent;
+  final StreamController<(EventDTO, dynamic)> _allCallStream = StreamController.broadcast();
+  final StreamController<EventDTO> _allSendStream = StreamController.broadcast();
+  Stream<(EventDTO, dynamic)> get allCallStream => _allCallStream.stream;
+  Stream<EventDTO> get allSendStream => _allSendStream.stream;
 
   @override
   // TODO: implement name
@@ -234,7 +243,7 @@ class EventBusController implements EventBus, EventBusHandler {
   final Map<Topic, _EventNode> _nodes = {};
 
   /// addToMaster work only name isNotEmpty @attention name must be uniqe
-  EventBusController({this.onCall, this.onEvent, required this.name, bool addToMaster = true}) {
+  EventBusController({required this.name, bool addToMaster = true}) {
     if (addToMaster) {
       EventBusMaster.instance.add(this);
     }
@@ -271,7 +280,8 @@ class EventBusController implements EventBus, EventBusHandler {
       if (n.hasHandler) {
         var e = EventDTO<T>(topic, data);
         var ret = await n.execute(e);
-        await onCall?.call(e, ret);
+        _allCallStream.add((e, ret));
+
         //CHAIN CALL
         if (ret is ChainEventDTO) {
           _send(ret);
@@ -423,7 +433,8 @@ class EventBusController implements EventBus, EventBusHandler {
     var node = _nodes[event.topic];
     if (node != null) {
       if (node.hasListener || node.hasHandler) {
-        onEvent?.call(event);
+        _allSendStream.add(event);
+
         var ret = node.execute(event);
         //CHAIN CALL
         ret.then((value) {
@@ -517,7 +528,7 @@ class EventBusController implements EventBus, EventBusHandler {
 }
 
 class EventModelBusController extends EventBusController {
-  EventModelBusController({required super.name, super.addToMaster, super.onCall, super.onEvent});
+  EventModelBusController({required super.name, super.addToMaster});
 
   @override
   bool _send(EventDTO event) {

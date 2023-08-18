@@ -4,11 +4,16 @@ import 'package:test/test.dart';
 void main() async {
   EventBus bus = EventBus(
     'bus',
-    onCall: (p0, p1) async {
-      print('bus call: $p0 return $p1');
+  );
+
+  bus.allCallStream.listen(
+    (e) async {
+      print('bus call: ${e.$1} return ${e.$2}');
     },
-    onEvent: (p0) async {
-      print('bus send: $p0 ');
+  );
+  bus.allSendStream.listen(
+    (e) async {
+      print('bus send: $e ');
     },
   );
   var busHandler = bus as EventBusHandler;
@@ -36,6 +41,9 @@ void main() async {
   await sumCommand.undo();
   print('---- undo 3 canUndo:${sumCommand.canUndo}');
   await sumCommand.undo();
+  await Future.delayed(Duration(seconds: 1));
+  var sumCommand1 = busHandler.addHandler<String>(_stringSumAaaaHandler);
+  sumCommand.execute(newData: 'Test3');
   // EventBus bus1 = EventBus(prefix: 'bus1');
   // EventBus bus2 = EventBus(prefix: 'bus2');
   // EventBus bus3 = EventBus(
@@ -134,6 +142,10 @@ void main() async {
 
 Future<dynamic> _stringSumHandler(Topic topic, {String? data, String? oldData}) async {
   return ChainEventDTO(Topic.create<String>(path: 'parse'), (oldData ?? '') + (data ?? ''));
+}
+
+Future<dynamic> _stringSumAaaaHandler(Topic topic, {String? data, String? oldData}) async {
+  return ChainEventDTO(Topic.create<String>(path: 'parse'), (oldData ?? '') + (data ?? '') + ('Aaaa11'));
 }
 
 Future<dynamic> _stringParserHandler(Topic topic, {String? data, String? oldData}) async {

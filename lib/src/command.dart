@@ -17,9 +17,7 @@ abstract class Command<T> implements EventDTO<T> {
 
   ///if executor == null this Command send how Event to EventBus
   ///if executer and EventBus not binded throw Exeption
-  Future<dynamic> execute({
-    T? newData,
-  });
+  Future<dynamic> execute({T? newData, String? fragment, Map<String, String>? arguments});
   Command<T> copy({T? newData, Executor<T>? newExecutorBinded, EventBus? newEventBusBinded});
   EventDTO createEvent();
   static Command<T> create<T>(
@@ -52,27 +50,26 @@ class CommandImpl<T> implements Command<T> {
   @override
   late final bool undoOn;
   @override
-  bool get canUndo => _list.isNotEmpty;
-  final List<T?> _list = [];
+  bool get canUndo => _list.length > 1;
+  final List<EventDTO<T?>> _list = [];
   @override
   final EventBus? eventBusBinded;
 
   bool _blockUndoAdd = false;
 
   @override
-  Future<dynamic> execute({
-    T? newData,
-  }) {
+  Future<dynamic> execute({T? newData, String? fragment, Map<String, String>? arguments}) {
     if (!isBinded) {
       throw Exception('Command $topic not binded ');
     }
-    var d = newData ?? data;
+
+    var d = EventDTO(topic.copy(fragment: fragment, arguments: arguments), newData ?? data);
 
     //----- Undo section
     if (undoOn && !_blockUndoAdd) {
       if (_list.isNotEmpty) {
-        if (_list.last != data) {
-          _list.add(data);
+        if (_list.last != d) {
+          _list.add(d);
           if (_list.length > maxLenUndo) {
             _list.removeAt(0);
           }
@@ -84,13 +81,14 @@ class CommandImpl<T> implements Command<T> {
     //----- execute section
     var ex = executorBinded;
     if (ex != null) {
-      var ret = ex.call(topic, data: d, oldData: newData != null ? data : null);
-      data = d;
+      var ret = ex.call(topic.copy(fragment: fragment, arguments: arguments),
+          data: d.data, oldData: newData != null ? data : null);
+
       return ret;
     } else {
       var bus = eventBusBinded;
-      var ret = bus!.call<T>(d as T, path: topic.path);
-      data = d;
+      var ret = bus!.call<T>(d.data as T, path: topic.path, fragment: fragment, arguments: arguments);
+
       return ret;
     }
   }
@@ -98,9 +96,10 @@ class CommandImpl<T> implements Command<T> {
   @override
   Future<dynamic> undo() async {
     if (undoOn && canUndo) {
-      var d = _list.removeLast();
+      /*var current =*/ _list.removeLast();
+      var last = _list.removeLast();
       _blockUndoAdd = true;
-      var ret = execute(newData: d);
+      var ret = execute(newData: last.data, fragment: last.topic.fragment, arguments: last.topic.arguments);
       _blockUndoAdd = false;
       return ret;
     }

@@ -1,324 +1,212 @@
-import 'dart:async';
+part of event_arch;
 
-import 'package:async/async.dart';
-import 'package:event_bus_arch/src/event_dto.dart';
-import 'package:event_bus_arch/src/event_master.dart';
-// import 'package:equatable/equatable.dart';
-import 'package:intl/intl.dart';
+abstract class EventBusHandler {
+  Command<T> addHandler<T>(
+    Executor<T> handler, {
+    String? path,
+    String? target,
+  });
+  void removeHandler<T>({
+    String? path,
+    String? target,
+  });
 
-import 'package:uuid/uuid.dart';
-
-class _Logger {
-  final void Function(String) cb;
-
-  ///#t - topic, #u - uuid #d - date #s - hasListener
-  final String format;
-  late final DateFormat dateFormat;
-
-  _Logger(this.cb, {this.format = '#d #t--#u--#s', DateFormat? dateFormat}) {
-    this.dateFormat = dateFormat ?? DateFormat('dd.MM hh:mm:ss');
-  }
-  void log(EventDTO event, bool hasListeners) {
-    cb.call(_getMessage(event, hasListeners));
-  }
-
-  String _getMessage(EventDTO event, bool hasListeners) {
-    String ret = '';
-    var t = DateTime.now();
-    for (var i = 0; i < format.length; i++) {
-      if (format[i] == '#' && i + 1 < format.length) {
-        if (format[i + 1] == 'd') {
-          ret += dateFormat.format(t);
-          i++;
-        } else if (format[i + 1] == 'u') {
-          ret += event.uuid ?? '';
-          i++;
-        } else if (format[i + 1] == 't') {
-          ret += event.topic;
-          i++;
-        } else if (format[i + 1] == 's') {
-          ret += hasListeners.toString();
-          i++;
-        } else {
-          ret += format[i];
-        }
-      } else {
-        ret += format[i];
-      }
-    }
-
-    // ret = ret.replaceAll('#d', _dateFormat.format(t));
-    // ret = ret.replaceAll('#b', body);
-    // ret = ret.replaceAll('#m', t.millisecond.toString());
-    return ret;
-  }
+  // void connect(EventBusHandlersGroup externHandlers);
+  // void disconnect(EventBusHandlersGroup externHandlers);
 }
 
-class _UUIDGenerator {
-  final String Function(String topic)? uuidGenerator;
-  _UUIDGenerator({this.uuidGenerator});
-  String getUuid(String topic) {
-    return uuidGenerator != null ? uuidGenerator!.call(topic) : Uuid().v1();
-  }
-}
-
-class EventBusTopic /*extends Equatable*/ {
-  static const String divider = '^';
-  late final String type;
-  late final String? name;
-  late final String? prefix;
-  late final String topic;
-  EventBusTopic.parse(this.topic) {
-    var l = topic.split(divider);
-    if (l.length <= 1) {
-      //just a type
-      name = null;
-      prefix = null;
-      type = topic;
-    } else if (l.length == 2) {
-      //just name and type
-      prefix = null;
-      name = l[1];
-      type = l[0];
-    } else if (l.length == 3) {
-      prefix = l[0];
-      name = l[2];
-      type = l[1];
-    }
-  }
-  EventBusTopic.create(Type type, {this.name, this.prefix}) {
-    this.type = '$type';
-    String? eventTypeAndName = name != null ? '$type${EventBusTopic.divider}$name' : '$type';
-    if (prefix != null) {
-      topic = '$prefix${EventBusTopic.divider}$eventTypeAndName';
-    } else {
-      topic = eventTypeAndName;
-    }
-  }
-  // @override
-  // List<Object?> get props => [topic];
-}
-
-// abstract class IEventNode<T> implements EventBusTopic {
-//   EventBus get bus;
-//   Future<void> repeat({String? uuid});
-//   T? lastEvent();
-// }
-
-abstract class EventBusHandlersGroup {
-  bool get isConnected;
-
-  ///Handler class must addHandler to bus. For example:
-  ///
-  /// ```
-  ///void connect(EventBusHandler bus) {
-  ///_busHandler = bus;
-  /// _busHandler!.addHandler<void>(init, eventName: eAppNamedEvent.init.name);
-  /// }
-  /// ```
-  void connect(EventBusHandler bus);
-
-  ///Handler class must removeHandler from bus
-  ///
-  /// ```
-  /// void disconnect(EventBusHandler bus) {
-  ///   bus!.removeHandler<void>(eventName: eAppNamedEvent.init.name);
-  /// }
-  /// ```
-  void disconnect(EventBusHandler bus);
-}
+///CHAIN: if event handler(executer) return ChainEventDTO this ChainEventDTO or List< ChainEventDTO> will be sended in bus
+///Chain completed if EventDTO have not handler or handler return not ChainEventDTO
+///Chain work only for send
 
 abstract class EventBus {
-  /// prefix used for indentificator bus in EventBusMaster
-  String? get prefix;
-  Type get type;
+  /// name use for Topic target
+  /// if Topic.target == 'all' this broadcast event
+  String get name;
 
   ///check if there is a listener on the bus
-  bool contain<T>(String? eventName);
+  bool contain(Topic topic);
 
-  ///return true if hasListener.
-  ///
-  ///if uuid not set, be use default uuid
-  ///
-  ///if prefix set - event send to EventMaster.
-  ///
-  ///if use afterEvent you Event will be sending when get event from afterEvent - One time
-  ///
-  ///if use afterThis you Event will be sending when future be comleted
-  ///
-  ///if you use afterTime, Event will be send after Duration
-  ///
-  ///You can use for example send(10) -> event topic = int
-  bool send<T>(T event,
-      {String? eventName,
-      String? uuid,
-      String? prefix,
-      Duration? afterTime,
-      Stream? afterEvent,
-      Future? afterThis,
-      bool needLog});
+  ///return EventDTO if hasListener.
+
+  EventDTO<T>? send<T>(
+    T data, {
+    String? path,
+    String? fragment,
+    String? target,
+    Map<String, String>? arguments,
+  });
+
+  ///use event or [topic and data ]
+  EventDTO<T>? sendEvent<T>({
+    EventDTO<T>? event,
+    Topic? topic,
+    T? data,
+  });
+
+  ///use events or eventsEntry<topic,data>
+  List<EventDTO<dynamic>?> sendAll({Map<Topic, dynamic>? eventsMap, List<EventDTO>? events});
+  // Future<List<EventDTO<dynamic>?>> sendChain({EventDTO? event, Topic? topic, dynamic data});
 
   ///can return value if handler do it(call needComplete) or cancel if handler not complete Future or this even not have a handler
   ///
   ///
-  Future<dynamic> call<T>(T event,
-      {String? eventName,
-      String? uuid,
-      String? prefix,
-      Duration? afterTime,
-      Stream? afterEvent,
-      Future? afterThis,
-      bool needLog});
+  Future<dynamic> call<T>(
+    T data, {
+    String? path,
+    String? fragment,
+    String? target,
+    Map<String, String>? arguments,
+  });
+
+  ///use event or [topic and data ]
+  Future<dynamic>? callEvent<T>({EventDTO<T>? event, Topic? topic, T? data});
+
+  ///use events or eventsEntry<topic,data>
+  Future<List<dynamic>?> callAll(List<EventDTO> events, {bool asyncOrder = true});
 
   ///repeat last event by topic.
   ///If set duration event be repeated when duration time end
-  bool repeat<T>({String? eventName, String? uuid, String? prefix, Duration? duration});
-
-  ///Use [repeatLastEvent] if need send lastEvent. @attention event be sended after wait 1 millisecond or [Duration]
-  ///
-  ///if prefix set and he != bus.prefix, event search be in EventMaster and @attention EventMaster can return null
-  Stream<EventDTO<T>>? listenEventDTO<T>(
-      {String? eventName, bool repeatLastEvent = false, Duration? duration, String? prefix});
+  ///return EventDTO<T> if event have node
+  EventDTO<T>? repeat<T>({String? path, String? target, Duration? duration});
+  List<bool?> repeatAll({List<Topic>? events});
 
   ///Use [repeatLastEvent] if need send lastEvent. @attention event be sended after wait 1 millisecond or [Duration]
   ///
   ///if prefix set and they != bus.prefix, event search in EventMaster and @attention EventMaster can return null
-  Stream<T>? listenEvent<T>({
-    String? eventName,
-    bool repeatLastEvent = false,
-    Duration? duration,
-    String? prefix,
+  Stream<T>? listen<T>({
+    String? path,
+    String? target,
   });
+  Stream<EventDTO<T>>? listenEvent<T>({EventDTO<T>? event, Topic? topic});
+  Stream<dynamic> groupListen(List<Stream> streams);
+  Stream<EventDTO> listenAll(List<Topic> topics);
 
   ///return the last event
-  T? lastEvent<T>({String? eventName, String? prefix});
+  T? lastData<T>({String? path, String? target});
+  EventDTO<T>? lastEvent<T>(Topic topic);
 
   ///Return map where:
   ///
-  ///key = topic name from [EventBusTopic]
+  ///key = topic
   ///
   ///value = last event
-  Map<String, dynamic> getAllTopics();
+  Map<Topic, dynamic> lastEventAll();
+  List<Topic> getAllTopic();
+  Future<void> Function(EventDTO event)? onEvent;
+  Future<void> Function(EventDTO event, dynamic result)? onCall;
 
-  Stream<dynamic> groupListen(List<Stream> streams);
-
-  ///create unique topic
-  static String topicCreate(Type type, {String? eventName, String? prefix}) {
-    String? eventTypeAndName = eventName != null ? '$type${EventBusTopic.divider}$eventName' : '$type';
-    if (prefix != null) return '$prefix${EventBusTopic.divider}$eventTypeAndName';
-
-    return eventTypeAndName;
-  }
-
-  ///if you whant add/remove Handlers or connect HandlerGroup use [EventBusHandler]
-  ///```
-  ///EventBusHandler busHandlers = eventBus as EventBusHandler;
-  ///```
-  factory EventBus(
-      {String? prefix, EventHandler? defaultHandler, bool isBusForModel = false, bool addToMaster = true}) {
-    if (isBusForModel) {
-      return EventModelController(prefix: prefix);
+  factory EventBus(String name,
+      {bool isModelBus = false,
+      bool addToMaster = true,
+      Future<void> Function(EventDTO<dynamic>, dynamic)? onCall,
+      Future<void> Function(EventDTO<dynamic>)? onEvent}) {
+    if (isModelBus) {
+      return EventModelBusController(name: name, addToMaster: addToMaster, onCall: onCall, onEvent: onEvent);
     } else {
-      return EventController(prefix: prefix, defaultHandler: defaultHandler, addToMaster: addToMaster);
+      return EventBusController(name: name, addToMaster: addToMaster, onCall: onCall, onEvent: onEvent);
     }
   }
-
-  ///set function to log. If set [cb] null log canceled
-  ///#t - topic, #u - uuid #d - date #s - status true or not(have listener or not)
-  void setLogger({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat});
-
-  ///set uuid generator. Default EventBus use Uuid().v1()
-  void setUUIDGenerator({String Function(String topic)? uuidGenerator});
 }
 
-typedef EventEmitter<T> = void Function(T data);
-
-typedef EventHandler<T> = Future<void> Function(
-    EventDTO<T> event,
-
-    ///send event to other listener
-    EventEmitter<EventDTO<T>>? emit,
-    {EventBus? bus,
-    Completer<dynamic>? needComplete});
-
-///Interface for add/remove handlers
-abstract class EventBusHandler {
-  void addHandler<T>(EventHandler<T> handler, {String? eventName});
-  void removeHandler<T>({String? eventName});
-  void connect(EventBusHandlersGroup externHandlers);
-  void disconnect(EventBusHandlersGroup externHandlers);
-}
-
-class EventNode<T> extends EventBusTopic {
-  // final String topic;
-  final String? eventName;
-  final EventBus _bus;
-  EventBus get bus => _bus;
+class _EventNode<T> {
+  final EventBus bus;
   Stream<EventDTO<T>> get stream => _streamController.stream;
   bool get hasListener => _streamController.hasListener;
   bool get hasHandler => _handler != null;
   bool _isDispose = false;
   bool get isDispose => _isDispose;
   late final StreamController<EventDTO<T>> _streamController;
-  EventHandler<T>? _handler;
-  Function(String topic)? onCancel;
-  T? lastEvent;
-  String? _lastUUID;
-  EventNode(
-    String topic,
+  final Executor<T>? _handler;
+  Function(Topic topic)? onCancel;
+  EventDTO<T>? lastEvent;
+  int executeCount = 0;
+  final Topic topic;
+  _EventNode(
+    this.topic,
     this._handler,
-    this._bus, {
-    this.eventName,
+    this.bus, {
     this.onCancel,
-  }) : super.parse(topic) {
+  }) {
     _streamController = StreamController<EventDTO<T>>.broadcast(onCancel: _onCancel);
   }
-  Future<void> call(EventDTO<T> event, {bool isRepeat = false, Completer<dynamic>? needComplete}) async {
-    if (!_isDispose) {
-      lastEvent = event.data;
-      _lastUUID = event.uuid;
-      if (_handler != null) {
-        _handler!.call(event, (event) {
-          if (_streamController.hasListener) {
-            // if (needLogging) _logging(event, 'send');
-            _streamController.add(event);
-          } else {
-            // if (needLogging) _loggingHasNoListener(event.topic, 'send');
-          }
-        }, bus: bus, needComplete: needComplete).then((value) {
-          if (needComplete != null && !needComplete.isCompleted) {
-            needComplete.completeError('$topic Handler not complete call');
-          }
-        });
+
+  Command<T> createCommand() {
+    return Command<T>(topic, data: lastEvent?.data, eventBusBinded: bus);
+  }
+
+  Future<dynamic> execute(EventDTO<T> event) async {
+    if (!_isDispose && event.topic == topic) {
+      executeCount++;
+      var ret = _handler?.call(event.topic, data: event.data, oldData: lastEvent?.data);
+      if (_streamController.hasListener) {
+        _streamController.add(event);
+      }
+      lastEvent = event;
+      return ret;
+    } else {
+      if (event is EventDTO<T>) {
+        throw EventBusException('Topic:$topic is dispose');
       } else {
-        if (_streamController.hasListener) {
-          // if (needLogging) _logging(event, 'send');
-          _streamController.add(event);
-          if (needComplete != null) {
-            needComplete.completeError('No handlers');
-          }
-        } else {
-          // if (needLogging) _loggingHasNoListener(event.topic, 'send');
-        }
-        // _streamController.hasListener ? _streamController.add(event) : null;
+        throw EventBusException('Node $topic != ${event.topic}');
       }
     }
   }
 
-  Future<void> repeat({String? uuid, Duration? duration}) async {
-    String u = '';
+  bool repeatLast() {
     if (lastEvent != null) {
-      if (uuid != null) {
-        u = uuid;
-      } else {
-        u = _lastUUID!; // Uuid().v1();
-      }
-      if (duration != null) {
-        await Future.delayed(duration);
-      }
-      await call(EventDTO<T>(topic, lastEvent!, uuid: u), isRepeat: true);
+      execute(lastEvent!);
+      return true;
     }
+    return false;
   }
+
+  // Future<void> call(EventDTO<T> event, {bool isRepeat = false, Completer<dynamic>? needComplete}) async {
+  //   if (!_isDispose) {
+  //     lastEvent = event.data;
+  //     _lastUUID = event.uuid;
+  //     if (_handler != null) {
+  //       _handler!.call(event, (event) {
+  //         if (_streamController.hasListener) {
+  //           // if (needLogging) _logging(event, 'send');
+  //           _streamController.add(event);
+  //         } else {
+  //           // if (needLogging) _loggingHasNoListener(event.topic, 'send');
+  //         }
+  //       }, bus: bus, needComplete: needComplete).then((value) {
+  //         if (needComplete != null && !needComplete.isCompleted) {
+  //           needComplete.completeError('$topic Handler not complete call');
+  //         }
+  //       });
+  //     } else {
+  //       if (_streamController.hasListener) {
+  //         // if (needLogging) _logging(event, 'send');
+  //         _streamController.add(event);
+  //         if (needComplete != null) {
+  //           needComplete.completeError('No handlers');
+  //         }
+  //       } else {
+  //         // if (needLogging) _loggingHasNoListener(event.topic, 'send');
+  //       }
+  //       // _streamController.hasListener ? _streamController.add(event) : null;
+  //     }
+  //   }
+  // }
+
+  // Future<void> repeat({String? uuid, Duration? duration}) async {
+  //   String u = '';
+  //   if (lastEvent != null) {
+  //     if (uuid != null) {
+  //       u = uuid;
+  //     } else {
+  //       u = _lastUUID!; // Uuid().v1();
+  //     }
+  //     if (duration != null) {
+  //       await Future.delayed(duration);
+  //     }
+  //     await call(EventDTO<T>(topic, lastEvent!, uuid: u), isRepeat: true);
+  //   }
+  // }
 
   void _onCancel() {
     onCancel?.call(topic);
@@ -326,348 +214,328 @@ class EventNode<T> extends EventBusTopic {
 
   Future<void> dispose() async {
     _isDispose = true;
-    _handler = null;
+    // _handler = null;
     await _streamController.close();
-    onCancel = null;
+    // onCancel = null;
   }
 }
 
-class EventController implements EventBus, EventBusHandler {
-  final String? _prefix;
+class EventBusController implements EventBus, EventBusHandler {
   @override
-  String? get prefix => _prefix;
-  final Map<String, EventNode> _eventsNode = {};
+  Future<void> Function(EventDTO event, dynamic result)? onCall;
+
   @override
-  Type get type => runtimeType;
-  _Logger? _logger;
-  _UUIDGenerator _uuid = _UUIDGenerator();
+  Future<void> Function(EventDTO event)? onEvent;
 
-  ///This handler use for event what not have special handler but hasListener.
-  ///use bus for
-  EventHandler? defaultHandler;
+  @override
+  // TODO: implement name
+  final String name;
 
-  EventController({String? prefix, this.defaultHandler, bool addToMaster = true}) : _prefix = prefix {
+  final Map<Topic, _EventNode> _nodes = {};
+
+  /// addToMaster work only name isNotEmpty @attention name must be uniqe
+  EventBusController({this.onCall, this.onEvent, required this.name, bool addToMaster = true}) {
     if (addToMaster) {
       EventBusMaster.instance.add(this);
     }
   }
-  @override
-  void connect(EventBusHandlersGroup externHandlers) {
-    externHandlers.connect(this);
+
+  void _cancelStreamInNode(Topic topic) {
+    _nodes[topic]?.dispose();
+    _nodes.remove(topic);
   }
 
   @override
-  void disconnect(EventBusHandlersGroup externHandlers) {
-    externHandlers.disconnect(this);
+  Command<T> addHandler<T>(Executor<T> handler, {String? path, String? target}) {
+    var t = Topic.create<T>(path: path, target: target);
+    var n = _EventNode<T>(
+      t,
+      handler,
+      this,
+      onCancel: _cancelStreamInNode,
+    );
+    _nodes[t] = n;
+    return n.createCommand();
   }
 
   @override
-  bool contain<T>(String? eventName) {
-    final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
-    return _eventsNode.containsKey(topic);
+  void removeHandler<T>({String? path, String? target}) {
+    var t = Topic.create<T>(path: path, target: target);
+    _nodes[t]?.dispose();
+    _nodes.remove(t.topic);
   }
 
-  @override
-  Map<String, dynamic> getAllTopics() {
-    return _eventsNode.map((key, value) => MapEntry(key, value.lastEvent));
-  }
-
-  @override
-  T? lastEvent<T>({String? eventName, String? prefix}) {
-    if (prefix == null || prefix == this.prefix) {
-      final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
-      return _eventsNode[topic]?.lastEvent;
-    } else {
-      return EventBusMaster.instance.lastEvent<T>(eventName: eventName, prefix: prefix);
-    }
-  }
-
-  @override
-  bool send<T>(T event,
-      {String? eventName,
-      String? uuid,
-      String? prefix,
-      Duration? afterTime,
-      Stream? afterEvent,
-      Future? afterThis,
-      bool needLog = true}) {
-    if (prefix == null || prefix == this.prefix) {
-      final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
-      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid: uuid ?? _uuid.getUuid(topic));
-      if (_eventsNode.containsKey(topic)) {
-        if (afterThis != null) {
-          afterThis.then((value) => _eventsNode[topic]?.call(eventDTO));
-        } else if (afterTime != null) {
-          Future.delayed(afterTime).then((value) => _eventsNode[topic]?.call(eventDTO));
-        } else if (afterEvent != null) {
-          afterEvent.first.then((value) => _eventsNode[topic]?.call(eventDTO));
-          // afterEvent.listen((event1) {
-          //   _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1()));
-          // });
-        } else {
-          _eventsNode[topic]!.call(eventDTO);
+  Future _call<T>(Topic topic, T? data) async {
+    var n = _nodes[topic];
+    if (n != null) {
+      if (n.hasHandler) {
+        var e = EventDTO<T>(topic, data);
+        var ret = await n.execute(e);
+        await onCall?.call(e, ret);
+        //CHAIN CALL
+        if (ret is ChainEventDTO) {
+          _send(ret);
         }
-        if (needLog) {
-          _logger?.log(eventDTO, true);
+        if (ret is List<ChainEventDTO>) {
+          ret.forEach(
+            (element) {
+              _send(element);
+            },
+          );
         }
-        return true;
-      }
-      if (needLog) {
-        _logger?.log(eventDTO, false);
-      }
-      return false;
-    } else {
-      return EventBusMaster.instance.send<T>(event, eventName: eventName, uuid: uuid, prefix: prefix);
-    }
-  }
-
-  @override
-  Future<dynamic> call<T>(T event,
-      {String? eventName,
-      String? uuid,
-      String? prefix,
-      Duration? afterTime,
-      Stream? afterEvent,
-      Future? afterThis,
-      bool needLog = true}) async {
-    if (prefix == null || prefix == this.prefix) {
-      final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
-      EventDTO<T> eventDTO = EventDTO<T>(topic, event, uuid: uuid ?? _uuid.getUuid(topic));
-      if (_eventsNode.containsKey(topic)) {
-        Completer completer = Completer<dynamic>();
-
-        if (afterThis != null) {
-          afterThis.then((value) => _eventsNode[topic]?.call(eventDTO, needComplete: completer));
-        } else if (afterTime != null) {
-          Future.delayed(afterTime).then((value) => _eventsNode[topic]?.call(eventDTO, needComplete: completer));
-        } else if (afterEvent != null) {
-          afterEvent.first.then((value) => _eventsNode[topic]?.call(eventDTO, needComplete: completer));
-          // afterEvent.listen((event1) {
-          //   _eventsNode[topic]!.call(EventDTO<T>(topic, event, uuid ?? Uuid().v1()));
-          // });
-        } else {
-          _eventsNode[topic]!.call(eventDTO, needComplete: completer);
-        }
-        if (needLog) {
-          _logger?.log(eventDTO, true);
-        }
-        return completer.future;
-      }
-      if (needLog) {
-        _logger?.log(eventDTO, false);
+        return ret;
+      } else {
+        throw EventBusException('EventBus $name not have ${topic.topic} handler');
       }
     } else {
-      // return EventBusMaster.instance.call<T>(event, eventName: eventName, uuid: uuid, prefix: prefix);
+      throw EventBusException('EventBus $name not have ${topic.topic} Node');
     }
   }
 
-  // Future<void> _callAfterTime(Duration afterTime,EventNode node, {})
   @override
-  bool repeat<T>({
-    String? eventName,
-    String? uuid,
-    String? prefix,
-    Duration? duration,
-  }) {
-    if (prefix == null || prefix == this.prefix) {
-      final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
-      var s = _eventsNode[topic];
-      if (s != null) {
-        s.repeat(uuid: uuid, duration: duration);
-        return true;
-      }
+  Future call<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments}) {
+    var t = Topic.create<T>(path: path, target: target);
+
+    return _call<T>(t, data);
+  }
+
+  @override
+  Future<List<dynamic>?> callAll(List<EventDTO> events, {bool asyncOrder = true}) async {
+    var l = events.map((e) => _call(e.topic, e.data)).toList();
+    if (asyncOrder) {
+      return Future.wait(l);
     } else {
-      return EventBusMaster().repeat(eventName: eventName, uuid: uuid, prefix: prefix, duration: duration);
+      var ret = [];
+      for (var i = 0; i < l.length; i++) {
+        ret.add(await l[i]);
+      }
+      return ret;
     }
-    return false;
   }
 
-  //Can return null only if set prefix != controller.prefix and EventBusMaster no have controller with this prefix
   @override
-  Stream<T>? listenEvent<T>({
-    String? eventName,
-    bool repeatLastEvent = false,
-    String? prefix,
-    Duration? duration,
-  }) {
-    // var s =
-    //     listenEventDTO<T>(eventName: eventName, prefix: prefix, repeatLastEvent: repeatLastEvent, duration: duration);
-    // if (s != null) {
-    //   var str = StreamController<T>();
-    //   var l = s.listen((event) {
-    //     str.add(event.data);
-    //   }, onDone: () => str.sink.close());
-    //   str.onCancel = () {
-    //     l.cancel();
-    //   };
-    //   return str.stream;
-    // }
-    return listenEventDTO<T>(eventName: eventName, prefix: prefix, repeatLastEvent: repeatLastEvent, duration: duration)
-        ?.map((event) => event.data!);
-  }
-
-  //Can return null only if set prefix != controller.prefix and EventBusMaster no have controller with this prefix
-  @override
-  Stream<EventDTO<T>>? listenEventDTO<T>({
-    String? eventName,
-    bool repeatLastEvent = false,
-    String? prefix,
-    Duration? duration,
-  }) {
-    if (prefix == null || prefix == this.prefix) {
-      final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: this.prefix);
-      var s = _eventsNode[topic];
-      if (s == null) {
-        _eventsNode[topic] = EventNode<T>(
-            topic,
-            defaultHandler != null
-                ? (event, emit, {bus, needComplete}) async {
-                    defaultHandler!.call(event, (data) {
-                      emit?.call(data as EventDTO<T>);
-                    }, bus: bus, needComplete: needComplete);
-                  }
-                : null,
-            this,
-            eventName: eventName,
-            onCancel: _cancelEventNode);
-      }
-
-      if (repeatLastEvent) {
-        _eventsNode[topic]?.repeat(duration: duration ?? Duration(milliseconds: 1));
-      }
-      return _eventsNode[topic]!.stream as Stream<EventDTO<T>>;
+  Future? callEvent<T>({EventDTO<T>? event, Topic? topic, T? data}) {
+    assert(event != null || (topic != null));
+    if (event != null) {
+      return _call<T>(event.topic, event.data);
     } else {
-      return EventBusMaster.instance
-          .listenEventDTO<T>(eventName: eventName, prefix: prefix, repeatLastEvent: repeatLastEvent);
-    }
-  }
-
-  void _cancelEventNode(String topic) {
-    _eventsNode[topic]?.dispose();
-    _eventsNode.remove(topic);
-    // clearNotUseListeners();
-  }
-
-  ///Очищает узлы события если в них нет слушателей и обработчиков
-  void clearNotUseListeners() {
-    List<String> toDel = [];
-    for (var key in _eventsNode.keys) {
-      var element = _eventsNode[key]!;
-      if (!element.hasListener && !element.hasHandler) {
-        toDel.add(key);
-      }
-    }
-    // _eventsNode.forEach((key, value) {
-    //   if (!value.hasListener && !value.hasHandler) {
-    //     toDel.add(key);
-    //   }
-    // });
-    for (var element in toDel) {
-      _eventsNode[element]?.dispose();
-      _eventsNode.remove(element);
+      return _call<T>(topic!, data);
     }
   }
 
   @override
-  void addHandler<T>(EventHandler<T> handler, {String? eventName}) {
-    final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
-    if (!_eventsNode.containsKey(topic)) {
-      _eventsNode[topic] = EventNode<T>(topic, handler, this, eventName: eventName, onCancel: _cancelEventNode);
-      return;
-    }
-    var t = _eventsNode[topic] as EventNode<T>;
-    t._handler = handler;
-  }
-
-  @override
-  void removeHandler<T>({String? eventName}) {
-    final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
-    if (_eventsNode.containsKey(topic)) {
-      var t = _eventsNode[topic] as EventNode<T>;
-      t._handler = null;
-    }
-  }
-
-  @override
-  void setLogger({void Function(String)? cb, String format = '#d #t--#u--#s', DateFormat? dateFormat}) {
-    if (cb != null) {
-      _logger = _Logger(cb, format: format, dateFormat: dateFormat);
-    } else {
-      _logger = null;
-    }
-  }
-
-  @override
-  void setUUIDGenerator({String Function(String topic)? uuidGenerator}) {
-    _uuid = _UUIDGenerator(uuidGenerator: uuidGenerator);
+  bool contain(Topic topic) {
+    return _nodes.containsKey(topic.topic);
   }
 
   @override
   Stream groupListen(List<Stream> streams) {
     return StreamGroup.mergeBroadcast(streams);
   }
-}
 
-///This class always have inner listener if you send a event
-///This class contain last event data and can use how temporary data holder with change notifications
-class EventModelController extends EventController {
-  EventModelController({
-    String? prefix,
-  }) : super(prefix: prefix);
   @override
-  bool send<T>(T event,
-      {String? eventName,
-      String? uuid,
-      String? prefix,
-      Duration? afterTime,
-      Stream? afterEvent,
-      Future? afterThis,
-      bool needLog = true}) {
-    if (!contain<T>(eventName)) {
-      listenEventDTO<T>(eventName: eventName);
+  T? lastData<T>({String? path, String? target}) {
+    var t = Topic.create<T>(path: path, target: target);
+    return _nodes[t.topic]?.lastEvent?.data;
+  }
+
+  @override
+  EventDTO<T>? lastEvent<T>(Topic topic) {
+    var r = _nodes[topic.topic]?.lastEvent;
+    if (r != null) {
+      return _nodes[topic.topic]?.lastEvent as EventDTO<T>;
+    } else {
+      return null;
     }
-    return super.send<T>(event,
-        eventName: eventName,
-        uuid: uuid,
-        prefix: prefix,
-        afterEvent: afterEvent,
-        afterTime: afterTime,
-        afterThis: afterThis,
-        needLog: needLog);
   }
 
   @override
-  void _cancelEventNode(String topic) {
-    // _eventsNode[topic]?.dispose();
-    // _eventsNode.remove(topic);
-    // clearNotUseListeners();
+  Map<Topic, dynamic> lastEventAll() {
+    return _nodes.map((key, value) => MapEntry(value.topic, value.lastEvent));
   }
-  bool clearModel<T>({String? eventName}) {
-    final topic = EventBus.topicCreate(T..runtimeType, eventName: eventName, prefix: prefix);
-    var node = _eventsNode[topic];
+
+  @override
+  Stream<T>? listen<T>({String? path, String? target}) {
+    var t = Topic.create<T>(path: path, target: target);
+    var node = _nodes[t.topic];
+    if (node == null) {
+      node = _EventNode(t, null, this, onCancel: _cancelStreamInNode);
+      _nodes[t] = node;
+    }
+    return node.stream.map((event) => event.data);
+  }
+
+  @override
+  Stream<EventDTO> listenAll(List<Topic> topics) {
+    List<Stream<EventDTO>> s = [];
+    _EventNode? tmp;
+    for (var element in topics) {
+      tmp = _nodes[element.topic];
+      if (tmp != null) {
+        s.add(tmp.stream);
+      }
+    }
+    return StreamGroup.mergeBroadcast<EventDTO>(s);
+  }
+
+  @override
+  Stream<EventDTO<T>>? listenEvent<T>({EventDTO<T>? event, Topic? topic}) {
+    assert(event != null || topic != null);
+    var t = event?.topic ?? topic;
+    var n = _nodes[t!.topic];
+    if (n != null) {
+      return n.stream as Stream<EventDTO<T>>;
+    }
+    return null;
+  }
+
+  @override
+  EventDTO<T>? repeat<T>({String? path, String? target, Duration? duration}) {
+    var t = Topic.create<T>(path: path, target: target);
+    var n = _nodes[t];
+    if (n != null && n.lastEvent != null) {
+      if (duration != null) {
+        Future.delayed(duration).then((value) => n.repeatLast());
+      } else {
+        n.repeatLast();
+      }
+      return n.lastEvent as EventDTO<T>;
+    }
+    return null;
+  }
+
+  @override
+  List<bool?> repeatAll({List<Topic>? events}) {
+    List<bool?> r = [];
+    if (events != null) {
+      for (var e in events) {
+        r.add(_nodes[e]?.repeatLast());
+      }
+    } else {
+      for (MapEntry<Topic, _EventNode<dynamic>> e in _nodes.entries) {
+        r.add(e.value.repeatLast());
+      }
+    }
+    return r;
+  }
+
+  bool _send(EventDTO event) {
+    var node = _nodes[event.topic];
     if (node != null) {
-      node.dispose();
-      _eventsNode.remove(topic);
-      return true;
+      if (node.hasListener || node.hasHandler) {
+        onEvent?.call(event);
+        var ret = node.execute(event);
+        //CHAIN CALL
+        ret.then((value) {
+          if (value is ChainEventDTO) {
+            _send(value);
+          }
+          if (value is List<ChainEventDTO>) {
+            value.forEach(
+              (element) {
+                _send(element);
+              },
+            );
+          }
+        });
+        return true;
+      }
     }
     return false;
   }
 
-  bool clearAll() {
-    var l = _eventsNode.keys;
-    for (var element in l) {
-      var node = _eventsNode[element];
-      if (node != null) {
-        node.dispose();
-        _eventsNode.remove(element);
-      }
+  @override
+  EventDTO<T>? send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments}) {
+    var e = EventDTO.create(data, target: target, fragment: fragment, arguments: arguments, path: path);
+    if (_send(e)) {
+      return e;
     }
 
-    return true;
+    return null;
+  }
+
+  @override
+  List<EventDTO?> sendAll({Map<Topic, dynamic>? eventsMap, List<EventDTO>? events}) {
+    assert(events != null || eventsMap != null);
+    List<EventDTO?> r = [];
+    if (events != null) {
+      for (var e in events) {
+        if (_send(e)) {
+          r.add(e);
+        }
+      }
+    }
+    if (eventsMap != null) {
+      for (var e in eventsMap.entries) {
+        var ev = EventDTO(e.key, e.value);
+        if (_send(ev)) {
+          r.add(ev);
+        }
+      }
+    }
+    return r;
+  }
+
+  @override
+  EventDTO<T>? sendEvent<T>({
+    EventDTO<T>? event,
+    Topic? topic,
+    T? data,
+  }) {
+    assert(event != null || (topic != null));
+    if (event != null) {
+      if (_send(event)) {
+        return event;
+      }
+    } else {
+      var ev = EventDTO(topic!, data);
+      if (_send(ev)) {
+        return ev;
+      }
+    }
+    return null;
+  }
+
+  @override
+  List<Topic> getAllTopic() {
+    return _nodes.keys.toList();
+  }
+
+  ///Очищает узлы события если в них нет слушателей и обработчиков
+  void clearNotUseListeners() {
+    List<Topic> toDel = [];
+
+    for (var e in _nodes.entries) {
+      if (!e.value.hasListener && !e.value.hasHandler) {
+        toDel.add(e.key);
+      }
+    }
+    for (var e in toDel) {
+      _cancelStreamInNode(e);
+    }
+  }
+}
+
+class EventModelBusController extends EventBusController {
+  EventModelBusController({required super.name, super.addToMaster, super.onCall, super.onEvent});
+
+  @override
+  bool _send(EventDTO event) {
+    if (!_nodes.containsKey(event.topic)) {
+      _nodes[event.topic] = _EventNode(event.topic, null, this, onCancel: _cancelStreamInNode);
+    }
+    return super._send(event);
+  }
+
+  @override
+  void _cancelStreamInNode(Topic topic) {
+    // TODO: implement _cancelStreamInNode
+    // super._cancelStreamInNode(topic);
   }
 
   @override
   void clearNotUseListeners() {
+    // TODO: implement clearNotUseListeners
     // super.clearNotUseListeners();
   }
 }

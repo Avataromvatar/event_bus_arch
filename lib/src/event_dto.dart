@@ -1,51 +1,100 @@
-import 'package:event_bus_arch/event_bus_arch.dart';
-import 'package:uuid/uuid.dart';
+part of event_arch;
+// / import 'package:event_bus_arch/event_bus_arch.dart';
+// import 'package:event_bus_arch/src/command.dart';
+// import 'package:event_bus_arch/src/topic.dart';
 
-// abstract class Command<T> {
-//   String get topic;
+// abstract class EventData<T> {
+//   Topic get topic;
 //   T get data;
-//   Function
-//   void execute({T newData});
-//   factory Command() {}
 // }
 
 abstract class EventDTO<T> {
-  String get topic;
-  T get data;
-  String? get uuid;
-  EventDTO<T> copy({String? topic, T? data, String? uuid});
-  factory EventDTO(String topic, T data, {String? uuid}) {
-    return BasicEventDTO<T>(topic, data, uuid);
-  }
-  factory EventDTO.fromType(
-    Type type,
-    T data, {
-    String? prefix,
-    String? name,
-    String? uuid,
+  Topic get topic;
+  T? get data;
+  // List<Topic> get route;
+  static EventDTO<T> copy<T>(
+    EventDTO<T> event, {
+    Topic? topic,
+    T? newData,
+    /*List<Topic>? route*/
   }) {
-    return BasicEventDTO<T>(EventBus.topicCreate(type, eventName: name, prefix: prefix), data, uuid ?? Uuid().v1());
+    return EventDTO<T>(topic ?? event.topic, newData ?? event.data);
+  }
+
+  static Command<T> createCommand<T>(EventDTO<T> dto, {Executor<T>? executor, EventBus? eventBus}) {
+    return Command<T>(dto.topic, data: dto.data, executorBinded: executor, eventBusBinded: eventBus);
+  }
+
+  // link new event and parent event
+  // EventDTO<R> next<R>(
+  //   Topic topic,
+  //   R data,
+  // ) {
+
+  // }
+
+  static EventDTO<T> create<T>(T data, {String? target, String? path, Map<String, String>? arguments, String? fragment
+
+      //List<Topic>? route,
+      }) {
+    return EventDTO.fromType(T..runtimeType, data,
+        target: target,
+        path: path,
+        /* route: route*/
+        fragment: fragment,
+        arguments: arguments);
+  }
+
+  factory EventDTO(
+    Topic topic,
+    T? data,
+  ) {
+    return EventDTOImpl<T>(
+      topic,
+      data, /* route*/
+    );
+  }
+  factory EventDTO.fromType(Type type, T data,
+      {String? target, String? path, Map<String, String>? arguments, String? fragment
+      //List<Topic>? route,
+      }) {
+    return EventDTOImpl<T>(
+      Topic.fromParametr(type: type, target: target, path: path, fragment: fragment, arguments: arguments),
+      data, /*route*/
+    );
   }
 }
 
-class BasicEventDTO<T> implements EventDTO<T> {
-  @override
-  String topic;
-  @override
-  T data;
-  @override
-  String? uuid;
-  BasicEventDTO(this.topic, this.data, this.uuid);
-  @override
-  EventDTO<T> copy({String? topic, T? data, String? uuid}) {
-    return BasicEventDTO(topic ?? this.topic, data ?? this.data, uuid ?? this.uuid);
-  }
+class ChainEventDTO<T> extends EventDTOImpl<T> {
+  ChainEventDTO(super.topic, super.data);
 }
 
-// class EventDTOCommand<T> extends BasicEventDTO<T> implements Command<T> {
-//   EventDTOCommand(super.topic,super.data,)
-//   @override
-//   void execute({T newData}) {
-//     // TODO: implement execute
-//   }
-// }
+class EventDTOImpl<T> implements EventDTO<T> {
+  @override
+  Topic topic;
+  @override
+  T? data;
+  // @override
+  // List<Topic>? route;
+  EventDTOImpl(
+    this.topic,
+    this.data,
+    /* this.route*/
+  );
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+
+    return other is EventDTOImpl<T> && other.topic == topic && other.data == data;
+  }
+
+  @override
+  int get hashCode => Object.hashAll([topic, data]);
+
+  @override
+  String toString() {
+    // TODO: implement toString
+    return '$topic  Data:$data';
+  }
+}

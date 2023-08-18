@@ -1,3 +1,8 @@
+## To V2
+-  change string topic to object Topic
+-  event with prefix and without prefix
+-  Event -> Command
+
 This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events.  
 ## Simple Usage 
 ![simply_usage](event_bus_arch.drawio.png)
@@ -97,3 +102,5 @@ catch (e)
       print(e);
 }
 ```
+
+

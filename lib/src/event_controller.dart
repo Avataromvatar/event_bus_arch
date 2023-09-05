@@ -7,14 +7,14 @@ typedef OnConnectionEventHandler = EventDTO Function(eEventBusConnection dir, Ev
 abstract class EventBusConnector {
   // eEventBusConnection get callConnectedType;
   eEventBusConnection get sendConnectedType;
-  EventBus get source;
-  EventBus get target;
+  EventBusStream get source;
+  EventBusStream get target;
   OnConnectionEventHandler? onEvent;
   // OnConnectionEventHandler? onCall;
   void dispose();
   factory EventBusConnector({
-    required EventBus source,
-    required EventBus target,
+    required EventBusStream source,
+    required EventBusStream target,
     // eEventBusConnection callConnectedType = eEventBusConnection.none,
     eEventBusConnection sendConnectedType = eEventBusConnection.bidirectional,
     OnConnectionEventHandler? onEvent,
@@ -32,9 +32,9 @@ abstract class EventBusConnector {
 
 class EventBusConnectorImpl implements EventBusConnector {
   @override
-  final EventBus source;
+  final EventBusStream source;
   @override
-  final EventBus target;
+  final EventBusStream target;
   @override
   // final eEventBusConnection callConnectedType;
   @override

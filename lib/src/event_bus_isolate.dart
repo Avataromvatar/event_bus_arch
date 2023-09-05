@@ -45,7 +45,7 @@ class EventBusIsolate implements EventBusStream {
 
   void _init() async {
     _receivePort = ReceivePort();
-    _isolate = await Isolate.spawn(_worker, _receivePort!.sendPort);
+    _isolate = await Isolate.spawn<SendPort>(_worker, _receivePort!.sendPort);
     _toEBSender = await _receivePort!.first;
     //from isolate eb to stream eb
     _receivePort!.listen((message) {

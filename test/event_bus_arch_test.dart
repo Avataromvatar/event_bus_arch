@@ -6,12 +6,12 @@ void main() async {
     'bus',
   );
 
-  bus.allCallStream.listen(
+  bus.streamCall.listen(
     (e) async {
       print('bus call: ${e.$1} return ${e.$2}');
     },
   );
-  bus.allSendStream.listen(
+  bus.streamSend.listen(
     (e) async {
       print('bus send: $e ');
     },

@@ -1,5 +1,82 @@
 part of event_arch;
 
+enum eEventBusConnection { sourceToTarget, targetToSource, bidirectional, none }
+
+typedef OnConnectionEventHandler = EventDTO Function(eEventBusConnection dir, EventDTO event);
+
+abstract class EventBusConnector {
+  // eEventBusConnection get callConnectedType;
+  eEventBusConnection get sendConnectedType;
+  EventBus get source;
+  EventBus get target;
+  OnConnectionEventHandler? onEvent;
+  // OnConnectionEventHandler? onCall;
+  void dispose();
+  factory EventBusConnector({
+    required EventBus source,
+    required EventBus target,
+    // eEventBusConnection callConnectedType = eEventBusConnection.none,
+    eEventBusConnection sendConnectedType = eEventBusConnection.bidirectional,
+    OnConnectionEventHandler? onEvent,
+    // OnConnectionEventHandler? onCall
+  }) {
+    return EventBusConnectorImpl(
+        source: source,
+        target: target,
+        // callConnectedType: callConnectedType,
+        sendConnectedType: sendConnectedType,
+        // onCall: onCall,
+        onEvent: onEvent);
+  }
+}
+
+class EventBusConnectorImpl implements EventBusConnector {
+  @override
+  final EventBus source;
+  @override
+  final EventBus target;
+  @override
+  // final eEventBusConnection callConnectedType;
+  @override
+  final eEventBusConnection sendConnectedType;
+  @override
+  // OnConnectionEventHandler? onCall;
+  @override
+  OnConnectionEventHandler? onEvent;
+  // final StreamController<EventDTO> _callSource = StreamController.broadcast();
+  // final StreamController<EventDTO> _callTarget = StreamController.broadcast();
+  final StreamController<EventDTO> _sendSource = StreamController.broadcast();
+  final StreamController<EventDTO> _sendTarget = StreamController.broadcast();
+  StreamSubscription? _streamSubscriptionSource;
+  StreamSubscription? _streamSubscriptionTarget;
+  EventBusConnectorImpl(
+      {required this.source,
+      required this.target,
+      // this.callConnectedType = eEventBusConnection.none,
+      this.sendConnectedType = eEventBusConnection.bidirectional,
+      // this.onCall,
+      this.onEvent}) {
+    if (sendConnectedType == eEventBusConnection.bidirectional ||
+        sendConnectedType == eEventBusConnection.sourceToTarget) {
+      _streamSubscriptionSource = source.streamSend.listen((event) {
+        target.sinkToSend.add(event);
+      });
+    }
+    if (sendConnectedType == eEventBusConnection.bidirectional ||
+        sendConnectedType == eEventBusConnection.targetToSource) {
+      _streamSubscriptionTarget = target.streamSend.listen((event) {
+        source.sinkToSend.add(event);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _streamSubscriptionSource?.cancel();
+    _streamSubscriptionTarget?.cancel();
+  }
+}
+
 abstract class EventBusHandler {
   Command<T> addHandler<T>(
     Executor<T> handler, {
@@ -15,11 +92,24 @@ abstract class EventBusHandler {
   // void disconnect(EventBusHandlersGroup externHandlers);
 }
 
+abstract class EventBusStream {
+  ///all event what send to bus.
+  Stream<EventDTO> get streamSend;
+
+  /// This stream is handler return
+  /// $1 event and $2 result after call
+  Stream<(EventDTO, dynamic)> get streamCall;
+
+  ///Event that sended to sinkToSend not throw to streamSend
+  Sink<EventDTO> get sinkToSend;
+  Sink<EventDTO> get sinkToCall;
+}
+
 ///CHAIN: if event handler(executer) return ChainEventDTO this ChainEventDTO or List< ChainEventDTO> will be sended in bus
 ///Chain completed if EventDTO have not handler or handler return not ChainEventDTO
 ///Chain work only for send
 
-abstract class EventBus {
+abstract class EventBus implements EventBusStream {
   /// name use for Topic target
   /// if Topic.target == 'all' this broadcast event
   String get name;
@@ -93,12 +183,6 @@ abstract class EventBus {
   ///value = last event
   Map<Topic, dynamic> lastEventAll();
   List<Topic> getAllTopic();
-
-  ///$1 event and $2 result after call
-  Stream<(EventDTO, dynamic)> get allCallStream;
-  Stream<EventDTO> get allSendStream;
-  // Future<void> Function(EventDTO event)? onEvent;
-  // Future<void> Function(EventDTO event, dynamic result)? onCall;
 
   factory EventBus(
     String name, {
@@ -231,11 +315,25 @@ class _EventNode<T> {
 }
 
 class EventBusController implements EventBus, EventBusHandler {
-  final StreamController<(EventDTO, dynamic)> _allCallStream = StreamController.broadcast();
-  final StreamController<EventDTO> _allSendStream = StreamController.broadcast();
-  Stream<(EventDTO, dynamic)> get allCallStream => _allCallStream.stream;
-  Stream<EventDTO> get allSendStream => _allSendStream.stream;
+  final StreamController<(EventDTO, dynamic)> _callStreamController = StreamController.broadcast();
+  final StreamController<EventDTO> _sendStreamController = StreamController.broadcast();
+  final StreamController<EventDTO> _callSinkController = StreamController.broadcast();
+  final StreamController<EventDTO> _sendSinkController = StreamController.broadcast();
+  @override
+  // TODO: implement sinkToCall
+  Sink<EventDTO> get sinkToCall => _callSinkController.sink;
 
+  @override
+  // TODO: implement sinkToSend
+  Sink<EventDTO> get sinkToSend => throw _sendSinkController.sink;
+
+  @override
+  // TODO: implement streamCall
+  Stream<(EventDTO, dynamic)> get streamCall => _callStreamController.stream;
+
+  @override
+  // TODO: implement streamSend
+  Stream<EventDTO> get streamSend => _sendStreamController.stream;
   @override
   // TODO: implement name
   final String name;
@@ -247,6 +345,12 @@ class EventBusController implements EventBus, EventBusHandler {
     if (addToMaster) {
       EventBusMaster.instance.add(this);
     }
+    _callSinkController.stream.listen((event) {
+      _call(event.topic, event.data);
+    });
+    _sendSinkController.stream.listen((event) {
+      _send(event, noSendToStream: true);
+    });
   }
 
   void _cancelStreamInNode(Topic topic) {
@@ -280,7 +384,7 @@ class EventBusController implements EventBus, EventBusHandler {
       if (n.hasHandler) {
         var e = EventDTO<T>(topic, data);
         var ret = await n.execute(e);
-        _allCallStream.add((e, ret));
+        _callStreamController.add((e, ret));
 
         //CHAIN CALL
         if (ret is ChainEventDTO) {
@@ -429,11 +533,13 @@ class EventBusController implements EventBus, EventBusHandler {
     return r;
   }
 
-  bool _send(EventDTO event) {
+  bool _send(EventDTO event, {bool noSendToStream = false}) {
     var node = _nodes[event.topic];
     if (node != null) {
       if (node.hasListener || node.hasHandler) {
-        _allSendStream.add(event);
+        if (!noSendToStream) {
+          _sendStreamController.add(event);
+        }
 
         var ret = node.execute(event);
         //CHAIN CALL
@@ -531,11 +637,11 @@ class EventModelBusController extends EventBusController {
   EventModelBusController({required super.name, super.addToMaster});
 
   @override
-  bool _send(EventDTO event) {
+  bool _send(EventDTO event, {bool noSendToStream = false}) {
     if (!_nodes.containsKey(event.topic)) {
       _nodes[event.topic] = _EventNode(event.topic, null, this, onCancel: _cancelStreamInNode);
     }
-    return super._send(event);
+    return super._send(event, noSendToStream: noSendToStream);
   }
 
   @override

@@ -30,9 +30,12 @@ class EventBusMaster implements IEventBusMaster {
   EventBus? getEventBus(String name, {Type? type}) {
     for (var i = 0; i < _list.length; i++) {
       if (_list[i].name == name) {
-        if (type == _list[i].runtimeType) {
-          return _list[i];
+        if (type != null) {
+          if (type == _list[i].runtimeType) {
+            return _list[i];
+          }
         }
+        return _list[i];
       }
     }
     return null;

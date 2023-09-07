@@ -1,6 +1,7 @@
 library event_arch;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:isolate';
 
 import 'package:async/async.dart';

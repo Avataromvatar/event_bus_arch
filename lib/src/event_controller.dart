@@ -59,13 +59,13 @@ class EventBusConnectorImpl implements EventBusConnector {
     if (sendConnectedType == eEventBusConnection.bidirectional ||
         sendConnectedType == eEventBusConnection.sourceToTarget) {
       _streamSubscriptionSource = source.streamSend.listen((event) {
-        target.sinkToSend.add(event);
+        target.sinkToSend.add(onEvent?.call(eEventBusConnection.sourceToTarget, event) ?? event);
       });
     }
     if (sendConnectedType == eEventBusConnection.bidirectional ||
         sendConnectedType == eEventBusConnection.targetToSource) {
       _streamSubscriptionTarget = target.streamSend.listen((event) {
-        source.sinkToSend.add(event);
+        source.sinkToSend.add(onEvent?.call(eEventBusConnection.targetToSource, event) ?? event);
       });
     }
   }
@@ -375,7 +375,7 @@ class EventBusController implements EventBus, EventBusHandler {
   void removeHandler<T>({String? path, String? target}) {
     var t = Topic.create<T>(path: path, target: target);
     _nodes[t]?.dispose();
-    _nodes.remove(t.topic);
+    _nodes.remove(t);
   }
 
   Future _call<T>(Topic topic, T? data) async {
@@ -439,7 +439,7 @@ class EventBusController implements EventBus, EventBusHandler {
 
   @override
   bool contain(Topic topic) {
-    return _nodes.containsKey(topic.topic);
+    return _nodes.containsKey(topic);
   }
 
   @override
@@ -450,14 +450,14 @@ class EventBusController implements EventBus, EventBusHandler {
   @override
   T? lastData<T>({String? path, String? target}) {
     var t = Topic.create<T>(path: path, target: target);
-    return _nodes[t.topic]?.lastEvent?.data;
+    return _nodes[t]?.lastEvent?.data;
   }
 
   @override
   EventDTO<T>? lastEvent<T>(Topic topic) {
-    var r = _nodes[topic.topic]?.lastEvent;
+    var r = _nodes[topic]?.lastEvent;
     if (r != null) {
-      return _nodes[topic.topic]?.lastEvent as EventDTO<T>;
+      return _nodes[topic]?.lastEvent as EventDTO<T>;
     } else {
       return null;
     }
@@ -471,7 +471,7 @@ class EventBusController implements EventBus, EventBusHandler {
   @override
   Stream<T>? listen<T>({String? path, String? target}) {
     var t = Topic.create<T>(path: path, target: target);
-    var node = _nodes[t.topic];
+    var node = _nodes[t];
     if (node == null) {
       node = _EventNode(t, null, this, onCancel: _cancelStreamInNode);
       _nodes[t] = node;
@@ -484,7 +484,7 @@ class EventBusController implements EventBus, EventBusHandler {
     List<Stream<EventDTO>> s = [];
     _EventNode? tmp;
     for (var element in topics) {
-      tmp = _nodes[element.topic];
+      tmp = _nodes[element];
       if (tmp != null) {
         s.add(tmp.stream);
       }
@@ -496,7 +496,7 @@ class EventBusController implements EventBus, EventBusHandler {
   Stream<EventDTO<T>>? listenEvent<T>({EventDTO<T>? event, Topic? topic}) {
     assert(event != null || topic != null);
     var t = event?.topic ?? topic;
-    var n = _nodes[t!.topic];
+    var n = _nodes[t];
     if (n != null) {
       return n.stream as Stream<EventDTO<T>>;
     }
@@ -639,7 +639,8 @@ class EventModelBusController extends EventBusController {
   @override
   bool _send(EventDTO event, {bool noSendToStream = false}) {
     if (!_nodes.containsKey(event.topic)) {
-      _nodes[event.topic] = _EventNode(event.topic, null, this, onCancel: _cancelStreamInNode);
+      _nodes[event.topic] =
+          _EventNode(event.topic, (topic, {data, oldData}) async {}, this, onCancel: _cancelStreamInNode);
     }
     return super._send(event, noSendToStream: noSendToStream);
   }

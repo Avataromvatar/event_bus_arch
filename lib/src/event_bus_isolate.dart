@@ -8,24 +8,24 @@ class _CallEventDTO extends EventDTOImpl {
   _CallEventDTO(super.topic, super.data);
 }
 
-class EventBusIsolate implements EventBusStream {
-  final StreamController<EventDTO> _toEBStreamController = StreamController.broadcast();
-  final StreamController<EventDTO> _fromEBStreamController = StreamController.broadcast();
-  @override
-  // TODO: implement sinkToCall
-  Sink<EventDTO> get sinkToCall => throw UnimplementedError();
+class EventBusIsolate extends EventBusController {
+  // final StreamController<EventDTO> _toEBStreamController = StreamController.broadcast();
+  // final StreamController<EventDTO> _fromEBStreamController = StreamController.broadcast();
+  // @override
+  // // TODO: implement sinkToCall
+  // Sink<EventDTO> get sinkToCall => throw UnimplementedError();
 
-  @override
-  // TODO: implement sinkToSend
-  Sink<EventDTO> get sinkToSend => _toEBStreamController.sink;
+  // @override
+  // // TODO: implement sinkToSend
+  // Sink<EventDTO> get sinkToSend => _toEBStreamController.sink;
 
-  @override
-  // TODO: implement streamCall
-  Stream<(EventDTO, dynamic)> get streamCall => throw UnimplementedError();
+  // @override
+  // // TODO: implement streamCall
+  // Stream<(EventDTO, dynamic)> get streamCall => throw UnimplementedError();
 
-  @override
-  // TODO: implement streamSend
-  Stream<EventDTO> get streamSend => _fromEBStreamController.stream;
+  // @override
+  // // TODO: implement streamSend
+  // Stream<EventDTO> get streamSend => _fromEBStreamController.stream;
 
   ///this func call from other isolate
   EventBus Function() onInit;
@@ -33,7 +33,7 @@ class EventBusIsolate implements EventBusStream {
   SendPort? _toEBSender;
   ReceivePort? _receivePort;
   bool get isInit => _toEBSender != null;
-  EventBusIsolate({required this.onInit}) {
+  EventBusIsolate({required this.onInit, required super.name, super.addToMaster}) {
     _init();
   }
   void dispose() {
@@ -57,13 +57,25 @@ class EventBusIsolate implements EventBusStream {
         //call result TODO:
         print('get call result');
       } else if (message is EventDTO) {
-        _fromEBStreamController.add(message);
+        _sendStreamController.add(message);
       }
     });
     //from stream eb to isolate eb
-    _toEBStreamController.stream.listen((event) {
+    _sendSinkController.stream.listen((event) {
       _toEBSender!.send(event);
     });
+  }
+
+  @override
+  Future _call<T>(Topic topic, T? data) async {
+    throw EventBusException('Isolate EventBus $name dont support call');
+  }
+
+  @override
+  bool _send(EventDTO event, {bool noSendToStream = false}) {
+    _sendStreamController.add(event);
+
+    return true;
   }
 }
 

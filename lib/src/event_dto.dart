@@ -81,7 +81,14 @@ class EventDTOImpl<T> implements EventDTO<T> {
     this.data,
     /* this.route*/
   );
-
+  factory EventDTOImpl.fromJson(
+    Map<String, dynamic> json,
+    T? Function(dynamic data) dataFromJson, {
+    T? data,
+  }) {
+    var d = json['data'];
+    return EventDTOImpl(Topic.parse(json['topic']), d != null ? dataFromJson(json['data']) : null);
+  }
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -94,7 +101,13 @@ class EventDTOImpl<T> implements EventDTO<T> {
 
   @override
   String toString() {
-    // TODO: implement toString
-    return '$topic  Data:$data';
+    return jsonEncode(toJson());
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'topic': topic.fullTopic,
+      'data': data != null ? jsonEncode(data) : null,
+    };
   }
 }

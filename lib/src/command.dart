@@ -30,12 +30,45 @@ abstract class Command<T> implements EventDTO<T> {
     return CommandImpl(topic,
         data: data, eventBusBinded: eventBusBinded, executorBinded: executorBinded, undoOn: undoOn);
   }
+  Map<String, dynamic> toJson();
+  factory Command.fromMap(
+    Map<String, dynamic> json,
+    T? Function(dynamic data) dataFromJson, {
+    bool? undoOn,
+    int? maxLenUndo,
+    T? data,
+    EventBus? eventBusBinded,
+    Executor? executorBinded,
+  }) {
+    return CommandImpl.fromJson(json, dataFromJson,
+        undoOn: undoOn,
+        data: data,
+        eventBusBinded: eventBusBinded,
+        executorBinded: executorBinded,
+        maxLenUndo: maxLenUndo);
+  }
 }
 
 class CommandImpl<T> implements Command<T> {
   final int maxLenUndo;
   CommandImpl(this.topic,
       {this.data, this.eventBusBinded, this.executorBinded, this.undoOn = true, this.maxLenUndo = 10});
+  factory CommandImpl.fromJson(
+    Map<String, dynamic> json,
+    T? Function(dynamic data) dataFromJson, {
+    bool? undoOn,
+    int? maxLenUndo,
+    T? data,
+    EventBus? eventBusBinded,
+    Executor? executorBinded,
+  }) {
+    var d = json['data'];
+
+    return CommandImpl(Topic.parse(json['topic']),
+        data: data ?? (d != null ? dataFromJson(d) : null),
+        maxLenUndo: maxLenUndo ?? json['maxLenUndo'] ?? 10,
+        undoOn: undoOn ?? json['undoOn'] ?? true);
+  }
   @override
   final Executor<T>? executorBinded;
 
@@ -120,7 +153,15 @@ class CommandImpl<T> implements Command<T> {
 
   @override
   String toString() {
-    // TODO: implement toString
-    return '$topic  Data:$data';
+    return jsonEncode(toJson());
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'topic': topic.fullTopic,
+      'data': data != null ? jsonEncode(data) : null,
+      'maxLenUndo': maxLenUndo,
+      'undoOn': undoOn,
+    };
   }
 }

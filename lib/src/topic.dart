@@ -113,7 +113,7 @@ class EventTopicImpl implements Topic {
   }
 
   String _getTopic({bool needFragment = false}) {
-    return '${_uri.scheme}://${target ?? _targetDefault}.$type/$path${needFragment ? '#$fragment' : ''}';
+    return '${_uri.scheme}://${target ?? _targetDefault}.$type$path${needFragment ? '#$fragment' : ''}';
   }
 
   @override

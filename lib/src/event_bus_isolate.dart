@@ -8,7 +8,7 @@ class _CallEventDTO extends EventDTOImpl {
   _CallEventDTO(super.topic, super.data);
 }
 
-class EventBusIsolate extends EventBusController {
+class EventBusIsolate extends EventBusImpl {
   // final StreamController<EventDTO> _toEBStreamController = StreamController.broadcast();
   // final StreamController<EventDTO> _fromEBStreamController = StreamController.broadcast();
   // @override
@@ -57,25 +57,13 @@ class EventBusIsolate extends EventBusController {
         //call result TODO:
         print('get call result');
       } else if (message is EventDTO) {
-        _sendStreamController.add(message);
+        sink.add(message);
       }
     });
     //from stream eb to isolate eb
-    _sendSinkController.stream.listen((event) {
+    stream.listen((event) {
       _toEBSender!.send(event);
     });
-  }
-
-  @override
-  Future _call<T>(Topic topic, T? data) async {
-    throw EventBusException('Isolate EventBus $name dont support call');
-  }
-
-  @override
-  bool _send(EventDTO event, {bool noSendToStream = false}) {
-    _sendStreamController.add(event);
-
-    return true;
   }
 }
 
@@ -87,23 +75,24 @@ void _worker(dynamic data) async {
   sendPort.send(innerReceivePort.sendPort);
   var eventBus = onInit();
 
-  var listenerSend = eventBus.streamSend.listen((event) {
+  var listenerSend = eventBus.stream.listen((event) {
     sendPort.send(event);
   });
-  var listenerCall = eventBus.streamCall.listen((event) {
-    sendPort.send(event);
-  });
+  // var listenerCall = eventBus.streamCall.listen((event) {
+  //   sendPort.send(event);
+  // });
 
   await for (var message in innerReceivePort) {
     // if (message is _CallEventDTO) {
+    // if (message is EventDTO) {
+    //   eventBus.sinkToCall.add(message);
+    // } else
     if (message is EventDTO) {
-      eventBus.sinkToCall.add(message);
-    } else if (message is EventDTO) {
       //if (message is _SendEventDTO) {
-      eventBus.sinkToSend.add(message);
+      eventBus.sink.add(message);
     }
   }
   listenerSend.cancel();
-  listenerCall.cancel();
+  //listenerCall.cancel();
   innerReceivePort.close();
 }

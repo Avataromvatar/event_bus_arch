@@ -11,6 +11,17 @@ part of event_arch;
 abstract class EventDTO<T> {
   Topic get topic;
   T? get data;
+  //--------
+  ///all bus save self name in this field for check many resend for EventBusStream.
+  ///when send(event)  traversedPath clear
+  List<String> get traversedPath;
+  void clearTraversedPath();
+
+  bool checkTraversedPath(String name);
+
+  void addTraversedPath(String name);
+
+  //---------
   // List<Topic> get route;
   static EventDTO<T> copy<T>(
     EventDTO<T> event, {
@@ -18,12 +29,12 @@ abstract class EventDTO<T> {
     T? newData,
     /*List<Topic>? route*/
   }) {
-    return EventDTO<T>(topic ?? event.topic, newData ?? event.data);
+    return EventDTO<T>(topic: topic ?? event.topic, data: newData ?? event.data);
   }
 
-  static Command<T> createCommand<T>(EventDTO<T> dto, {Executor<T>? executor, EventBus? eventBus}) {
-    return Command<T>(dto.topic, data: dto.data, executorBinded: executor, eventBusBinded: eventBus);
-  }
+  // static Command<T> createCommand<T>(EventDTO<T> dto, {Executor<T>? executor, EventBus? eventBus}) {
+  //   return Command<T>(dto.topic, data: dto.data, executorBinded: executor, eventBusBinded: eventBus);
+  // }
 
   // link new event and parent event
   // EventDTO<R> next<R>(
@@ -37,7 +48,8 @@ abstract class EventDTO<T> {
 
       //List<Topic>? route,
       }) {
-    return EventDTO.fromType(T..runtimeType, data,
+    return EventDTO<T>(
+        data: data,
         target: target,
         path: path,
         /* route: route*/
@@ -45,35 +57,49 @@ abstract class EventDTO<T> {
         arguments: arguments);
   }
 
-  factory EventDTO(
-    Topic topic,
+// factory EventDTO(
+//     Topic topic,
+//     T? data,
+//   ) {
+//     return EventDTOImpl<T>(
+//       topic,
+//       data, /* route*/
+//     );
+//   }
+  factory EventDTO({
+    Topic? topic,
+    String? target,
+    String? path,
+    Map<String, String>? arguments,
+    String? fragment,
     T? data,
-  ) {
+  }) {
     return EventDTOImpl<T>(
-      topic,
+      topic ?? Topic.create<T>(target: target, path: path, fragment: fragment, arguments: arguments),
       data, /* route*/
     );
   }
-  factory EventDTO.fromType(Type type, T data,
-      {String? target, String? path, Map<String, String>? arguments, String? fragment
-      //List<Topic>? route,
-      }) {
-    return EventDTOImpl<T>(
-      Topic.fromParametr(type: type, target: target, path: path, fragment: fragment, arguments: arguments),
-      data, /*route*/
-    );
-  }
+  // factory EventDTO.fromType(Type type, T data,
+  //     {String? target, String? path, Map<String, String>? arguments, String? fragment
+  //     //List<Topic>? route,
+  //     }) {
+  //   return EventDTOImpl<T>(
+  //     Topic.fromParametr(type: type, target: target, path: path, fragment: fragment, arguments: arguments),
+  //     data, /*route*/
+  //   );
+  // }
 }
 
-class ChainEventDTO<T> extends EventDTOImpl<T> {
-  ChainEventDTO(super.topic, super.data);
-}
+// class ChainEventDTO<T> extends EventDTOImpl<T> {
+//   ChainEventDTO(super.topic, super.data);
+// }
 
 class EventDTOImpl<T> implements EventDTO<T> {
   @override
   Topic topic;
   @override
   T? data;
+  List<String> traversedPath = [];
   // @override
   // List<Topic>? route;
   EventDTOImpl(
@@ -94,6 +120,18 @@ class EventDTOImpl<T> implements EventDTO<T> {
     if (identical(this, other)) return true;
 
     return other is EventDTOImpl<T> && other.topic == topic && other.data == data;
+  }
+
+  void clearTraversedPath() {
+    traversedPath.clear();
+  }
+
+  bool checkTraversedPath(String name) {
+    return traversedPath.contains(name);
+  }
+
+  void addTraversedPath(String name) {
+    traversedPath.add(name);
   }
 
   @override

@@ -2,7 +2,7 @@ part of event_arch;
 
 // typedef EventHandler<T> = Future<dynamic> Function(Topic topic, {T? data, T? oldData});
 ///
-typedef EventHandler<T, E> = Stream Function(EventDTO<T>, {E? env, T? oldData});
+typedef EventHandler<T> = Stream Function(EventDTO<T>, {dynamic env, T? oldData});
 
 enum eEventBusConnection { sourceToTarget, targetToSource, bidirectional, none }
 
@@ -103,7 +103,7 @@ abstract class Event<T> {
   bool sendEvent({T? data});
 }
 
-abstract class EventNode<T, E> implements Event<T> {
+abstract class EventNode<T> implements Event<T> {
   @override
   Topic get topic;
   EventBus get bus;
@@ -112,7 +112,7 @@ abstract class EventNode<T, E> implements Event<T> {
   bool get hasHandler;
   EventDTO<T>? get lastEvent;
   T? get lastData;
-  E? get environment;
+  dynamic get environment;
   Stream<EventDTO<T>> get streamEvent;
   // Sink<EventDTO<T>> get sink;
   //
@@ -129,19 +129,26 @@ abstract class EventNode<T, E> implements Event<T> {
   factory EventNode(
       {required EventBus bus,
       required Topic topic,
-      E? environment,
+      dynamic environment,
+      EventHandler<T>? handler,
       Function(EventNode node)? onCancel,
       EventDTO<T>? initalEvent}) {
-    return EventNodeImpl(bus: bus, topic: topic, onCancel: onCancel, initalEvent: initalEvent);
+    return EventNodeImpl(
+        bus: bus,
+        topic: topic,
+        environment: environment,
+        handler: handler,
+        onCancel: onCancel,
+        initalEvent: initalEvent);
   }
 }
 
-class EventNodeImpl<T, E> implements EventNode<T, E> {
+class EventNodeImpl<T> implements EventNode<T> {
   //-----public
   @override
   final Topic topic;
   @override
-  final E? environment;
+  final dynamic environment;
   @override
   final EventBus bus;
   @override
@@ -168,9 +175,16 @@ class EventNodeImpl<T, E> implements EventNode<T, E> {
   EventDTO<T>? _lastEvent;
 
   late final StreamController<EventDTO<T>> _streamController;
-  EventHandler<T, E>? _handler;
+  EventHandler<T>? _handler;
 //------ construct
-  EventNodeImpl({required this.bus, required this.topic, this.environment, this.onCancel, EventDTO<T>? initalEvent}) {
+  EventNodeImpl(
+      {required this.bus,
+      required this.topic,
+      EventHandler<T>? handler,
+      this.environment,
+      this.onCancel,
+      EventDTO<T>? initalEvent}) {
+    _handler = handler;
     if (initalEvent != null) {
       _lastEvent = initalEvent;
     }
@@ -218,7 +232,7 @@ class EventNodeImpl<T, E> implements EventNode<T, E> {
     if (_isDispose) {
       throw EventBusException('Topic:$topic is dispose');
     }
-    if (!hasHandler || !hasListener) {
+    if (!hasHandler && !hasListener) {
       return false;
     }
 
@@ -266,23 +280,27 @@ class EventNodeImpl<T, E> implements EventNode<T, E> {
   Future<void> dispose() async {
     if (!_isDispose) {
       _isDispose = true;
-      onCancel?.call(this);
+      // onCancel?.call(this);
       await _streamController.close();
     }
   }
 }
 
 abstract class EventBusHandler {
-  ///if addCommonNode set in bus will be preset 2 EventNode with target=_targetDefault and target = EventBus.name
-  Future<Event<T>> addHandler<T, E>(
-      {E? env,
-      EventHandler<T, E>? handler,
+  ///if the event node is already present, then its handler will be redefined, and the hideFromBroadcastingEvent flag will also be applied again
+  ///
+  ///if hideFromBroadcastingEvent set common node(target == all) not create
+  Future<Event<T>> addHandler<T>(
+      {dynamic env,
+      EventHandler<T>? handler,
       String? path,
       EventDTO<T>? initalEvent,
       bool hideFromBroadcastingEvent = false});
+  //remove common(target == all) and target node
   Future<bool> removeHandler<T>({
     String? path,
   });
+  static Stream<dynamic> emptyHandler<T, E>(EventDTO<T> event, {E? env, T? oldData}) async* {}
 }
 
 abstract class EventBusStream {
@@ -305,6 +323,16 @@ abstract class EventBus implements EventBusStream, EventBusHandler {
 
   ///check if there is a listener on the bus
   bool contain(Topic topic);
+
+  ///choose one from: event or [topic and data?] or [data?,target?,fragment?,target?,arguments? ]
+  Event<T>? getEvent<T>(
+      {Topic? topic,
+      T? data,
+      String? path,
+      String? fragment,
+      String? target,
+      Map<String, String>? arguments,
+      EventDTO<T>? event});
 
   ///choose one from: event or [topic and data?] or [data?,target?,fragment?,target?,arguments? ]
   ///if data ==null and EventNode not have lastData return false.
@@ -365,6 +393,9 @@ abstract class EventBus implements EventBusStream, EventBusHandler {
   //   String? path,
   //   String? target,
   // });
+  factory EventBus({required String name, bool isModelBus = false, bool addToMaster = true}) {
+    return EventBusImpl(name: name, isModelBus: isModelBus, addToMaster: addToMaster);
+  }
 }
 
 class EventBusImpl implements EventBus {
@@ -395,18 +426,31 @@ class EventBusImpl implements EventBus {
   void _onCancelNode(EventNode node) async {
     if (!isModelBus) {
       if (!node.hasHandler) {
-        await node.dispose();
+        // await node.dispose();
+
         //TODO: check delete
         removeHandler(topic: node.topic);
       }
     }
   }
 
-  EventNode<T, dynamic> _createNode<T>(
+  EventNode<T>? _getNode<T>(Topic topic) {
+    if (topic.target == _targetDefault) {
+      var node = _map[topic] ?? _map[topic.copy(target: name)];
+
+      return node != null ? node as EventNode<T> : null;
+    } else {
+      var node = _map[topic];
+      return node != null ? node as EventNode<T> : null;
+    }
+  }
+
+  EventNode<T> _createNode<T>(
     Topic topic, {
     bool hideFromBroadcastingEvent = false,
   }) {
-    var node = EventNode<T, dynamic>(bus: this, topic: topic, onCancel: _onCancelNode);
+    var node = EventNode<T>(bus: this, topic: topic, onCancel: _onCancelNode);
+    if (topic.target != _targetDefault) {}
     _map[topic] = node;
     if (!hideFromBroadcastingEvent) {
       var topicCom = topic.copy(target: _targetDefault);
@@ -416,26 +460,41 @@ class EventBusImpl implements EventBus {
   }
 
   @override
-  Future<EventNode<T, E>> addHandler<T, E>(
-      {E? env,
-      EventHandler<T, E>? handler,
+  Future<EventNode<T>> addHandler<T>(
+      {dynamic env,
+      EventHandler<T>? handler,
       String? path,
       EventDTO<T>? initalEvent,
       bool hideFromBroadcastingEvent = false,
       Topic? topic}) async {
     var t = topic ?? Topic.create<T>(path: path, target: name);
     var topicCom = t.copy(target: _targetDefault);
-    if (_map.containsKey(topic)) {
-      await _map[t]!.dispose();
+    EventNode<T>? node;
+    if (_map.containsKey(t)) {
+      node = _map[t]! as EventNode<T>;
+      (node as EventNodeImpl<T>)._handler = handler;
     }
     if (_map.containsKey(topicCom)) {
-      await _map[topicCom]!.dispose();
+      if (!hideFromBroadcastingEvent) {
+        node = _map[topicCom]! as EventNode<T>;
+        (node as EventNodeImpl<T>)._handler = handler;
+      } else {
+        await _map[topicCom]!.dispose();
+        _map.remove(topicCom);
+      }
     }
-    var node =
-        EventNode<T, E>(bus: this, topic: t, environment: env, initalEvent: initalEvent, onCancel: _onCancelNode);
-    _map[t] = node;
-    if (!hideFromBroadcastingEvent) {
-      _map[topicCom] = node;
+    if (node == null) {
+      node = EventNode<T>(
+          bus: this,
+          topic: hideFromBroadcastingEvent ? t : topicCom,
+          handler: handler,
+          environment: env,
+          initalEvent: initalEvent,
+          onCancel: _onCancelNode);
+      _map[t] = node;
+      if (!hideFromBroadcastingEvent) {
+        _map[topicCom] = node;
+      }
     }
     return node;
   }
@@ -447,10 +506,12 @@ class EventBusImpl implements EventBus {
     var topicCom = t.copy(target: _targetDefault);
     if (_map.containsKey(topic)) {
       await _map[t]!.dispose();
+      _map.remove(t);
       isDel = true;
     }
     if (_map.containsKey(topicCom)) {
       await _map[topicCom]!.dispose();
+      _map.remove(t);
       isDel = true;
     }
     return isDel;
@@ -487,6 +548,19 @@ class EventBusImpl implements EventBus {
     }
   }
 
+  Event<T>? getEvent<T>(
+      {Topic? topic,
+      T? data,
+      String? path,
+      String? fragment,
+      String? target,
+      Map<String, String>? arguments,
+      EventDTO<T>? event}) {
+    Topic t = topic ??
+        (event?.topic ?? Topic.create<T>(path: path, fragment: fragment, target: target, arguments: arguments));
+    return _map[t]! as Event<T>;
+  }
+
   @override
   bool send<T>(
       {Topic? topic,
@@ -497,16 +571,17 @@ class EventBusImpl implements EventBus {
       Map<String, String>? arguments,
       EventDTO<T>? event,
       bool fromSink = false}) {
+    if (fromSink && (event?.checkTraversedPath(name) ?? false)) {
+      return false;
+    }
     Topic t = topic ??
         (event?.topic ?? Topic.create<T>(path: path, fragment: fragment, target: target, arguments: arguments));
 
     T? d = data ?? event?.data;
     var e = event ?? EventDTO(topic: t, data: d);
-    EventNode<dynamic, dynamic>? node;
+    EventNode<dynamic>? node;
     //block multisend event
-    if (fromSink && e.checkTraversedPath(name)) {
-      return false;
-    }
+
     if (!fromSink) {
       e.clearTraversedPath();
     }
@@ -568,7 +643,7 @@ class EventBusImpl implements EventBus {
     if (node == null) {
       node = _createNode<T>(t);
     }
-    return node.stream.map((event) => event.data);
+    return node.stream as Stream<T>;
   }
 
   @override

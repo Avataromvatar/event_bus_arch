@@ -122,8 +122,8 @@ class EventTopicImpl implements Topic {
         nameType: type,
         shema: shema ?? this.shema,
         target: target ?? this.target!,
-        fragment: fragment ?? this.fragment,
-        arguments: arguments ?? this.arguments,
+        fragment: fragment ?? (this.fragment.isEmpty ? null : this.fragment),
+        arguments: arguments ?? ((this.arguments?.isEmpty ?? true) ? null : this.arguments),
         path: path);
   }
 

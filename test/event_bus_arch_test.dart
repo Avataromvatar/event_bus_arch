@@ -16,7 +16,7 @@ void main() async {
 //   });
 //==== Inital section
   var oneBus = EventBus(name: 'one');
-  var eventStringOneBus = await oneBus.addHandler<String>(
+  var eventStringOneBus = oneBus.addHandler<String>(
     env: TestScope(prefix: 'OneBusScope'),
     handler: (p0, {env, oldData}) async* {
       env!.count++;

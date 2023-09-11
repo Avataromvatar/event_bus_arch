@@ -287,15 +287,16 @@ class EventNodeImpl<T> implements EventNode<T> {
 }
 
 abstract class EventBusHandler {
-  ///if the event node is already present, then its handler will be redefined, and the hideFromBroadcastingEvent flag will also be applied again
+  ///if the event node is already present, then its handler will be redefined
   ///
-  ///if hideFromBroadcastingEvent set common node(target == all) not create
-  Future<Event<T>> addHandler<T>(
+  ///if isCommonHandler set and topic==null? target = all : target = EventBus.name
+  EventNode<T> addHandler<T>(
       {dynamic env,
       EventHandler<T>? handler,
       String? path,
       EventDTO<T>? initalEvent,
-      bool hideFromBroadcastingEvent = false});
+      Topic? topic,
+      bool isCommonHandler = true});
   //remove common(target == all) and target node
   Future<bool> removeHandler<T>({
     String? path,
@@ -311,6 +312,10 @@ abstract class EventBusStream {
   Stream<EventDTO> get stream;
 }
 
+///event /  handler =>    all.int  t1.int   t2.int
+/// all.int                 +       +         +
+/// t1.int                  +       +         -
+/// t2.int                  +       -         +
 abstract class EventBus implements EventBusStream, EventBusHandler {
   /// name use for Topic target
   /// if Topic.target == 'all' this broadcast event
@@ -434,68 +439,44 @@ class EventBusImpl implements EventBus {
     }
   }
 
-  EventNode<T>? _getNode<T>(Topic topic) {
+  ///event /  handler =>    all.int  t1.int   t2.int
+  /// all.int                 +       +         +
+  /// t1.int                  +       +         -
+  /// t2.int                  +       -         +
+  EventNode<T>? _getNode<T>(Topic topic, {bool fullCompliance = false}) {
+    if (fullCompliance) {
+      var node = _map[topic];
+      return node != null ? node as EventNode<T> : null;
+    }
     if (topic.target == _targetDefault) {
       var node = _map[topic] ?? _map[topic.copy(target: name)];
 
       return node != null ? node as EventNode<T> : null;
     } else {
-      var node = _map[topic];
+      var node = _map[topic] ?? _map[topic.copy(target: _targetDefault)];
       return node != null ? node as EventNode<T> : null;
     }
   }
 
-  EventNode<T> _createNode<T>(
-    Topic topic, {
-    bool hideFromBroadcastingEvent = false,
-  }) {
-    var node = EventNode<T>(bus: this, topic: topic, onCancel: _onCancelNode);
-    if (topic.target != _targetDefault) {}
-    _map[topic] = node;
-    if (!hideFromBroadcastingEvent) {
-      var topicCom = topic.copy(target: _targetDefault);
-      _map[topicCom] = node;
-    }
-    return node;
-  }
-
   @override
-  Future<EventNode<T>> addHandler<T>(
+  EventNode<T> addHandler<T>(
       {dynamic env,
       EventHandler<T>? handler,
       String? path,
       EventDTO<T>? initalEvent,
-      bool hideFromBroadcastingEvent = false,
-      Topic? topic}) async {
-    var t = topic ?? Topic.create<T>(path: path, target: name);
-    var topicCom = t.copy(target: _targetDefault);
-    EventNode<T>? node;
-    if (_map.containsKey(t)) {
-      node = _map[t]! as EventNode<T>;
-      (node as EventNodeImpl<T>)._handler = handler;
-    }
-    if (_map.containsKey(topicCom)) {
-      if (!hideFromBroadcastingEvent) {
-        node = _map[topicCom]! as EventNode<T>;
-        (node as EventNodeImpl<T>)._handler = handler;
-      } else {
-        await _map[topicCom]!.dispose();
-        _map.remove(topicCom);
-      }
-    }
+      Topic? topic,
+      bool isCommonHandler = true}) {
+    var t = topic ?? Topic.create<T>(path: path, target: isCommonHandler ? _targetDefault : name);
+    // var topicCom = t.copy(target: _targetDefault);
+    EventNode<T>? node = _getNode(t, fullCompliance: true);
     if (node == null) {
       node = EventNode<T>(
-          bus: this,
-          topic: hideFromBroadcastingEvent ? t : topicCom,
-          handler: handler,
-          environment: env,
-          initalEvent: initalEvent,
-          onCancel: _onCancelNode);
+          bus: this, topic: t, handler: handler, environment: env, initalEvent: initalEvent, onCancel: _onCancelNode);
       _map[t] = node;
-      if (!hideFromBroadcastingEvent) {
-        _map[topicCom] = node;
-      }
+    } else {
+      (node as EventNodeImpl<T>)._handler = handler;
     }
+
     return node;
   }
 
@@ -503,17 +484,13 @@ class EventBusImpl implements EventBus {
   Future<bool> removeHandler<T>({String? path, Topic? topic}) async {
     var t = topic ?? Topic.create<T>(path: path, target: name);
     bool isDel = false;
-    var topicCom = t.copy(target: _targetDefault);
+
     if (_map.containsKey(topic)) {
       await _map[t]!.dispose();
       _map.remove(t);
       isDel = true;
     }
-    if (_map.containsKey(topicCom)) {
-      await _map[topicCom]!.dispose();
-      _map.remove(t);
-      isDel = true;
-    }
+
     return isDel;
   }
 
@@ -525,7 +502,7 @@ class EventBusImpl implements EventBus {
     String? target,
   }) {
     var t = topic ?? Topic.create<T>(path: path, target: name);
-    return _map[t]?.lastData;
+    return _getNode(t)?.lastData;
   }
 
   @override
@@ -535,7 +512,7 @@ class EventBusImpl implements EventBus {
     String? target,
   }) {
     var t = topic ?? Topic.create<T>(path: path, target: name);
-    return _map[t]?.lastData;
+    return _getNode(t)?.lastData;
   }
 
   void _sendToStream(EventDTO event) {
@@ -558,7 +535,8 @@ class EventBusImpl implements EventBus {
       EventDTO<T>? event}) {
     Topic t = topic ??
         (event?.topic ?? Topic.create<T>(path: path, fragment: fragment, target: target, arguments: arguments));
-    return _map[t]! as Event<T>;
+    var node = _getNode(t);
+    return node != null ? node as Event<T> : null;
   }
 
   @override
@@ -579,16 +557,16 @@ class EventBusImpl implements EventBus {
 
     T? d = data ?? event?.data;
     var e = event ?? EventDTO(topic: t, data: d);
-    EventNode<dynamic>? node;
+    EventNode? node;
     //block multisend event
 
     if (!fromSink) {
       e.clearTraversedPath();
     }
 
-    node = _map[t];
+    node = _getNode(t);
     if (node == null && isModelBus) {
-      node = _createNode(t);
+      node = addHandler<T>(isCommonHandler: true); // _createNode(t);
     }
     _sendToStream(e);
     return node?.send(event: e) ?? false;
@@ -608,7 +586,7 @@ class EventBusImpl implements EventBus {
 
     T? d = data ?? event?.data;
     var e = EventDTO(topic: t, data: d);
-    var node = _map[t];
+    var node = _getNode(t);
     if (node == null && isModelBus) {
       throw EventBusException('EventBus $name not have node ${t.topic}');
     } else {
@@ -639,9 +617,9 @@ class EventBusImpl implements EventBus {
           path: path,
           target: target,
         ));
-    var node = _map[t];
+    var node = _getNode(t);
     if (node == null) {
-      node = _createNode<T>(t);
+      node = addHandler<T>(isCommonHandler: true);
     }
     return node.stream as Stream<T>;
   }
@@ -653,9 +631,9 @@ class EventBusImpl implements EventBus {
           path: path,
           target: target,
         ));
-    var node = _map[t];
+    var node = _getNode(t);
     if (node == null) {
-      node = _createNode<T>(t);
+      node = addHandler<T>(isCommonHandler: true);
     }
     return node.stream as Stream<EventDTO<T>>;
   }

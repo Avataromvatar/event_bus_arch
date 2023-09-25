@@ -1,12 +1,12 @@
 part of event_arch;
 
-class _SendEventDTO extends EventDTOImpl {
-  _SendEventDTO(super.topic, super.data);
-}
+// class _SendEventDTO extends EventDTOImpl {
+//   _SendEventDTO(super.topic, super.data);
+// }
 
-class _CallEventDTO extends EventDTOImpl {
-  _CallEventDTO(super.topic, super.data);
-}
+// class _CallEventDTO extends EventDTOImpl {
+//   _CallEventDTO(super.topic, super.data);
+// }
 
 class EventBusIsolate extends EventBusImpl {
   // final StreamController<EventDTO> _toEBStreamController = StreamController.broadcast();
@@ -32,6 +32,8 @@ class EventBusIsolate extends EventBusImpl {
   Isolate? _isolate;
   SendPort? _toEBSender;
   ReceivePort? _receivePort;
+  Completer<bool> _completerInit = Completer();
+  Future<bool> get waitInit => _completerInit.future;
   bool get isInit => _toEBSender != null;
   EventBusIsolate({required this.onInit, required super.name, super.addToMaster}) {
     _init();
@@ -44,19 +46,24 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   void _init() async {
+    // print('Begin Inital EventBusIsolate');
     _receivePort = ReceivePort();
 
     _isolate = await Isolate.spawn(_worker, [_receivePort!.sendPort, onInit]);
+    // print('Isolate create');
     // _toEBSender = await _receivePort!.first;
     //from isolate eb to stream eb
     _receivePort!.listen((message) {
       if (message is SendPort) {
         _toEBSender = message;
+        // print('EventBusIsolate get send port');
+        _completerInit.complete(true);
       }
-      if (message is (EventDTO<dynamic>, dynamic)) {
-        //call result TODO:
-        print('get call result');
-      } else if (message is EventDTO) {
+      // if (message is (EventDTO<dynamic>, dynamic)) {
+      //   //call result TODO:
+      //   // print('get call result');
+      // } else
+      if (message is EventDTO) {
         sink.add(message);
       }
     });

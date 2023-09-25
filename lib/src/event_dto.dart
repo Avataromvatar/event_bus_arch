@@ -13,13 +13,13 @@ abstract class EventDTO<T> {
   T? get data;
   //--------
   ///all bus save self name in this field for check many resend for EventBusStream.
-  ///when send(event)  traversedPath clear
-  List<String> get traversedPath;
-  void clearTraversedPath();
+  ///when send(event)  _traversedPath clear
+  List<String> get _traversedPath;
+  void _clearTraversedPath();
 
-  bool checkTraversedPath(String name);
+  bool _checkTraversedPath(String name);
 
-  void addTraversedPath(String name);
+  void _addTraversedPath(String name);
 
   //---------
   // List<Topic> get route;
@@ -99,7 +99,8 @@ class EventDTOImpl<T> implements EventDTO<T> {
   Topic topic;
   @override
   T? data;
-  List<String> traversedPath = [];
+  @override
+  List<String> _traversedPath = [];
   // @override
   // List<Topic>? route;
   EventDTOImpl(
@@ -122,16 +123,19 @@ class EventDTOImpl<T> implements EventDTO<T> {
     return other is EventDTOImpl<T> && other.topic == topic && other.data == data;
   }
 
-  void clearTraversedPath() {
-    traversedPath.clear();
+  @override
+  void _clearTraversedPath() {
+    _traversedPath.clear();
   }
 
-  bool checkTraversedPath(String name) {
-    return traversedPath.contains(name);
+  @override
+  bool _checkTraversedPath(String name) {
+    return _traversedPath.contains(name);
   }
 
-  void addTraversedPath(String name) {
-    traversedPath.add(name);
+  @override
+  void _addTraversedPath(String name) {
+    _traversedPath.add(name);
   }
 
   @override

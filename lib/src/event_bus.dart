@@ -24,6 +24,8 @@ abstract class EventBusConnector {
     // eEventBusConnection callConnectedType = eEventBusConnection.none,
     eEventBusConnection sendConnectedType = eEventBusConnection.bidirectional,
     OnConnectionEventHandler? onEvent,
+    bool sourceAutoFilterOn = false,
+    bool targetAutoFilterOn = false,
     // OnConnectionEventHandler? onCall
   }) {
     return EventBusConnectorImpl(
@@ -41,6 +43,10 @@ class EventBusConnectorImpl implements EventBusConnector {
   final EventBusStream source;
   @override
   final EventBusStream target;
+
+  bool sourceAutoFilterOn;
+  bool targetAutoFilterOn;
+
   @override
   // final eEventBusConnection callConnectedType;
   @override
@@ -58,6 +64,8 @@ class EventBusConnectorImpl implements EventBusConnector {
   EventBusConnectorImpl(
       {required this.source,
       required this.target,
+      this.sourceAutoFilterOn = false,
+      this.targetAutoFilterOn = false,
       // this.callConnectedType = eEventBusConnection.none,
       this.sendConnectedType = eEventBusConnection.bidirectional,
       // this.onCall,
@@ -68,10 +76,16 @@ class EventBusConnectorImpl implements EventBusConnector {
         if (onEvent != null) {
           var e = onEvent!.call(eEventBusConnection.sourceToTarget, event);
           if (e is EventDTO) {
-            target.sink.add(e);
+            var tmp = _autoFiltering(e, false);
+            if (tmp != null) {
+              target.sink.add(tmp);
+            }
           }
         } else {
-          target.sink.add(event);
+          var tmp = _autoFiltering(event, false);
+          if (tmp != null) {
+            target.sink.add(tmp);
+          }
         }
       });
     }
@@ -81,13 +95,41 @@ class EventBusConnectorImpl implements EventBusConnector {
         if (onEvent != null) {
           var e = onEvent!.call(eEventBusConnection.targetToSource, event);
           if (e is EventDTO) {
-            source.sink.add(e);
+            var tmp = _autoFiltering(e, true);
+            if (tmp != null) {
+              source.sink.add(tmp);
+            }
           }
         } else {
-          source.sink.add(event);
+          var tmp = _autoFiltering(event, true);
+          if (tmp != null) {
+            source.sink.add(tmp);
+          }
+          // source.sink.add(event);
         }
       });
     }
+  }
+  EventDTO? _autoFiltering(EventDTO event, bool isSource) {
+    if (sourceAutoFilterOn && isSource) {
+      if (source is EventBus) {
+        if ((source as EventBus).contain(event.topic)) {
+          return event;
+        } else {
+          return null;
+        }
+      }
+    }
+    if (targetAutoFilterOn && !isSource) {
+      if (target is EventBus) {
+        if ((target as EventBus).contain(event.topic)) {
+          return event;
+        } else {
+          return null;
+        }
+      }
+    }
+    return event;
   }
 
   @override
@@ -122,7 +164,7 @@ abstract class EventNode<T> implements Event<T> {
   bool send({EventDTO<T>? event, T? data});
 
   /// throw exception if no have Handler. return last R from EventHandler or null if R not return from EventHandler
-  Future<R?> call<R>({EventDTO<T>? event, T? data});
+  // Future<R?> call<R>({EventDTO<T>? event, T? data});
   Future<void> dispose();
   void repeat();
 
@@ -212,20 +254,20 @@ class EventNodeImpl<T> implements EventNode<T> {
     return bus.send(topic: topic, data: data);
   }
 
-  @override
-  Future<R?> call<R>({EventDTO<T>? event, T? data}) async {
-    if (_isDispose) {
-      throw EventBusException('Topic:$topic is dispose');
-    }
-    if (!hasHandler) {
-      throw EventBusException('Topic:$topic cant be called because not have handler');
-    }
-    R? ret;
-    var e = event ?? EventDTO(data: data, topic: topic);
-    ret = await _execute(e, isCall: true);
-    _lastEvent = event;
-    return ret;
-  }
+  // @override
+  // Future<R?> call<R>({EventDTO<T>? event, T? data}) async {
+  //   if (_isDispose) {
+  //     throw EventBusException('Topic:$topic is dispose');
+  //   }
+  //   if (!hasHandler) {
+  //     throw EventBusException('Topic:$topic cant be called because not have handler');
+  //   }
+  //   R? ret;
+  //   var e = event ?? EventDTO(data: data, topic: topic);
+  //   ret = await _execute(e, isCall: true);
+  //   _lastEvent = event;
+  //   return ret;
+  // }
 
   @override
   bool send({EventDTO<T>? event, T? data}) {
@@ -290,6 +332,14 @@ abstract class EventBusHandler {
   ///if the event node is already present, then its handler will be redefined
   ///
   ///if isCommonHandler set and topic==null? target = all : target = EventBus.name
+  ///
+  ///event / handler => all.int | t1.int | t2.int
+  ///
+  /// all.int ____________ + _ | __ + _ | __ +
+  ///
+  /// t1.int _____________ + _ | __ + _ | __ -
+  ///
+  /// t2.int _____________ + _ | __ - _ | __ +
   EventNode<T> addHandler<T>(
       {dynamic env,
       EventHandler<T>? handler,
@@ -297,11 +347,14 @@ abstract class EventBusHandler {
       EventDTO<T>? initalEvent,
       Topic? topic,
       bool isCommonHandler = true});
-  //remove common(target == all) and target node
+
+  ///if topic==null remove node target=EventBus.name.
+  ///if topic set remove full compliance node.
   Future<bool> removeHandler<T>({
     String? path,
+    Topic? topic,
   });
-  static Stream<dynamic> emptyHandler<T, E>(EventDTO<T> event, {E? env, T? oldData}) async* {}
+  static Stream<dynamic> emptyHandler<T>(EventDTO<T> event, {dynamic env, T? oldData}) async* {}
 }
 
 abstract class EventBusStream {
@@ -312,10 +365,13 @@ abstract class EventBusStream {
   Stream<EventDTO> get stream;
 }
 
-///event /  handler =>    all.int  t1.int   t2.int
-/// all.int                 +       +         +
-/// t1.int                  +       +         -
-/// t2.int                  +       -         +
+///event / handler => all.int | t1.int | t2.int
+///
+/// all.int ____________ + _ | __ + _ | __ +
+///
+/// t1.int _____________ + _ | __ + _ | __ -
+///
+/// t2.int _____________ + _ | __ - _ | __ +
 abstract class EventBus implements EventBusStream, EventBusHandler {
   /// name use for Topic target
   /// if Topic.target == 'all' this broadcast event
@@ -328,6 +384,7 @@ abstract class EventBus implements EventBusStream, EventBusHandler {
 
   ///check if there is a listener on the bus
   bool contain(Topic topic);
+  List<Event> getAllEvent();
 
   ///choose one from: event or [topic and data?] or [data?,target?,fragment?,target?,arguments? ]
   Event<T>? getEvent<T>(
@@ -357,14 +414,14 @@ abstract class EventBus implements EventBusStream, EventBusHandler {
   ///if data ==null and EventNode have lastData return true and send lastData to listeners and handlers
   ///
   ///Call method wait complete work handler and get last R from handler stream
-  Future<R?> call<T, R>(
-      {Topic? topic,
-      T? data,
-      String? path,
-      String? fragment,
-      String? target,
-      Map<String, String>? arguments,
-      EventDTO<T>? event});
+  // Future<R?> call<T, R>(
+  //     {Topic? topic,
+  //     T? data,
+  //     String? path,
+  //     String? fragment,
+  //     String? target,
+  //     Map<String, String>? arguments,
+  //     EventDTO<T>? event});
 
   ///choose one from: topic or [path? and target?]
   T? lastData<T>({
@@ -388,6 +445,7 @@ abstract class EventBus implements EventBusStream, EventBusHandler {
   });
 
   ///choose one from: topic or [path? and target?]
+  ///if topic==null and target==null return common stream (target = all)
   Stream<EventDTO<T>> getStreamEvent<T>({
     String? path,
     String? target,
@@ -439,10 +497,13 @@ class EventBusImpl implements EventBus {
     }
   }
 
-  ///event /  handler =>    all.int  t1.int   t2.int
-  /// all.int                 +       +         +
-  /// t1.int                  +       +         -
-  /// t2.int                  +       -         +
+  ///event / handler => all.int | t1.int | t2.int
+  ///
+  /// all.int ____________ + _ | __ + _ | __ +
+  ///
+  /// t1.int _____________ + _ | __ + _ | __ -
+  ///
+  /// t2.int _____________ + _ | __ - _ | __ +
   EventNode<T>? _getNode<T>(Topic topic, {bool fullCompliance = false}) {
     if (fullCompliance) {
       var node = _map[topic];
@@ -456,6 +517,12 @@ class EventBusImpl implements EventBus {
       var node = _map[topic] ?? _map[topic.copy(target: _targetDefault)];
       return node != null ? node as EventNode<T> : null;
     }
+  }
+
+  @override
+  List<Event> getAllEvent() {
+    List<Event> l = _map.values.map((e) => e).toList();
+    return l;
   }
 
   @override
@@ -516,11 +583,11 @@ class EventBusImpl implements EventBus {
   }
 
   void _sendToStream(EventDTO event) {
-    if (!event.checkTraversedPath(name)) {
-      event.addTraversedPath(name);
+    if (!event._checkTraversedPath(name)) {
+      event._addTraversedPath(name);
       _streamController.add(event);
     } else {
-      print('Event ${event.topic} sended to EventBus $name many time ${event.traversedPath}');
+      print('Event ${event.topic} sended to EventBus $name many time ${event._traversedPath}');
       // throw EventBusException('Event ${event.topic} sended to EventBus $name many time ${event._pathResend}');
     }
   }
@@ -549,7 +616,7 @@ class EventBusImpl implements EventBus {
       Map<String, String>? arguments,
       EventDTO<T>? event,
       bool fromSink = false}) {
-    if (fromSink && (event?.checkTraversedPath(name) ?? false)) {
+    if (fromSink && (event?._checkTraversedPath(name) ?? false)) {
       return false;
     }
     Topic t = topic ??
@@ -561,7 +628,7 @@ class EventBusImpl implements EventBus {
     //block multisend event
 
     if (!fromSink) {
-      e.clearTraversedPath();
+      e._clearTraversedPath();
     }
 
     node = _getNode(t);
@@ -572,31 +639,32 @@ class EventBusImpl implements EventBus {
     return node?.send(event: e) ?? false;
   }
 
-  @override
-  Future<R?> call<T, R>(
-      {Topic? topic,
-      T? data,
-      String? path,
-      String? fragment,
-      String? target,
-      Map<String, String>? arguments,
-      EventDTO<T>? event}) {
-    Topic t = topic ??
-        (event?.topic ?? Topic.create<T>(path: path, fragment: fragment, target: target, arguments: arguments));
+  // @override
+  // Future<R?> call<T, R>(
+  //     {Topic? topic,
+  //     T? data,
+  //     String? path,
+  //     String? fragment,
+  //     String? target,
+  //     Map<String, String>? arguments,
+  //     EventDTO<T>? event}) {
+  //   Topic t = topic ??
+  //       (event?.topic ?? Topic.create<T>(path: path, fragment: fragment, target: target, arguments: arguments));
 
-    T? d = data ?? event?.data;
-    var e = EventDTO(topic: t, data: d);
-    var node = _getNode(t);
-    if (node == null && isModelBus) {
-      throw EventBusException('EventBus $name not have node ${t.topic}');
-    } else {
-      return node!.call(event: e);
-    }
-  }
+  //   T? d = data ?? event?.data;
+  //   var e = EventDTO(topic: t, data: d);
+  //   var node = _getNode(t);
+  //   if (node == null && isModelBus) {
+  //     throw EventBusException('EventBus $name not have node ${t.topic}');
+  //   } else {
+  //     return node!.call(event: e);
+  //   }
+  // }
 
   @override
   bool contain(Topic topic) {
-    return _map.containsKey(topic);
+    var node = _getNode(topic);
+    return node != null;
   }
 
   // @override

@@ -6,12 +6,14 @@ import 'dart:isolate';
 
 import 'package:async/async.dart';
 import 'package:event_bus_arch/src/exception.dart';
+import 'package:rxdart/rxdart.dart';
+export 'package:rxdart/rxdart.dart';
 
 part 'src/topic.dart';
 part 'src/event_dto.dart';
 // part 'src/command.dart';
 // part 'src/event_controller.dart';
-part 'src/event_master.dart';
+// part 'src/event_master.dart';
 part 'src/event_bus_isolate.dart';
 part 'src/event_bus.dart';
 // export 'src/event_controller.dart'

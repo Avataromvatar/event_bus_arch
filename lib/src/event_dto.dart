@@ -10,27 +10,30 @@ part of event_arch;
 
 abstract class EventDTO<T> {
   Topic get topic;
-  T? get data;
+  T get data;
+
+  Completer? get completer;
+
   //--------
   ///all bus save self name in this field for check many resend for EventBusStream.
   ///when send(event)  _traversedPath clear
-  List<String> get _traversedPath;
-  void _clearTraversedPath();
+  // List<String> get _traversedPath;
+  // void _clearTraversedPath();
 
-  bool _checkTraversedPath(String name);
+  // bool _checkTraversedPath(String name);
 
-  void _addTraversedPath(String name);
+  // void _addTraversedPath(String name);
 
   //---------
   // List<Topic> get route;
-  static EventDTO<T> copy<T>(
-    EventDTO<T> event, {
-    Topic? topic,
-    T? newData,
-    /*List<Topic>? route*/
-  }) {
-    return EventDTO<T>(topic: topic ?? event.topic, data: newData ?? event.data);
-  }
+  // static EventDTO<T> copy<T>(
+  //   EventDTO<T> event, {
+  //   Topic? topic,
+  //   T? newData,
+  //   /*List<Topic>? route*/
+  // }) {
+  //   return EventDTO<T>(topic: topic ?? event.topic, data: newData ?? event.data);
+  // }
 
   // static Command<T> createCommand<T>(EventDTO<T> dto, {Executor<T>? executor, EventBus? eventBus}) {
   //   return Command<T>(dto.topic, data: dto.data, executorBinded: executor, eventBusBinded: eventBus);
@@ -44,17 +47,13 @@ abstract class EventDTO<T> {
 
   // }
 
-  static EventDTO<T> create<T>(T data, {String? target, String? path, Map<String, String>? arguments, String? fragment
+  static EventDTO<T> create<T>(T data,
+      {String? target, String? path, Map<String, String>? arguments, String? fragment, Completer? completer
 
       //List<Topic>? route,
       }) {
-    return EventDTO<T>(
-        data: data,
-        target: target,
-        path: path,
-        /* route: route*/
-        fragment: fragment,
-        arguments: arguments);
+    return EventDTO<T>(data,
+        target: target, path: path, completer: completer, fragment: fragment, arguments: arguments);
   }
 
 // factory EventDTO(
@@ -66,18 +65,18 @@ abstract class EventDTO<T> {
 //       data, /* route*/
 //     );
 //   }
-  factory EventDTO({
-    Topic? topic,
-    String? target,
-    String? path,
-    Map<String, String>? arguments,
-    String? fragment,
-    T? data,
-  }) {
+  factory EventDTO(T data,
+      {Topic? topic,
+      String? target,
+      String? path,
+      Map<String, String>? arguments,
+      String? fragment,
+      Completer? completer}) {
     return EventDTOImpl<T>(
-      topic ?? Topic.create<T>(target: target, path: path, fragment: fragment, arguments: arguments),
-      data, /* route*/
-    );
+        topic ?? Topic.create<T>(target: target, path: path, fragment: fragment, arguments: arguments), data,
+        completer: completer
+        /* route*/
+        );
   }
   // factory EventDTO.fromType(Type type, T data,
   //     {String? target, String? path, Map<String, String>? arguments, String? fragment
@@ -98,24 +97,26 @@ class EventDTOImpl<T> implements EventDTO<T> {
   @override
   Topic topic;
   @override
-  T? data;
+  T data;
   @override
-  List<String> _traversedPath = [];
+  Completer? completer;
+
+  @override
+  // List<String> _traversedPath = [];
   // @override
   // List<Topic>? route;
-  EventDTOImpl(
-    this.topic,
-    this.data,
-    /* this.route*/
-  );
-  factory EventDTOImpl.fromJson(
-    Map<String, dynamic> json,
-    T? Function(dynamic data) dataFromJson, {
-    T? data,
-  }) {
-    var d = json['data'];
-    return EventDTOImpl(Topic.parse(json['topic']), d != null ? dataFromJson(json['data']) : null);
-  }
+  EventDTOImpl(this.topic, this.data, {Completer? completer}
+      /* this.route*/
+      )
+      : completer = completer;
+  // factory EventDTOImpl.fromJson(
+  //   Map<String, dynamic> json,
+  //   T Function(dynamic data) dataFromJson, {
+  //   T data,
+  // }) {
+  //   var d = json['data'];
+  //   return EventDTOImpl(Topic.parse(json['topic']), d != null ? dataFromJson(json['data']) : null);
+  // }
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -123,20 +124,20 @@ class EventDTOImpl<T> implements EventDTO<T> {
     return other is EventDTOImpl<T> && other.topic == topic && other.data == data;
   }
 
-  @override
-  void _clearTraversedPath() {
-    _traversedPath.clear();
-  }
+  // @override
+  // void _clearTraversedPath() {
+  //   _traversedPath.clear();
+  // }
 
-  @override
-  bool _checkTraversedPath(String name) {
-    return _traversedPath.contains(name);
-  }
+  // @override
+  // bool _checkTraversedPath(String name) {
+  //   return _traversedPath.contains(name);
+  // }
 
-  @override
-  void _addTraversedPath(String name) {
-    _traversedPath.add(name);
-  }
+  // @override
+  // void _addTraversedPath(String name) {
+  //   _traversedPath.add(name);
+  // }
 
   @override
   int get hashCode => Object.hashAll([topic, data]);

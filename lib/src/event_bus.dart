@@ -31,6 +31,7 @@ class EventNode<T> {
   void send(EventDTO dto) {
     if (dto.data is T) {
       var d = EventDTO<T>(dto.data, topic: dto.topic, completer: dto.completer);
+      lastData = dto.data;
       _streamController.add(d);
     }
   }
@@ -64,7 +65,9 @@ abstract class EventBus {
     String? path,
     String? target,
   });
-
+  factory EventBus({bool isModelBus = false}) {
+    return EventBusImpl(isModelBus);
+  }
   // void _addNode() {
   //   _map[Topic.create<int>()] = (0, null, StreamController<EventDTO<int>>.broadcast());
   //   _map[Topic.create<int>()]!.$3.onCancel = () {

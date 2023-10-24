@@ -133,6 +133,10 @@ class EventBusImpl implements EventBus, EventBusHandlers {
     if (node != null && node is EventNode<T>) {
       node.send(dto);
       return dto.completer?.future;
+    } else if (isModelBus) {
+      _map[dto.topic] = EventNode<T>();
+      _map[dto.topic]!.send(dto);
+      return dto.completer?.future;
     }
     _allEventStream.add(dto);
     return null;

@@ -74,26 +74,32 @@ class EventBusIsolate extends EventBusImpl {
   void _init() async {
     _receivePort = ReceivePort();
     _isolate = await Isolate.spawn(_worker, [_receivePort!.sendPort, onInit]);
-    _receivePort!.listen((message) {
-      if (message is SendPort) {
-        _toEBSender = message;
-        // print('EventBusIsolate get send port');
-        _completerInit.complete(true);
-      }
-      if (message is (int, dynamic)) {
-        var m = _request[message.$1];
-        if (m != null && m.isNotEmpty) {
-          var c = m.removeAt(0);
-          c.complete(message.$2);
-        } else {
-          if (m?.isEmpty ?? false) {
-            throw Exception('Discrepancy between created events (requests) and received responses from the Isolate');
-          }
+
+    _receivePort!.listen(
+      (message) {
+        if (message is SendPort) {
+          _toEBSender = message;
+          // print('EventBusIsolate get send port');
+          _completerInit.complete(true);
         }
-      } else if (message is EventDTO) {
-        _send(message)?.then((value) => _toEBSender?.send((message.hashCode, value)));
-      }
-    });
+        if (message is (int, dynamic)) {
+          var m = _request[message.$1];
+          if (m != null && m.isNotEmpty) {
+            var c = m.removeAt(0);
+            c.complete(message.$2);
+          } else {
+            if (m?.isEmpty ?? false) {
+              throw Exception('Discrepancy between created events (requests) and received responses from the Isolate');
+            }
+          }
+        } else if (message is EventDTO) {
+          _send(message)?.then((value) => _toEBSender?.send((message.hashCode, value)));
+        }
+      },
+      onDone: () {
+        dispose();
+      },
+    );
   }
 }
 

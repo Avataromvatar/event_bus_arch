@@ -48,6 +48,9 @@ abstract class Topic /*extends Equatable*/ {
         fragment: fragment,
         arguments: arguments);
   }
+  factory Topic.fromString(String topic) {
+    return EventTopicImpl.parse(topic);
+  }
   @override
   String toString() {
     return fullTopic;

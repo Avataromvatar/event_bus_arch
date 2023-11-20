@@ -1,4 +1,38 @@
-// part of event_arch;
+part of event_arch;
+
+abstract class Command<T> {
+  static const int maxLen = 10;
+  Future<dynamic> execute(T data, {String? fragment, Map<String, String>? arguments});
+  Future<dynamic> undo();
+  factory Command(EventBus busBinded, {String? path}) {
+    return CommandImpl(busBinded, path: path);
+  }
+}
+
+class CommandImpl<T> implements Command<T> {
+  final EventBus _bus;
+  final String? _path;
+
+  ///data, argument, fragment
+  Queue<(T, Map<String, String>?, String?)> _queue = Queue();
+
+  CommandImpl(this._bus, {String? path}) : _path = path;
+  Future<dynamic> execute(T data, {String? fragment, Map<String, String>? arguments}) async {
+    if (Command.maxLen <= _queue.length) {
+      _queue.removeFirst();
+    }
+    _queue.add((data, arguments, fragment));
+    return _bus.send<T>(data, path: _path, arguments: arguments, fragment: fragment);
+  }
+
+  Future<dynamic> undo() async {
+    if (_queue.isNotEmpty) {
+      var last = _queue.removeLast();
+      return _bus.send<T>(last.$1, path: _path, arguments: last.$2, fragment: last.$3);
+    }
+  }
+}
+
 // // import 'package:event_bus_arch/event_bus_arch.dart';
 // // import 'package:event_bus_arch/src/topic.dart';
 

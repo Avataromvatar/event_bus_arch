@@ -1,38 +1,58 @@
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
 
-//call from other Isolate
-class TestEventBus extends EventBusImpl {
-  TestEventBus({required super.name}) {
-    addHandler<int>(
-      path: 'fibonacci',
-      handler: (p0, {env, oldData}) async* {
-        yield EventDTO<(int, int)>(data: (p0.data!, fibonacci(p0.data!)));
-      },
-    );
-  }
-}
-
 void main() async {
-  EventBusIsolate iebus = EventBusIsolate(name: 'test', onInit: _onInitIsolate);
-  await iebus.waitInit;
-  bool end_calculate = false;
-  iebus.getStreamData<(int, int)>().listen((event) {
-    print('Fibonacci from ${event.$1} = ${event.$2}');
-    end_calculate = true;
+  EventBusIsolate isolateBus = EventBusIsolate(onInit: _initIsolate);
+  await isolateBus.waitInit;
+  EventBus bus = EventBus();
+  EventBus bus1 = EventBus();
+  (bus as EventBusHandlers).setHandler<int>(handler: mainThreadHandler);
+  (bus1 as EventBusHandlers).setHandler<int>(handler: mainThreadHandler);
+  isolateBus.listen<String>().listen((event) {
+    print(event);
   });
-  print('Begin calculate');
-  iebus.send(data: 1000, path: 'fibonacci');
-  // await Future.delayed(Duration(seconds: 1));
-  while (!end_calculate) {
-    await Future.delayed(Duration(seconds: 1));
-  }
-  print('goodbay');
+  // fibonacci(10000);
+  //--- get speed calc in main thread
+  // var start = DateTime.now();
+  // print('From bus: ${await bus.send(10000)}');
+  // print('From bus: ${await bus1.send(10000)}');
+  // var end = DateTime.now();
+  // print('Main thread calc: ${(end.microsecondsSinceEpoch - start.microsecondsSinceEpoch)}');
+  //--- get speed calc in worker thread
+  // var start = DateTime.now();
+  // print('From isolate bus: ${await isolateBus.send(10000)}');
+  // print('From isolate bus: ${await isolateBus.send(10000)}');
+  // var end = DateTime.now();
+  // print('Worker thread calc: ${(end.microsecondsSinceEpoch - start.microsecondsSinceEpoch)}');
+  //--- get speed calc in main thread + worker thread
+  var start = DateTime.now();
+  var ret = await Future.wait<dynamic>([bus.send(10000)!, isolateBus.send(10000)!]);
+  print('From bus: ${ret[0]}');
+  print('From isolate bus: ${ret[1]}');
+  var end = DateTime.now();
+  print('Main + Worker thread calc: ${(end.microsecondsSinceEpoch - start.microsecondsSinceEpoch)}');
 }
 
-//call from other Isolate
-EventBus _onInitIsolate() {
-  return TestEventBus(name: 'testF');
+Future<void> mainThreadHandler(EventDTO<int> dto, int? lastData) async {
+  int ret;
+
+  ret = fibonacci(dto.data);
+
+  dto.completer?.complete(ret);
+}
+
+EventBus? _isolateBus;
+void _initIsolate(EventBus bus) {
+  _isolateBus = bus;
+  (bus as EventBusHandlers).setHandler<int>(handler: workerThreadHandler);
+}
+
+Future<void> workerThreadHandler(EventDTO<int> dto, int? lastData) async {
+  int ret;
+
+  ret = fibonacci(dto.data);
+  _isolateBus?.send('from worker to main $ret');
+  dto.completer?.complete(ret);
 }
 
 //call from other Isolate

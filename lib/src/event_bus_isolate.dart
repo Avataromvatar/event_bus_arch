@@ -1,6 +1,9 @@
 part of event_arch;
 
 ///Atention The result of calling the event can be received later than the events called in the event handler on the isolate side
+///
+///EventBusIsolate it consists of two Event bus, one on the side of the main isolate and the other in the working isolate.
+///They exchange EventDTO and the results of the handlers' work among themselves.
 class EventBusIsolate extends EventBusImpl {
   Map<int, List<Completer>> _request = {};
   void Function(EventBus isolateBus) onInit;
@@ -58,9 +61,10 @@ class EventBusIsolate extends EventBusImpl {
     var node = _map[dtoCopy.topic];
     if (node != null) {
       node.send(dtoCopy);
+      _allEventStream.add((dtoCopy, true));
       return dtoCopy.completer?.future;
     }
-    _allEventStream.add(dtoCopy);
+    _allEventStream.add((dtoCopy, false));
     return null;
   }
 
@@ -144,6 +148,7 @@ class _EventBusForIsolate extends EventBusImpl {
   _EventBusForIsolate(super.isModelBus, this._receivePort, this._sendPort) {
     _receivePort.listen((message) {
       if (message is (int, dynamic)) {
+        //--- This is completer message
         var m = _request[message.$1];
         if (m != null && m.isNotEmpty) {
           var c = m.removeAt(0);
@@ -158,6 +163,9 @@ class _EventBusForIsolate extends EventBusImpl {
       }
     });
   }
+
+  ///This func send event from _receivePort to isolate bus
+  ///dto come without completer and we add new completer for send result back to main thread
   Future? _send(EventDTO dto) async {
     var c = Completer();
     var dtoCopy = EventDTOImpl(dto.topic, dto.data, completer: c);
@@ -165,9 +173,10 @@ class _EventBusForIsolate extends EventBusImpl {
 
     if (node != null) {
       node.send(dtoCopy);
+      _allEventStream.add((dtoCopy, true));
       return dtoCopy.completer?.future;
     }
-    _allEventStream.add(dtoCopy);
+    _allEventStream.add((dtoCopy, false));
     return null;
   }
 
@@ -188,7 +197,6 @@ class _EventBusForIsolate extends EventBusImpl {
     return c.future;
   }
 }
-
 
 // // class _SendEventDTO extends EventDTOImpl {
 // //   _SendEventDTO(super.topic, super.data);

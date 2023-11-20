@@ -46,8 +46,8 @@ class EventNode<T> {
 abstract class EventBus {
   bool get isModelBus;
 
-  ///stream for sended event
-  Stream<EventDTO> get allEventStream;
+  ///stream for sended event (event dto, have listener or not)
+  Stream<(EventDTO, bool)> get allEventStream;
 
   ///When you send event, handler can return result if call EventDTO.completer
   Future<dynamic>? send<T>(
@@ -57,7 +57,7 @@ abstract class EventBus {
     String? target,
     Map<String, String>? arguments,
   });
-  Stream<T>? listen<T>({
+  Stream<T> listen<T>({
     String? path,
     String? target,
   });
@@ -86,8 +86,8 @@ abstract class EventBusHandlers {
 }
 
 class EventBusImpl implements EventBus, EventBusHandlers {
-  StreamController<EventDTO> _allEventStream = StreamController<EventDTO>.broadcast();
-  Stream<EventDTO> get allEventStream => _allEventStream.stream;
+  final StreamController<(EventDTO, bool)> _allEventStream = StreamController<(EventDTO, bool)>.broadcast();
+  Stream<(EventDTO, bool)> get allEventStream => _allEventStream.stream;
 
   final Map<Topic, EventNode> _map = {};
   @override
@@ -108,7 +108,7 @@ class EventBusImpl implements EventBus, EventBusHandlers {
   }
 
   @override
-  Stream<T>? listen<T>({String? path, String? target}) {
+  Stream<T> listen<T>({String? path, String? target}) {
     var t = Topic.create<T>(path: path, target: target);
     var node = _map[t];
     if (node != null && node is EventNode<T>) {
@@ -122,7 +122,6 @@ class EventBusImpl implements EventBus, EventBusHandlers {
         removeNode(t, node!);
       }) as Stream<T>;
     }
-    return null;
   }
 
   @override
@@ -132,13 +131,15 @@ class EventBusImpl implements EventBus, EventBusHandlers {
     var node = _map[dto.topic];
     if (node != null && node is EventNode<T>) {
       node.send(dto);
+      _allEventStream.add((dto, true));
       return dto.completer?.future;
     } else if (isModelBus) {
       _map[dto.topic] = EventNode<T>();
       _map[dto.topic]!.send(dto);
+      _allEventStream.add((dto, true));
       return dto.completer?.future;
     }
-    _allEventStream.add(dto);
+    _allEventStream.add((dto, false));
     return null;
   }
 

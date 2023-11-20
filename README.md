@@ -1,10 +1,47 @@
-## To V2
--  change string topic to object Topic
--  event with prefix and without prefix
--  Event -> Command
+## About
+This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events. 
+## What new in V2
+Now we have two version v1 and v2. In the second version, we have significantly reduced the code base, mode everything easier.  
+We added an Event Bus in the Isolate (EventBusIsolate) with which you can also safely exchange events (although remember the limitations when working with isolates).  
+Removed the "call" method, now when you send events, you will always get either a result or null after the event handler finishes working. To return the result of the function that caused the events, you need to call the completer(in EventDTO) in event handler or its will be call with null  when handler complety work.   
+In V2, we abandoned the EventBusMaster and the need to give names to EventBus. This was done because the approaches to using event buses can be different, someone creates dynamically, someone uses constants, someone uses singleton, etc.
 
-This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events.  
-## Simple Usage 
+## V2 Simple Usage
+EventBus in V2 have 3 main method send, listen and lastData.
+```dart
+void main() async {
+  ///The EventBusIsolate it consists of two EventBus, one on the side of the main isolate and the other in the working isolate.
+  /// They exchange EventDTO and the results of the handlers' work among themselves.
+  EventBusIsolate isolateBus = EventBusIsolate(onInit: _initIsolate);
+  await isolateBus.waitInit;
+//listen in in main isolate event from worker isolate
+  isolateBus.listen<String>().listen((event) {
+    print('event from isolate: $event');
+  });
+  print('result: ${await isolateBus.send(10)}');
+  print('result: ${await isolateBus.send(11)}');
+  await Future.delayed(Duration(seconds: 1));
+}
+//event from isolate: 10
+//result: 10
+//event from isolate: 11
+//result: 11
+
+///this func run in isolate. And we wait event <int> and send result String
+void _initIsolate(EventBus bus) {
+  ///all EventBus implement EventBusHandlers
+  ///and we set handler for event type <int>
+  (bus as EventBusHandlers).setHandler<int>(handler: (dto, lastData) async {
+    //send result to main thread
+    dto.completer?.complete(dto.data.toString());
+    //send event<String>
+    bus.send(dto.data.toString());
+  });
+}
+
+```
+
+## V1 Simple Usage 
 ![simply_usage](event_bus_arch.drawio.png)
 
 The event(EventDTO) consists of 3 parts: a header (topic), a unique identifier and data. The topic consists of the type of the transmitted object (required) and the name of the event.  
@@ -32,7 +69,7 @@ bus
       .listen((event) => print('topic ${event.topic} uuid:${event.uuid} event:${event.data}'));
 ```
 When you call listenEvent method, you can set flag repeatLastEvent what send event after wait 1 millisecond or [Duration] 
-## Used with prefix and EventBusMaster
+## V1 Used with prefix and EventBusMaster
 EventBusMaster is a singltone what have knowledg about all created EventBus and use prefix to sort them.
 The Event Bus Master also provides the ability to send and receive events from different business, but if there is no bus, it will return null or false. If you use any bus to send by prefix and the bus prefix does not match the specified prefix, event will be send to EventBusMaster.
 ```dart
@@ -54,11 +91,11 @@ App - layer in which the business logic.
 AppModel the layer, like ViewModel , stores the latest data models necessary for the operation of the application.  
 Services and ServicesModel , respectively.  
 
-## EventBus for Model
+## V1 EventBus for Model
 By default EventBus, clear not use(where event listeners ==0) event node, but if you add flag 'isBusForModel' in constructor, you get EventBus(EventModelController) what not clear event node.
 This EventModelController can be used by hold(resource manager) and update object(models, providers, command, interface and other).  
 
-## EventBus Handler
+## V1 EventBus Handler
 EventBusHandlersGroup this interface for handler group. You can connect  EventBusHandlersGroup to you event bus
 ```dart
 ///Event handler
@@ -89,7 +126,7 @@ void main()
 }
 ```
 
-## Method: Call 
+## V1 Method: Call 
 If event have handler, handler can processing **needCompleter** and complety it. Result of complety return from future.  
 if event no have handler or handler dont support **needCompleter** Future complete with Error
 ```dart

@@ -1,3 +1,8 @@
+## 2.0.0
+-  change api. reduced the code base. simplified work with the bus
+-  add EventBusIsolate  
+-  add Command pattern
+-  remove EventBusMaster
 ## 1.3.2  
 -  add groupListen method to EventBus   
 -  add getAllTopic method to EventBus   

@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
-import 'package:test/test.dart';
+// import 'package:test/test.dart';
 
 void main() async {
   ///The EventBusIsolate it consists of two Event busbars, one on the side of the main isolate and the other in the working isolate.

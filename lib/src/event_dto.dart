@@ -1,51 +1,68 @@
-import 'package:event_bus_arch/event_bus_arch.dart';
-import 'package:uuid/uuid.dart';
-
-// abstract class Command<T> {
-//   String get topic;
-//   T get data;
-//   Function
-//   void execute({T newData});
-//   factory Command() {}
-// }
+part of event_arch;
 
 abstract class EventDTO<T> {
-  String get topic;
+  Topic get topic;
   T get data;
-  String? get uuid;
-  EventDTO<T> copy({String? topic, T? data, String? uuid});
-  factory EventDTO(String topic, T data, {String? uuid}) {
-    return BasicEventDTO<T>(topic, data, uuid);
+
+  ///completed with null after call handler, if not completed in handler
+  Completer? get completer;
+
+  static EventDTO<T> create<T>(T data,
+      {String? target, String? path, Map<String, String>? arguments, String? fragment, Completer? completer}) {
+    return EventDTO<T>(data,
+        target: target, path: path, completer: completer, fragment: fragment, arguments: arguments);
   }
-  factory EventDTO.fromType(
-    Type type,
-    T data, {
-    String? prefix,
-    String? name,
-    String? uuid,
-  }) {
-    return BasicEventDTO<T>(EventBus.topicCreate(type, eventName: name, prefix: prefix), data, uuid ?? Uuid().v1());
+
+  factory EventDTO(T data,
+      {Topic? topic,
+      String? target,
+      String? path,
+      Map<String, String>? arguments,
+      String? fragment,
+      Completer? completer}) {
+    return EventDTOImpl<T>(
+        topic ?? Topic.create<T>(target: target, path: path, fragment: fragment, arguments: arguments), data,
+        completer: completer
+        /* route*/
+        );
   }
+  Map<String, dynamic> toJson();
 }
 
-class BasicEventDTO<T> implements EventDTO<T> {
+class EventDTOImpl<T> implements EventDTO<T> {
   @override
-  String topic;
+  Topic topic;
   @override
   T data;
   @override
-  String? uuid;
-  BasicEventDTO(this.topic, this.data, this.uuid);
+  Completer? completer;
+
   @override
-  EventDTO<T> copy({String? topic, T? data, String? uuid}) {
-    return BasicEventDTO(topic ?? this.topic, data ?? this.data, uuid ?? this.uuid);
+  EventDTOImpl(this.topic, this.data, {Completer? completer}) : completer = completer;
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+
+    return other is EventDTOImpl<T> && other.topic == topic && other.data == data;
+  }
+
+  @override
+  int get hashCode => Object.hashAll([topic, data]);
+
+  @override
+  String toString() {
+    return jsonEncode(toJson());
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'topic': topic.fullTopic,
+      'data': data != null ? jsonEncode(data) : null,
+    };
+  }
+
+  static EventDTO<T> fromJson<T>(Map<String, dynamic> json, {T Function(String topic, dynamic data)? dataConverter}) {
+    return EventDTOImpl<T>(Topic.parse(json['topic']),
+        dataConverter != null ? dataConverter.call(json['topic'], json['data']) : json['data']);
   }
 }
-
-// class EventDTOCommand<T> extends BasicEventDTO<T> implements Command<T> {
-//   EventDTOCommand(super.topic,super.data,)
-//   @override
-//   void execute({T newData}) {
-//     // TODO: implement execute
-//   }
-// }

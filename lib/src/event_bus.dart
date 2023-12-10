@@ -49,6 +49,18 @@ abstract class EventBus {
   ///stream for sended event (event dto, have listener or not)
   Stream<(EventDTO, bool)> get allEventStream;
 
+  ///true if bus contain listener
+  bool haveListener<T>({
+    String? path,
+    String? target,
+  });
+
+  ///true if bus contain handler
+  bool haveHandler<T>({
+    String? path,
+    String? target,
+  });
+
   ///When you send event, handler can return result if call EventDTO.completer
   Future<dynamic>? send<T>(
     T data, {
@@ -173,6 +185,20 @@ class EventBusImpl implements EventBus, EventBusHandlers {
       return true;
     }
     return false;
+  }
+
+  @override
+  bool haveHandler<T>({String? path, String? target}) {
+    var t = Topic.create<T>(path: path, target: target);
+    var node = _map[t];
+    return node?.handler != null;
+  }
+
+  @override
+  bool haveListener<T>({String? path, String? target}) {
+    var t = Topic.create<T>(path: path, target: target);
+    var node = _map[t];
+    return node?._streamControllerValue.hasListener ?? false;
   }
 }
 

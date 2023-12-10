@@ -6,7 +6,7 @@ part of event_arch;
 ///They exchange EventDTO and the results of the handlers' work among themselves.
 class EventBusIsolate extends EventBusImpl {
   Map<int, List<Completer>> _request = {};
-  void Function(EventBus isolateBus) onInit;
+  void Function(EventBus isolateBu, Object? initalData) onInit;
   Isolate? _isolate;
 
   /// this port for send event to isolate
@@ -21,6 +21,7 @@ class EventBusIsolate extends EventBusImpl {
 
   EventBusIsolate({
     required this.onInit,
+    Object? initalData,
   }) : super(false) {
     _init();
   }
@@ -75,9 +76,11 @@ class EventBusIsolate extends EventBusImpl {
     _isolate!.pause();
   }
 
-  void _init() async {
+  void _init({
+    Object? initalData,
+  }) async {
     _receivePort = ReceivePort();
-    _isolate = await Isolate.spawn(_worker, [_receivePort!.sendPort, onInit]);
+    _isolate = await Isolate.spawn(_worker, [_receivePort!.sendPort, onInit, initalData]);
 
     _receivePort!.listen(
       (message) {
@@ -108,16 +111,18 @@ class EventBusIsolate extends EventBusImpl {
 }
 
 void _worker(dynamic data) async {
-  void Function(EventBus) onInit = data[1];
+  void Function(EventBus, Object? initalData) onInit = data[1];
 
   ReceivePort innerReceivePort = ReceivePort();
+
   var s = innerReceivePort.asBroadcastStream();
   SendPort sendPort = data[0];
+  Object? initalData = data[2];
   sendPort.send(innerReceivePort.sendPort);
 
   var eventBus = _EventBusForIsolate(false, s, sendPort);
 
-  onInit(eventBus);
+  onInit(eventBus, initalData);
 
   // var listenerSend = eventBus.al.listen((event) {
   //   sendPort.send(event);

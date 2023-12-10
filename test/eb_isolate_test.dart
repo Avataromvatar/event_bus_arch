@@ -42,7 +42,7 @@ Future<void> mainThreadHandler(EventDTO<int> dto, int? lastData) async {
 }
 
 EventBus? _isolateBus;
-void _initIsolate(EventBus bus) {
+void _initIsolate(EventBus bus, Object? initalData) {
   _isolateBus = bus;
   (bus as EventBusHandlers).setHandler<int>(handler: workerThreadHandler);
 }

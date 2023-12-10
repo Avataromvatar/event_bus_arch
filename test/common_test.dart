@@ -22,7 +22,7 @@ void main() async {
 //result: 11
 
 ///this func run in isolate. And we wait event <int> and send result String
-void _initIsolate(EventBus bus) {
+void _initIsolate(EventBus bus, Object? initalData) {
   ///all EventBus implement EventBusHandlers
   ///and we set handler for event type <int>
   (bus as EventBusHandlers).setHandler<int>(handler: (dto, lastData) async {

@@ -49,7 +49,7 @@ void main() async {
 }
 
 //call from other Isolate
-void _onInitIsolate(EventBus isolateBus) {
+void _onInitIsolate(EventBus isolateBus, Object? initalData) {
   print('Begin Setup Isolate bus');
   var e = isolateBus as EventBusHandlers;
   e.setHandler<int>(

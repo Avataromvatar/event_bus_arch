@@ -1,3 +1,6 @@
+## 2.0.1
+-  add method haveListener and haveHandler
+-  add initalData for EventBusIsolate
 ## 2.0.0
 -  change api. reduced the code base. simplified work with the bus
 -  add EventBusIsolate  

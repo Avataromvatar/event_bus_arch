@@ -8,11 +8,12 @@ typedef Node<T> = EventNode<T>;
 class EventNode<T> {
   T? lastData;
   Handler<T>? handler;
+  bool get isDisposed => _streamController.isClosed;
   // void Function()? onCancel;
   StreamController<EventDTO<T>> _streamController = StreamController<EventDTO<T>>.broadcast();
   StreamController<T> _streamControllerValue = StreamController<T>.broadcast();
   StreamSubscription? _streamControllerSub;
-
+  // void Function()? _onDispose;
   EventNode({
     this.lastData,
     this.handler,
@@ -38,10 +39,19 @@ class EventNode<T> {
     }
   }
 
-  void dispose() {
+  Future<void> dispose() async {
     _streamControllerSub?.cancel();
-    _streamControllerValue.close();
-    _streamController.close();
+    _streamControllerSub = null;
+    if (!_streamControllerValue.isClosed) {
+      await _streamControllerValue.close();
+    }
+    if (!_streamController.isClosed) {
+      await _streamController.close();
+    }
+    // if (_onDispose != null) {
+    //   _onDispose!.call();
+    //   _onDispose = null;
+    // }
   }
 }
 
@@ -97,6 +107,8 @@ abstract class EventBusHandlers {
     String? path,
     String? target,
   });
+  void addAllHandlerFromOtherBus(EventBus fromBus);
+  void removeAllHandlerPresentInOtherBus(EventBus otherBus);
 }
 
 class EventBusImpl with EventBusMixin {
@@ -230,6 +242,7 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
       //   throw Exception('EventBus storage node($t) with broken data ');
       // }
     }
+
     return null;
   }
 
@@ -265,6 +278,7 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
       _allEventStream.add((dto, true));
       return dto.completer?.future;
     }
+
     _allEventStream.add((dto, false));
     return null;
   }
@@ -276,6 +290,28 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     if (node != null) {
       node.dispose();
       _eventsMap.remove(t);
+    }
+  }
+
+  @override
+  void addAllHandlerFromOtherBus(EventBus fromBus) {
+    if (fromBus is EventBusMixin) {
+      for (var element in fromBus._eventsMap.entries) {
+        if (element.value.handler != null) {
+          _eventsMap[element.key] = element.value;
+        }
+      }
+    }
+  }
+
+  @override
+  void removeAllHandlerPresentInOtherBus(EventBus otherBus) {
+    if (otherBus is EventBusMixin) {
+      for (var element in otherBus._eventsMap.entries) {
+        if (element.value.handler != null) {
+          _eventsMap.remove(element.key);
+        }
+      }
     }
   }
 

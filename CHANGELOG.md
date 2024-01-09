@@ -1,3 +1,6 @@
+## 2.0.4
+-  add method: void addAllHandlerFromOtherBus(EventBus fromBus);
+-  add method: void removeAllHandlerPresentInOtherBus(EventBus otherBus);
 ## 2.0.3
 -  add EventBusMixin
 -  change EvenBusImpl to EvenBusImpl with mixin

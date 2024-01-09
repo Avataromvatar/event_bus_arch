@@ -1,3 +1,5 @@
+## 2.0.2
+-  fix initalData for EventBusIsolate
 ## 2.0.1
 -  add method haveListener and haveHandler
 -  add initalData for EventBusIsolate

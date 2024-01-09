@@ -23,7 +23,7 @@ class EventBusIsolate extends EventBusImpl {
     required this.onInit,
     Object? initalData,
   }) : super(false) {
-    _init();
+    _init(initalData: initalData);
   }
 
   @override

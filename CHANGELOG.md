@@ -1,3 +1,6 @@
+## 2.0.3
+-  add EventBusMixin
+-  change EvenBusImpl to EvenBusImpl with mixin
 ## 2.0.2
 -  fix initalData for EventBusIsolate
 ## 2.0.1

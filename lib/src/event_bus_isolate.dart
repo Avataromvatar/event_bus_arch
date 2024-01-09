@@ -59,7 +59,7 @@ class EventBusIsolate extends EventBusImpl {
   Future? _send(EventDTO dto) async {
     var c = Completer();
     var dtoCopy = EventDTOImpl(dto.topic, dto.data, completer: c);
-    var node = _map[dtoCopy.topic];
+    var node = _eventsMap[dtoCopy.topic];
     if (node != null) {
       node.send(dtoCopy);
       _allEventStream.add((dtoCopy, true));
@@ -151,7 +151,7 @@ class _EventBusForIsolate extends EventBusImpl {
   Map<int, List<Completer>> _request = {};
   Stream<dynamic> _receivePort;
   SendPort _sendPort;
-  _EventBusForIsolate(super.isModelBus, this._receivePort, this._sendPort) {
+  _EventBusForIsolate(super._isModelBus, this._receivePort, this._sendPort) {
     _receivePort.listen((message) {
       if (message is (int, dynamic)) {
         //--- This is completer message
@@ -175,7 +175,7 @@ class _EventBusForIsolate extends EventBusImpl {
   Future? _send(EventDTO dto) async {
     var c = Completer();
     var dtoCopy = EventDTOImpl(dto.topic, dto.data, completer: c);
-    var node = _map[dtoCopy.topic];
+    var node = _eventsMap[dtoCopy.topic];
 
     if (node != null) {
       node.send(dtoCopy);

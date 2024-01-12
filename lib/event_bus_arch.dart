@@ -14,6 +14,7 @@ part 'src/topic.dart';
 part 'src/event_dto.dart';
 part 'src/command.dart';
 part 'src/event_bus_logger.dart';
+part 'src/scope.dart';
 // part 'src/event_controller.dart';
 // part 'src/event_master.dart';
 part 'src/event_bus_isolate.dart';

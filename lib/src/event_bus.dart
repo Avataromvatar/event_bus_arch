@@ -294,13 +294,19 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
   }
 
   @override
-  void addAllHandlerFromOtherBus(EventBus fromBus) {
+  void addAllHandlerFromOtherBus(
+    EventBus fromBus,
+  ) {
     if (fromBus is EventBusMixin) {
       for (var element in fromBus._eventsMap.entries) {
-        if (element.value.handler != null) {
-          _eventsMap[element.key] = element.value;
-        }
+        // if (element.value.handler != null) {
+
+        _eventsMap[element.key] = element.value;
+        element.value._streamController.stream.doOnCancel(() {
+          removeNode(element.key, element.value);
+        });
       }
+      // }
     }
   }
 
@@ -308,9 +314,9 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
   void removeAllHandlerPresentInOtherBus(EventBus otherBus) {
     if (otherBus is EventBusMixin) {
       for (var element in otherBus._eventsMap.entries) {
-        if (element.value.handler != null) {
-          _eventsMap.remove(element.key);
-        }
+        // if (element.value.handler != null) {
+        _eventsMap.remove(element.key);
+        // }
       }
     }
   }

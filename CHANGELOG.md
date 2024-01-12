@@ -1,3 +1,6 @@
+## 2.0.5
+-  fix bug with Topic where type YouClass?
+-  add Scope and change Command 
 ## 2.0.4
 -  add method: void addAllHandlerFromOtherBus(EventBus fromBus);
 -  add method: void removeAllHandlerPresentInOtherBus(EventBus otherBus);

@@ -112,7 +112,11 @@ class EventTopicImpl implements Topic {
       throw Exception('Topic.create required type or nameType !');
     }
     _uri = Uri(
-        scheme: shema, host: '$target.${type ?? nameType}', path: path, fragment: fragment, queryParameters: arguments);
+        scheme: shema,
+        host: '$target.${'${type ?? nameType}'.replaceAll("?", "^")}',
+        path: path,
+        fragment: fragment,
+        queryParameters: arguments);
   }
 
   String _getTopic({bool needFragment = false}) {

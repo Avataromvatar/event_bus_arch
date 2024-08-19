@@ -1,3 +1,5 @@
+## 2.0.6
+-  update intl to 0.19.0 
 ## 2.0.5
 -  fix bug with Topic where type YouClass?
 -  add Scope and change Command 

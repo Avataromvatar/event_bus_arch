@@ -1,6 +1,6 @@
 name: event_bus_arch
 description: This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events.  
-version: 2.0.5
+version: 2.0.5+1-geaefe5a
 repository: https://github.com/Avataromvatar/dart_event_bus
 # publish_to: none
 environment:
@@ -9,7 +9,7 @@ environment:
 dependencies:
   # equatable: ^2.0.0
   # uuid: ^3.0.6
-  intl: ^0.18.0
+  intl: ^0.19.0
   async: ^2.11.0
   rxdart: ^0.27.7
   

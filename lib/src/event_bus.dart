@@ -193,13 +193,19 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     if (node != null && node is EventNode<T>) {
       return node._streamControllerValue.stream.doOnCancel(() {
         removeNode(t, node!);
-      }) as Stream<T>;
+      });
+      // return node._streamControllerValue.stream.doOnCancel(() {
+      //   removeNode(t, node!);
+      // }) as Stream<T>;
     } else {
       node = EventNode<T>();
       _eventsMap[t] = node;
       return node._streamControllerValue.stream.doOnCancel(() {
         removeNode(t, node!);
-      }) as Stream<T>;
+      });
+      // return node._streamControllerValue.stream.doOnCancel(() {
+      //   removeNode(t, node!);
+      // }) as Stream<T>;
     }
   }
 

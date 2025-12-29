@@ -1,10 +1,16 @@
 part of event_arch;
 
-///If hadler completed but no complite EventDTO.completer EventNode return null(EventDTO.completer(null)) to sender
+/// Handler function type for processing events.
+/// The handler receives the event data and the last data from the same topic.
+/// If the handler completes but doesn't call EventDTO.completer, 
+/// EventNode returns null (EventDTO.completer(null)) to the sender.
 typedef Handler<T> = Future<void> Function(EventDTO<T> dto, T? lastData);
 
+/// Alias for EventNode type
 typedef Node<T> = EventNode<T>;
 
+/// EventNode represents a node in the event bus system.
+/// It manages the handler, last data, and stream controllers for a specific topic.
 class EventNode<T> {
   T? lastData;
   Handler<T>? handler;
@@ -14,6 +20,9 @@ class EventNode<T> {
   StreamController<T> _streamControllerValue = StreamController<T>.broadcast();
   StreamSubscription? _streamControllerSub;
   // void Function()? _onDispose;
+  
+  /// Creates an EventNode with optional initial data and handler.
+  /// Sets up the stream listener to process incoming events.
   EventNode({
     this.lastData,
     this.handler,
@@ -31,6 +40,10 @@ class EventNode<T> {
       _streamControllerValue.add(event.data);
     });
   }
+  
+  bool get isHaveHandler => handler!=null;
+  /// Sends an event to the node if the data type matches T.
+  /// Updates the lastData and adds the event to the stream.
   void send(EventDTO dto) {
     if (dto.data is T) {
       var d = EventDTO<T>(dto.data, topic: dto.topic, completer: dto.completer);
@@ -39,6 +52,7 @@ class EventNode<T> {
     }
   }
 
+  /// Disposes of the node, closing all stream controllers and cancelling subscriptions.
   Future<void> dispose() async {
     _streamControllerSub?.cancel();
     _streamControllerSub = null;
@@ -58,22 +72,24 @@ class EventNode<T> {
 abstract class EventBus {
   bool get isModelBus;
 
-  ///stream for sended event (event dto, have listener or not)
+  /// Stream for all sent events (event DTO, and whether it had a listener or not)
   Stream<(EventDTO, bool)> get allEventStream;
 
-  ///true if bus contain listener
+  /// Returns true if the bus contains a listener for the specified topic
   bool haveListener<T>({
     String? path,
     String? target,
   });
 
-  ///true if bus contain handler
+  /// Returns true if the bus contains a handler for the specified topic
   bool haveHandler<T>({
     String? path,
     String? target,
   });
 
-  ///When you send event, handler can return result if call EventDTO.completer
+  /// Sends an event to the bus.
+  /// If a handler exists for the topic, it will be called.
+  /// Returns a Future that completes with the result if EventDTO.completer was called by the handler.
   Future<dynamic>? send<T>(
     T data, {
     String? path,
@@ -81,14 +97,22 @@ abstract class EventBus {
     String? target,
     Map<String, String>? arguments,
   });
+  
+  /// Listens to events on a specific topic.
+  /// Returns a Stream of the data type T.
   Stream<T> listen<T>({
     String? path,
     String? target,
   });
+  
+  /// Gets the last data sent to a specific topic.
   T? lastData<T>({
     String? path,
     String? target,
   });
+  
+  /// Factory constructor for EventBus.
+  /// Creates an EventBusImpl instance.
   factory EventBus({bool isModelBus = false}) {
     return EventBusImpl(isModelBus);
   }
@@ -101,13 +125,22 @@ abstract class EventBus {
   // }
 }
 
+/// 
 abstract class EventBusHandlers {
+  /// Sets a handler for a specific topic.
+  /// If initialData is provided, it will be used as the initial data for the topic.
   void setHandler<T>({T? initalData, String? path, String? target, required Handler<T> handler});
+  
+  /// Removes a handler from a specific topic.
   void removeHandler<T>({
     String? path,
     String? target,
   });
+  
+  /// Adds all handlers from another EventBus to this one.
   void addAllHandlerFromOtherBus(EventBus fromBus);
+  
+  /// Removes all handlers that are present in another EventBus from this one.
   void removeAllHandlerPresentInOtherBus(EventBus otherBus);
 }
 
@@ -116,121 +149,25 @@ class EventBusImpl with EventBusMixin {
   @override
   bool get isModelBus => _isModelBus;
 
+  /// Creates an EventBusImpl instance.
+  /// If isModelBus is true, the bus behaves as a model bus.
   EventBusImpl(this._isModelBus);
 }
-// class EventBusImpl implements EventBus, EventBusHandlers {
-//   final StreamController<(EventDTO, bool)> _allEventStream = StreamController<(EventDTO, bool)>.broadcast();
-//   Stream<(EventDTO, bool)> get allEventStream => _allEventStream.stream;
-
-//   final Map<Topic, EventNode> _map = {};
-//   @override
-//   final bool isModelBus;
-//   EventBusImpl(this.isModelBus);
-//   @override
-//   T? lastData<T>({String? path, String? target}) {
-//     var t = Topic.create<T>(path: path, target: target);
-//     var node = _map[t];
-//     if (node != null && node is EventNode<T>) {
-//       // if (node.lastData is T) {
-//       return node.lastData;
-//       // } else {
-//       //   throw Exception('EventBus storage node($t) with broken data ');
-//       // }
-//     }
-//     return null;
-//   }
-
-//   @override
-//   Stream<T> listen<T>({String? path, String? target}) {
-//     var t = Topic.create<T>(path: path, target: target);
-//     var node = _map[t];
-//     if (node != null && node is EventNode<T>) {
-//       return node._streamControllerValue.stream.doOnCancel(() {
-//         removeNode(t, node!);
-//       }) as Stream<T>;
-//     } else {
-//       node = EventNode<T>();
-//       _map[t] = node;
-//       return node._streamControllerValue.stream.doOnCancel(() {
-//         removeNode(t, node!);
-//       }) as Stream<T>;
-//     }
-//   }
-
-//   @override
-//   Future? send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments}) async {
-//     var dto =
-//         EventDTO<T>(data, path: path, fragment: fragment, arguments: arguments, target: target, completer: Completer());
-//     var node = _map[dto.topic];
-//     if (node != null && node is EventNode<T>) {
-//       node.send(dto);
-//       _allEventStream.add((dto, true));
-//       return dto.completer?.future;
-//     } else if (isModelBus) {
-//       _map[dto.topic] = EventNode<T>();
-//       _map[dto.topic]!.send(dto);
-//       _allEventStream.add((dto, true));
-//       return dto.completer?.future;
-//     }
-//     _allEventStream.add((dto, false));
-//     return null;
-//   }
-
-//   @override
-//   void removeHandler<T>({String? path, String? target}) {
-//     var t = Topic.create<T>(path: path, target: target);
-//     var node = _map[t];
-//     if (node != null) {
-//       node.dispose();
-//       _map.remove(t);
-//     }
-//   }
-
-//   @override
-//   void setHandler<T>({T? initalData, String? path, String? target, required Handler<T> handler}) {
-//     var t = Topic.create<T>(path: path, target: target);
-//     var node = _map[t];
-//     if (node != null && node is EventNode<T>) {
-//       node.handler = handler;
-//     } else {
-//       _map[t] = EventNode<T>(handler: handler, lastData: initalData);
-//     }
-//   }
-
-//   ///This method call every time when listener close stream
-//   ///node removed if has no listener and handler and this !isModelBus
-//   bool removeNode(Topic topic, EventNode node) {
-//     if (!node._streamControllerValue.hasListener && !isModelBus && node.handler == null) {
-//       node.dispose();
-//       _map.remove(topic);
-//       return true;
-//     }
-//     return false;
-//   }
-
-//   @override
-//   bool haveHandler<T>({String? path, String? target}) {
-//     var t = Topic.create<T>(path: path, target: target);
-//     var node = _map[t];
-//     return node?.handler != null;
-//   }
-
-//   @override
-//   bool haveListener<T>({String? path, String? target}) {
-//     var t = Topic.create<T>(path: path, target: target);
-//     var node = _map[t];
-//     return node?._streamControllerValue.hasListener ?? false;
-//   }
-// }
 
 mixin EventBusMixin implements EventBus, EventBusHandlers {
+  /// Stream controller for all events sent through the bus
   final StreamController<(EventDTO, bool)> _allEventStream = StreamController<(EventDTO, bool)>.broadcast();
   Stream<(EventDTO, bool)> get allEventStream => _allEventStream.stream;
 
+  /// Map storing all event nodes by their topic
   final Map<Topic, EventNode> _eventsMap = {};
+  
   @override
   bool get isModelBus => false;
   // EventBusImpl(this.isModelBus);
+  
+  /// Gets the last data sent to a specific topic.
+  /// Returns null if no data has been sent to that topic.
   @override
   T? lastData<T>({String? path, String? target}) {
     var t = Topic.create<T>(path: path, target: target);
@@ -246,6 +183,9 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     return null;
   }
 
+  /// Listens to events on a specific topic.
+  /// Creates a new EventNode if one doesn't exist for that topic.
+  /// Returns a Stream of the data type T.
   @override
   Stream<T> listen<T>({String? path, String? target}) {
     var t = Topic.create<T>(path: path, target: target);
@@ -263,6 +203,10 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     }
   }
 
+  /// Sends an event to the bus.
+  /// If a handler exists for the topic, it will be called.
+  /// Returns a Future that completes with the result if EventDTO.completer was called by the handler.
+  /// If no handler exists, returns null.
   @override
   Future? send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments}) async {
     var dto =
@@ -283,6 +227,8 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     return null;
   }
 
+  /// Removes a handler from a specific topic.
+  /// Disposes of the EventNode if it exists.
   @override
   void removeHandler<T>({String? path, String? target}) {
     var t = Topic.create<T>(path: path, target: target);
@@ -293,6 +239,8 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     }
   }
 
+  /// Adds all handlers from another EventBus to this one.
+  /// Sets up stream cancellation to remove nodes when they're no longer needed.
   @override
   void addAllHandlerFromOtherBus(
     EventBus fromBus,
@@ -310,6 +258,7 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     }
   }
 
+  /// Removes all handlers that are present in another EventBus from this one.
   @override
   void removeAllHandlerPresentInOtherBus(EventBus otherBus) {
     if (otherBus is EventBusMixin) {
@@ -321,6 +270,9 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     }
   }
 
+  /// Sets a handler for a specific topic.
+  /// If an EventNode already exists for that topic, it updates the handler.
+  /// Otherwise, it creates a new EventNode with the handler and initial data.
   @override
   void setHandler<T>({T? initalData, String? path, String? target, required Handler<T> handler}) {
     var t = Topic.create<T>(path: path, target: target);
@@ -332,10 +284,10 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     }
   }
 
-  ///This method call every time when listener close stream
-  ///node removed if has no listener and handler and this !isModelBus
+  /// This method is called every time a listener closes the stream.
+  /// The node is removed if it has no listeners, no handler, and this is not a model bus.
   bool removeNode(Topic topic, EventNode node) {
-    if (!node._streamControllerValue.hasListener && !isModelBus && node.handler == null) {
+    if (!node._streamControllerValue.hasListener && !isModelBus && !node.isHaveHandler) {
       node.dispose();
       _eventsMap.remove(topic);
       return true;
@@ -343,13 +295,15 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     return false;
   }
 
+  /// Checks if the bus contains a handler for the specified topic.
   @override
   bool haveHandler<T>({String? path, String? target}) {
     var t = Topic.create<T>(path: path, target: target);
     var node = _eventsMap[t];
-    return node?.handler != null;
+    return node?.isHaveHandler??false;
   }
 
+  /// Checks if the bus contains a listener for the specified topic.
   @override
   bool haveListener<T>({String? path, String? target}) {
     var t = Topic.create<T>(path: path, target: target);

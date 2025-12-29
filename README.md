@@ -1,143 +1,192 @@
-## About
-This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events. 
-## What new in V2
-Now we have two version v1 and v2. In the second version, we have significantly reduced the code base, mode everything easier.  
-We added an Event Bus in the Isolate (EventBusIsolate) with which you can also safely exchange events (although remember the limitations when working with isolates).  
-Removed the "call" method, now when you send events, you will always get either a result or null after the event handler finishes working. To return the result of the function that caused the events, you need to call the completer(in EventDTO) in event handler or its will be call with null  when handler complety work.   
-In V2, we abandoned the EventBusMaster and the need to give names to EventBus. This was done because the approaches to using event buses can be different, someone creates dynamically, someone uses constants, someone uses singleton, etc.
+# EventBus Arch
 
-## V2 Simple Usage
-EventBus in V2 have 3 main method send, listen and lastData.
+EventBus Arch is a Dart package that provides an event-driven architecture for managing communication between different parts of an application. It allows components to communicate with each other through events, promoting loose coupling and better organization of code.
+EventBus have a two type is Model and Common. isModelBus autocreate Node if user try send Event what not have Node. Common EventBus not create Node if user send Event what not have Node. 
+## Features
+
+- Send and receive events between components
+- Support for event handlers with optional return values
+- Isolate-safe event bus for multi-threaded applications
+- Event scoping with command pattern support
+- Type-safe event handling
+- Flexible topic-based routing
+- two type EventBus: Model and Common. isModelBus autocreate Node if user try send Event what not have Node, Common EventBus dont create Node
+
+## Installation
+
+Add the following to your `pubspec.yaml` file:
+
+```yaml
+dependencies:
+  event_bus_arch: ^2.1.0
+```
+
+Then run:
+
+```bash
+flutter pub get
+```
+
+## Usage
+
+### Basic Usage
+
 ```dart
-void main() async {
-  ///The EventBusIsolate it consists of two EventBus, one on the side of the main isolate and the other in the working isolate.
-  /// They exchange EventDTO and the results of the handlers' work among themselves.
-  EventBusIsolate isolateBus = EventBusIsolate(onInit: _initIsolate);
-  await isolateBus.waitInit;
-//listen in in main isolate event from worker isolate
-  isolateBus.listen<String>().listen((event) {
-    print('event from isolate: $event');
-  });
-  print('result: ${await isolateBus.send(10)}');
-  print('result: ${await isolateBus.send(11)}');
-  await Future.delayed(Duration(seconds: 1));
-}
-//event from isolate: 10
-//result: 10
-//event from isolate: 11
-//result: 11
+import 'package:event_bus_arch/event_bus_arch.dart';
 
-///this func run in isolate. And we wait event <int> and send result String
+void main() async {
+  // Create an EventBus
+  EventBus bus = EventBus();
+  
+  // Listen for events
+  bus.listen<String>().listen((event) {
+    print('Received event: $event');
+  });
+  
+  // Send an event
+  await bus.send('Hello, World!');
+}
+```
+
+### Event Handlers
+
+```dart
+// Set up an event handler
+(bus as EventBusHandlers).setHandler<String>(handler: (dto, lastData) async {
+  print('Handler received: ${dto.data}');
+  // Optionally complete the event with a result
+  dto.completer?.complete('Processed: ${dto.data}');
+});
+
+// Send an event and get the result
+var result = await bus.send('Test message');
+print('Result: $result'); // Result: Processed: Test message
+```
+
+### EventBusIsolate
+
+For multi-threaded applications, EventBusIsolate provides a way to send events between the main isolate and worker isolates:
+
+```dart
+///this func run in isolate. And we wait event <int> and send result <String>
 void _initIsolate(EventBus bus) {
-  ///all EventBus implement EventBusHandlers
-  ///and we set handler for event type <int>
   (bus as EventBusHandlers).setHandler<int>(handler: (dto, lastData) async {
-    //send result to main thread
-    dto.completer?.complete(dto.data.toString());
-    //send event<String>
+    // Process event in isolate
+    dto.completer?.complete(dto.data);
+    // Send event back to main thread
     bus.send(dto.data.toString());
   });
 }
 
-```
-
-## V1 Simple Usage 
-![simply_usage](event_bus_arch.drawio.png)
-
-The event(EventDTO) consists of 3 parts: a header (topic), a unique identifier and data. The topic consists of the type of the transmitted object (required) and the name of the event.  
-EventDTO class transporting Event in bus, but user can use clear data without EventDTO for example:
-```dart
-EventBus bus = EventBus();
-//----- Without EventDTO
-///listenEvent return Stream
-///topic = 'int' 
-///bus.listenEvent<int>()! can return null only if you set prefix becouse bus be search other EventBus with prefix in EventBusMaster
-bus.listenEvent<int>()!.listen((event)=>print('int event:$event'));
-///topic = 'int^test' 
-bus.listenEvent<int>(eventName:'test')!.listen((event)=>print('int^test event:$event'));
-///topic = 'int' 
-bus.send<int>(1); //'int event:1'
-bus.send(2); //'int event:2' in this case type event get automated
-///topic = 'int^test' 
-bus.send<int>(3,eventName:'test');////'int@test event:3'
-//----- With EventDTO
-bus
-      .listenEventDTO<int>()!
-      .listen((event) => print('topic ${event.topic} uuid:${event.uuid} event:${event.data}'));
-bus
-      .listenEventDTO<int>(eventName: 'test')!
-      .listen((event) => print('topic ${event.topic} uuid:${event.uuid} event:${event.data}'));
-```
-When you call listenEvent method, you can set flag repeatLastEvent what send event after wait 1 millisecond or [Duration] 
-## V1 Used with prefix and EventBusMaster
-EventBusMaster is a singltone what have knowledg about all created EventBus and use prefix to sort them.
-The Event Bus Master also provides the ability to send and receive events from different business, but if there is no bus, it will return null or false. If you use any bus to send by prefix and the bus prefix does not match the specified prefix, event will be send to EventBusMaster.
-```dart
-EventBus bus = EventBus();
-EventBus busServices = EventBus(prefix: 'services');
-/// get event from bus
-EventBusMaster.instance.listenEvent<int>()!.listen((event) => print('int master event:$event'));
-/// get event from busServices
-EventBusMaster.instance
-      .listenEvent<int>(prefix: 'services')!
-      .listen((event) => print('int master services bus event:$event'));
-  bus.send<int>(5);
-  EventBusMaster.instance.send(6);
-  EventBusMaster.instance.send(7, prefix: 'services');
-```
-The prefix can be used to divide the application into layers, for example:
-ViewModel - layers for stores the latest state of the models and does not delete unused nodes (more on this later).  
-App - layer in which the business logic.  
-AppModel the layer, like ViewModel , stores the latest data models necessary for the operation of the application.  
-Services and ServicesModel , respectively.  
-
-## V1 EventBus for Model
-By default EventBus, clear not use(where event listeners ==0) event node, but if you add flag 'isBusForModel' in constructor, you get EventBus(EventModelController) what not clear event node.
-This EventModelController can be used by hold(resource manager) and update object(models, providers, command, interface and other).  
-
-## V1 EventBus Handler
-EventBusHandlersGroup this interface for handler group. You can connect  EventBusHandlersGroup to you event bus
-```dart
-///Event handler
-typedef EventHandler<T> = Future<void> Function(
-    EventDTO<T> event,
-
-    ///send event to other listener
-    EventEmitter<EventDTO<T>>? emit,
-    {EventBus? bus,
-    Completer<dynamic>? needComplete});
-
-
-class TestHandlers implements EventBusHandlersGroup {
-void connect(EventBusHandler bus) {
-///if you have many void handler need use eventName
-bus.addHandler<void>(getMasterData, eventName: 'getMasterData');
-///if handle unique for object you can not set eventName
-bus.addHandler<Test>(test);
-}
-...
-void main()
-{
-  EventBus bus = EventBus(prefix: 'test');
-  var handlers = TestHandlers();
-  handlers.connect(bus);
-  bus.send<void>(null,eventName:'getMasterData');//call getMasterData fn
-  bus.send(Test());//call test fn
+void main() async {
+  EventBusIsolate isolateBus = EventBusIsolate(onInit: _initIsolate);
+  await isolateBus.waitInit;
+  
+  // Listen for events from isolate
+  isolateBus.listen<String>().listen((event) {
+    print('Event from isolate: $event');
+  });
+  
+  // Send event to isolate
+  var result = await isolateBus.send(10);
+  print('Result: $result'); //Result: 10
 }
 ```
 
-## V1 Method: Call 
-If event have handler, handler can processing **needCompleter** and complety it. Result of complety return from future.  
-if event no have handler or handler dont support **needCompleter** Future complete with Error
+### Scoping with Command Pattern
+
+The Scope class provides a way to manage event-based state with command pattern support:
+
 ```dart
-//wait result or error
-try{
-var r = await bus1.call('Hello');
+Scope<String> scope = Scope<String>();
+
+void initScope() {
+  scope.initScope(bus, initalData: 'Initial Value', onUpdate: (data) {
+    print('Data updated: $data');
+  });
 }
-catch (e)
-{
-      print(e);
-}
+
+// Send an event
+await scope.call('New Value');
+
+// Undo last event
+await scope.undo();
 ```
 
+## API Reference
 
+### EventBus
+
+The EventBus class provides core functionality for sending and receiving events.
+
+#### Methods
+
+- `send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments})` - Send an event
+- `listen<T>({String? path, String? target})` - Listen for events
+- `lastData<T>({String? path, String? target})` - Get the last data sent for a topic
+- `haveHandler<T>({String? path, String? target})` - Check if a handler exists for a topic
+- `haveListener<T>({String? path, String? target})` - Check if a listener exists for a topic
+
+### EventBusHandlers
+
+The EventBusHandlers mixin provides methods for managing event handlers.
+
+#### Methods
+
+- `setHandler<T>({T? initalData, String? path, String? target, required Handler<T> handler})` - Set an event handler
+- `removeHandler<T>({String? path, String? target})` - Remove an event handler
+- `addAllHandlerFromOtherBus(EventBus fromBus)` - Copy all handlers from another bus
+- `removeAllHandlerPresentInOtherBus(EventBus otherBus)` - Remove handlers present in another bus
+
+### Command
+
+The Command class provides command pattern support for event handling.
+
+#### Methods
+
+- `execute(T data, {String? fragment, Map<String, String>? arguments})` - Execute a command
+- `undo()` - Undo the last command
+- `queueLenght` - Get the queue length
+- `lastCall` - Get the last call details
+
+### Scope
+
+The Scope class provides scoping for events with command pattern support.
+
+#### Methods
+
+- `initScope(EventBus bus, {T? initalData, bool initalDataNeedExecute = true, String? path, int maxLenForUndo = 0, void Function(T newData)? onUpdate})` - Initialize the scope
+- `call(T newData, {String? fragment, Map<String, String>? arguments})` - Call an event
+- `undo()` - Undo the last event
+- `disposeScope({bool removeHandler = true})` - Dispose the scope
+
+### Topic
+
+The Topic class represents event topics with various components.
+
+#### Properties
+
+- `shema` - The schema of the topic
+- `target` - The target of the topic
+- `type` - The type of the topic
+- `host` - The host of the topic
+- `path` - The path of the topic
+- `fragment` - The fragment of the topic
+- `arguments` - The arguments of the topic
+- `topic` - The topic without fragment and arguments
+- `topicWithFragment` - The topic with fragment
+- `fullTopic` - The full topic with fragment and arguments
+
+## Version 2 Changes
+
+Version 2 introduced several significant changes:
+
+1. **Reduced code base**: Simplified architecture for easier maintenance
+2. **EventBusIsolate**: Added support for isolate-safe event communication
+3. **Simplified event handling**: Removed the "call" method, now always return either a result or null
+4. **Removed EventBusMaster**: Abandoned the need to give names to EventBus
+5. **Improved handler return values**: Handlers can now return results via Completer in EventDTO
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

@@ -1,3 +1,8 @@
+## 2.1.0
+-  update dependencies
+-  add test for EventBus and EventBusIsolate
+-  change readme
+-  fix problem in haveHandler and add getter in Node isHaveHandler  
 ## 2.0.6
 -  update intl to 0.19.0 
 ## 2.0.5

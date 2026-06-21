@@ -25,9 +25,7 @@ Add the following to your `pubspec.yaml` file:
 dependencies:
   event_bus_arch: ^2.2.0
 ```
-
 Then run:
-
 ```bash
 flutter pub get
 ```

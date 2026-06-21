@@ -1,5 +1,5 @@
 name: event_bus_arch
-description: This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events.  
+description: This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events. This package additional contain  Finite State Machine and Layers in Isolate what help create Event driven application.   
 version: 2.2.0
 repository: https://github.com/Avataromvatar/dart_event_bus
 # publish_to: none

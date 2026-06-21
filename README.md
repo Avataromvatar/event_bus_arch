@@ -2,11 +2,16 @@
 
 EventBus Arch is a Dart package that provides an event-driven architecture for managing communication between different parts of an application. It allows components to communicate with each other through events, promoting loose coupling and better organization of code.
 EventBus have a two type is Model and Common. isModelBus autocreate Node if user try send Event what not have Node. Common EventBus not create Node if user send Event what not have Node. 
+
+For work with event driven architecture this package additional have Finite State machine and EventBusIsolate and layers separated by isolate  
+
 ## Features
 
 - Send and receive events between components
 - Support for event handlers with optional return values
 - Isolate-safe event bus for multi-threaded applications
+- Layers what create isolate with EventBus
+- Finite State Machine (FSM)
 - Event scoping with command pattern support
 - Type-safe event handling
 - Flexible topic-based routing
@@ -18,7 +23,7 @@ Add the following to your `pubspec.yaml` file:
 
 ```yaml
 dependencies:
-  event_bus_arch: ^2.1.0
+  event_bus_arch: ^2.2.0
 ```
 
 Then run:
@@ -111,6 +116,93 @@ await scope.call('New Value');
 
 // Undo last event
 await scope.undo();
+```
+
+### Layers 
+The layer consists of two or more parts that are located in different isolates, these isolates work through EventBusIsolate. Each layer can have top and bottom levels.  
+see layer example.
+```dart
+class TestIsolateProvider
+{
+  late Layer layer;
+  Completer _completer = Completer();
+  Future<void> get wait =>_completer.future;
+  TestIsolateProvider()
+  {
+    ///Create Layer with deep 1  
+    ///top layer <-> isolate <-> bottom layer
+    Layers.createLayers([(_initLayers,null,true)]).then((value) {
+      layer = value;
+      layer.bottom!.subscribe<int>(onData: (e) {
+        print('Get from bottom $e');
+      },);
+      _completer.complete();
+
+    },);
+  }
+  Future<int> send(int data)async
+  {
+    print('SEND $data');
+    layer.bottom!.send(data);
+    var ret = (await layer.bottom!.listen<int>().first);
+    
+    return ret;
+  }
+}
+Future<void> main()async
+{
+  var providerIsolate = TestIsolateProvider();
+  await providerIsolate.wait;
+  print('GET ${await providerIsolate.send(1)}');
+  await providerIsolate.layer.close();
+}
+//This function run in bottom Isolate
+void _initLayers(Layer layer,Object? initalData)async
+{
+    print('Hello From ${Isolate.current.hashCode}');
+    layer.top!.subscribe<int>(onData: (e) {
+      layer.top!.send(e*10);
+    },);
+    
+}
+```
+
+### FSM Finite State Machine
+
+```dart
+enum FSMTeststate
+{
+  state0,
+  state1,
+  state2,
+  state3
+}
+class FSMTest with FSM<FSMTeststate>
+{
+  final EventBus bus;
+  FSMTest(this.bus)
+  {
+    initFSM(bus, FSMTeststate.state0);
+    addFSMTransition<int>(FSMTeststate.state0, FSMTeststate.state1,filter: (currentState, lastState, event) { return event==1;},handler:(currentState, lastState, event, ignoredEvents) async{
+      print('$lastState -> $currentState with $event');
+    }, );
+    addFSMTransition<int>(FSMTeststate.state1, FSMTeststate.state2,filter: (currentState, lastState, event) { return event==2;},handler:(currentState, lastState, event, ignoredEvents) async{
+      print('$lastState -> $currentState with $event');
+    },);
+    addFSMTransition<String>(FSMTeststate.state2, FSMTeststate.state3,handler: (currentState, lastState, event, ignoredEvents) async{
+      print('$lastState -> $currentState with $event');
+    },);
+  }
+
+}
+Future<void> main()async
+{
+  var fsm = FSMTest(EventBus());
+  await fsm.bus.send(1);
+  await fsm.bus.send(2);
+  await fsm.bus.send('Test');
+
+}
 ```
 
 ## API Reference

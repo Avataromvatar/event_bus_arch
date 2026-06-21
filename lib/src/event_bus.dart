@@ -35,7 +35,13 @@ class EventNode<T> {
             event.completer?.complete(null);
           }
         });
+      } else 
+      {
+        if (!(event.completer?.isCompleted ?? false)) {
+            event.completer?.complete(null);
+          }
       }
+
 
       _streamControllerValue.add(event.data);
     });
@@ -104,7 +110,8 @@ abstract class EventBus {
     String? path,
     String? target,
   });
-  
+  ///Subscribe to events on a specific topic.
+  StreamSubscription<T> subscribe<T>({String? path, String? target,void Function(T e)? onData, Function? onError, void Function()? onDone, bool? cancelOnError});
   /// Gets the last data sent to a specific topic.
   T? lastData<T>({
     String? path,
@@ -203,6 +210,28 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
       return node._streamControllerValue.stream.doOnCancel(() {
         removeNode(t, node!);
       });
+      // return node._streamControllerValue.stream.doOnCancel(() {
+      //   removeNode(t, node!);
+      // }) as Stream<T>;
+    }
+  }
+  @override
+  StreamSubscription<T> subscribe<T>({String? path, String? target,void Function(T e)? onData, Function? onError, void Function()? onDone, bool? cancelOnError}) {
+    var t = Topic.create<T>(path: path, target: target);
+    var node = _eventsMap[t];
+    if (node != null && node is EventNode<T>) {
+      return node._streamControllerValue.stream.doOnCancel(() {
+        removeNode(t, node!);
+      }).listen(onData,cancelOnError: cancelOnError,onDone: onDone,onError: onError);
+      // return node._streamControllerValue.stream.doOnCancel(() {
+      //   removeNode(t, node!);
+      // }) as Stream<T>;
+    } else {
+      node = EventNode<T>();
+      _eventsMap[t] = node;
+      return node._streamControllerValue.stream.doOnCancel(() {
+        removeNode(t, node!);
+      }).listen(onData,cancelOnError: cancelOnError,onDone: onDone,onError: onError);
       // return node._streamControllerValue.stream.doOnCancel(() {
       //   removeNode(t, node!);
       // }) as Stream<T>;
@@ -315,5 +344,19 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     var t = Topic.create<T>(path: path, target: target);
     var node = _eventsMap[t];
     return node?._streamControllerValue.hasListener ?? false;
+  }
+
+  Future<void> dispose()async
+  {
+    
+    await _allEventStream.close();
+    for (var e in _eventsMap.values){
+      try {
+        e.dispose();
+      } catch (e) {
+        //TODO
+      }
+    }
+    _eventsMap.clear();
   }
 }

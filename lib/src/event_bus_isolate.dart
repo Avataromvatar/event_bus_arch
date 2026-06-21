@@ -5,7 +5,7 @@ part of event_arch;
 ///EventBusIsolate it consists of two Event bus, one on the side of the main isolate and the other in the working isolate.
 ///They exchange EventDTO and the results of the handlers' work among themselves.
 class EventBusIsolate extends EventBusImpl {
-  Map<int, List<Completer>> _request = {};
+  Map<Topic, List<Completer>> _request = {};
   void Function(EventBus isolateBu, Object? initalData) onInit;
   Isolate? _isolate;
 
@@ -18,7 +18,7 @@ class EventBusIsolate extends EventBusImpl {
   Completer<bool> _completerInit = Completer();
   Future<bool> get waitInit => _completerInit.future;
   bool get isInit => _toEBSender != null;
-
+  bool _isDone = false;
   EventBusIsolate({
     required this.onInit,
     Object? initalData,
@@ -34,11 +34,11 @@ class EventBusIsolate extends EventBusImpl {
           EventDTO<T>(data, path: path, fragment: fragment, arguments: arguments, target: target, completer: null);
 
       ///We send EventDTO to Isolate and wait return
-      if (_request.containsKey(dto.hashCode)) {
-        _request[dto.hashCode]!.add(c);
+      if (_request.containsKey(dto.topic)) {
+        _request[dto.topic]!.add(c);
       } else {
-        _request[dto.hashCode] = [];
-        _request[dto.hashCode]!.add(c);
+        _request[dto.topic] = [];
+        _request[dto.topic]!.add(c);
       }
 
       _toEBSender!.send(dto);
@@ -53,6 +53,7 @@ class EventBusIsolate extends EventBusImpl {
       // return null;
       // return super.send(data, path, fragment, target, arguments);
     }
+    return;
   }
 
   ///Send to main thread from isolate
@@ -68,12 +69,14 @@ class EventBusIsolate extends EventBusImpl {
     _allEventStream.add((dtoCopy, false));
     return null;
   }
-
-  void dispose() {
-    _receivePort?.close();
-    Future.delayed(Duration(milliseconds: 100));
+  @override
+  Future<void> dispose() async{
+    await super.dispose();
+    if(!_isDone)
+    {_receivePort?.close();}
+    await Future.delayed(Duration(milliseconds: 10));
     _isolate?.kill();
-    _isolate!.pause();
+    // _isolate!.pause();
   }
 
   void _init({
@@ -89,7 +92,7 @@ class EventBusIsolate extends EventBusImpl {
           // print('EventBusIsolate get send port');
           _completerInit.complete(true);
         }
-        if (message is (int, dynamic)) {
+        if (message is (Topic, dynamic)) {
           var m = _request[message.$1];
           if (m != null && m.isNotEmpty) {
             var c = m.removeAt(0);
@@ -100,10 +103,11 @@ class EventBusIsolate extends EventBusImpl {
             }
           }
         } else if (message is EventDTO) {
-          _send(message)?.then((value) => _toEBSender?.send((message.hashCode, value)));
+          _send(message)?.then((value) => _toEBSender?.send((message.topic, value)));
         }
       },
       onDone: () {
+        _isDone = true;
         dispose();
       },
     );
@@ -146,14 +150,14 @@ void _worker(dynamic data) async {
   //listenerCall.cancel();
   innerReceivePort.close();
 }
-
+///In Worker Isolate
 class _EventBusForIsolate extends EventBusImpl {
-  Map<int, List<Completer>> _request = {};
+  Map<Topic, List<Completer>> _request = {};
   Stream<dynamic> _receivePort;
   SendPort _sendPort;
   _EventBusForIsolate(super._isModelBus, this._receivePort, this._sendPort) {
     _receivePort.listen((message) {
-      if (message is (int, dynamic)) {
+      if (message is (Topic, dynamic)) {
         //--- This is completer message
         var m = _request[message.$1];
         if (m != null && m.isNotEmpty) {
@@ -165,7 +169,7 @@ class _EventBusForIsolate extends EventBusImpl {
           }
         }
       } else if (message is EventDTO) {
-        _send(message)?.then((value) => _sendPort.send((message.hashCode, value)));
+        _send(message)?.then((value) => _sendPort.send((message.topic, value)));
       }
     });
   }
@@ -192,11 +196,11 @@ class _EventBusForIsolate extends EventBusImpl {
     var dto = EventDTO<T>(data, path: path, fragment: fragment, arguments: arguments, target: target, completer: null);
 
     ///We send EventDTO to Isolate and wait return
-    if (_request.containsKey(dto.hashCode)) {
-      _request[dto.hashCode]!.add(c);
+    if (_request.containsKey(dto.topic)) {
+      _request[dto.topic]!.add(c);
     } else {
-      _request[dto.hashCode] = [];
-      _request[dto.hashCode]!.add(c);
+      _request[dto.topic] = [];
+      _request[dto.topic]!.add(c);
     }
 
     _sendPort.send(dto);

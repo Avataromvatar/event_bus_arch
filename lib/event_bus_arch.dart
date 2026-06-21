@@ -10,6 +10,8 @@ import 'dart:collection';
 import 'package:rxdart/rxdart.dart';
 export 'package:rxdart/rxdart.dart';
 
+part 'src/layers.dart';
+part 'src/fsm.dart';
 part 'src/topic.dart';
 part 'src/event_dto.dart';
 part 'src/command.dart';

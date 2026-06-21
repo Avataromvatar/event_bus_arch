@@ -1,3 +1,9 @@
+## 2.2.0
+-  fix bug when send from isolate not call completer
+-  add dispose
+-  add subscribe method
+-  add FSM
+-  add Layers
 ## 2.1.0
 -  update dependencies
 -  add test for EventBus and EventBusIsolate

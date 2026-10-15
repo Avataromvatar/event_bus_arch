@@ -10,7 +10,7 @@ typedef FSMFilter<T, E> =
 class _FSM<T> {
   EventBus bus = EventBus(isModelBus: false);
   EventBusHandlers get busHandlers => bus as EventBusHandlers;
-  Map<Topic, Map<T, _FSMNode>> _map = {};
+  final Map<Topic, Map<T, _FSMNode>> _map = {};
 }
 
 class _FSMNode<T, E> {
@@ -32,17 +32,21 @@ mixin class FSM<T> {
   final _FSM _fsm = _FSM();
   late T _state;
   late T _lastState;
+  StreamSubscription<(EventDTO, bool)>? _fsmSubscription;
   T get state => _state;
   T get lastState => _lastState;
-  final List<EventDTO> __ignoredDTO = [];
+  final List<EventDTO> _ignoredDTO = [];
 
   void initFSM(EventBus bus, T currentState, {T? lastState}) {
+    // a repeated initFSM must not leave a second live subscription
+    _fsmSubscription?.cancel();
+    _fsmSubscription = null;
     _fsm.bus = bus;
     _state = currentState;
     _lastState = lastState ?? currentState;
     bool changeStateStart = false;
-    
-    bus.allEventStream.listen((e) async {
+
+    _fsmSubscription = bus.allEventStream.listen((e) async {
       if (!changeStateStart) {
         var topic = e.$1.topic;//Topic.fromParametr(type: e.$1.data.runtimeType);
         var eventChannel = _fsm._map[topic];
@@ -51,16 +55,23 @@ mixin class FSM<T> {
           if (node != null && node.check(_state, _lastState, e.$1.data)) {
             changeStateStart = true;
             changeState(node.toState);
-            await node.call(_state, _lastState, e.$1.data,__ignoredDTO);
-            __ignoredDTO.clear();
+            await node.call(_state, _lastState, e.$1.data,_ignoredDTO);
+            _ignoredDTO.clear();
             changeStateStart = false;
           }
         }
-      } else 
+      } else
       {
-        __ignoredDTO.add(e.$1);
+        _ignoredDTO.add(e.$1);
       }
     });
+  }
+
+  ///Unsubscribes from the bus: the state machine stops reacting to events.
+  ///A repeated [initFSM] turns it on again.
+  void dispose() {
+    _fsmSubscription?.cancel();
+    _fsmSubscription = null;
   }
   // Future<void> _listenFSMEvent<E>()
 
@@ -99,8 +110,7 @@ mixin class FSM<T> {
     _lastState = state;
     _state = newState;
   }
-  void changeStateByEvent(T newState) {
-    _lastState = state;
-    _state = newState;
-  }
+
+  @Deprecated('Use changeState')
+  void changeStateByEvent(T newState) => changeState(newState);
 }

@@ -1,13 +1,22 @@
 part of event_arch;
 
 /// Handler function type for processing events.
-/// The handler receives the event data and the last data from the same topic.
-/// If the handler completes but doesn't call EventDTO.completer, 
+/// The handler receives the event data and the previous data from the same topic
+/// (the value that was stored in [EventNode.lastData] before this event).
+/// If the handler completes but doesn't call EventDTO.completer,
 /// EventNode returns null (EventDTO.completer(null)) to the sender.
+/// If the handler throws, the sender receives the error through the completer.
 typedef Handler<T> = Future<void> Function(EventDTO<T> dto, T? lastData);
 
 /// Alias for EventNode type
 typedef Node<T> = EventNode<T>;
+
+/// Internal envelope: DTO plus the `lastData` value at the moment of sending.
+class _NodeEvent<T> {
+  final EventDTO<T> dto;
+  final T? previous;
+  const _NodeEvent(this.dto, this.previous);
+}
 
 /// EventNode represents a node in the event bus system.
 /// It manages the handler, last data, and stream controllers for a specific topic.
@@ -15,52 +24,83 @@ class EventNode<T> {
   T? lastData;
   Handler<T>? handler;
   bool get isDisposed => _streamController.isClosed;
-  // void Function()? onCancel;
-  StreamController<EventDTO<T>> _streamController = StreamController<EventDTO<T>>.broadcast();
-  StreamController<T> _streamControllerValue = StreamController<T>.broadcast();
+  final StreamController<_NodeEvent<T>> _streamController = StreamController<_NodeEvent<T>>.broadcast();
+  final StreamController<T> _streamControllerValue = StreamController<T>.broadcast();
   StreamSubscription? _streamControllerSub;
-  // void Function()? _onDispose;
-  
+
   /// Creates an EventNode with optional initial data and handler.
   /// Sets up the stream listener to process incoming events.
   EventNode({
     this.lastData,
     this.handler,
-    /*this.onCancel*/
   }) {
-    _streamControllerSub = _streamController.stream.listen((event) {
-      if (handler != null) {
-        handler!(event, lastData).then((value) {
-          if (!(event.completer?.isCompleted ?? false)) {
-            event.completer?.complete(null);
-          }
-        });
-      } else 
-      {
-        if (!(event.completer?.isCompleted ?? false)) {
-            event.completer?.complete(null);
-          }
-      }
-
-
-      _streamControllerValue.add(event.data);
-    });
+    _streamControllerSub = _streamController.stream.listen(_process);
   }
-  
-  bool get isHaveHandler => handler!=null;
+
+  /// Handles one event: listeners first, then the handler.
+  ///
+  /// The value goes to the value stream before the handler runs, so listeners
+  /// are notified before the sender's `await send(...)` resumes — and they get
+  /// the data even when the handler fails.
+  void _process(_NodeEvent<T> message) {
+    var event = message.dto;
+
+    _streamControllerValue.add(event.data);
+
+    var h = handler;
+    if (h == null) {
+      _completeIfNeeded(event.completer, null);
+      return;
+    }
+
+    try {
+      h(event, message.previous).then(
+        (_) => _completeIfNeeded(event.completer, null),
+        onError: (Object error, StackTrace stackTrace) =>
+            _completeErrorIfNeeded(event.completer, error, stackTrace),
+      );
+    } catch (error, stackTrace) {
+      // a non-async handler threw synchronously
+      _completeErrorIfNeeded(event.completer, error, stackTrace);
+    }
+  }
+
+  static void _completeIfNeeded(Completer? completer, dynamic value) {
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(value);
+    }
+  }
+
+  static void _completeErrorIfNeeded(Completer? completer, Object error, StackTrace stackTrace) {
+    if (completer != null && !completer.isCompleted) {
+      completer.completeError(error, stackTrace);
+    }
+  }
+
+  bool get isHaveHandler => handler != null;
+
   /// Sends an event to the node if the data type matches T.
   /// Updates the lastData and adds the event to the stream.
   void send(EventDTO dto) {
     if (dto.data is T) {
+      var previous = lastData;
       var d = EventDTO<T>(dto.data, topic: dto.topic, completer: dto.completer);
       lastData = dto.data;
-      _streamController.add(d);
+      _streamController.add(_NodeEvent<T>(d, previous));
+    } else {
+      // an event of a foreign type: it must not be dropped silently, otherwise
+      // the sender would never get an answer
+      _completeIfNeeded(dto.completer, null);
     }
   }
 
+  /// Creates an independent node with the same handler and last data.
+  /// Used to move handlers between buses without sharing state.
+  EventNode<T> copy() => EventNode<T>(handler: handler, lastData: lastData);
+
   /// Disposes of the node, closing all stream controllers and cancelling subscriptions.
   Future<void> dispose() async {
-    _streamControllerSub?.cancel();
+    await _streamControllerSub?.cancel();
     _streamControllerSub = null;
     if (!_streamControllerValue.isClosed) {
       await _streamControllerValue.close();
@@ -68,15 +108,21 @@ class EventNode<T> {
     if (!_streamController.isClosed) {
       await _streamController.close();
     }
-    // if (_onDispose != null) {
-    //   _onDispose!.call();
-    //   _onDispose = null;
-    // }
   }
 }
 
 abstract class EventBus {
   bool get isModelBus;
+
+  /// Handler management without casting `bus as EventBusHandlers`.
+  EventBusHandlers get handlers;
+
+  /// Closes the all-events stream and every node of the bus. Safe to call twice.
+  /// After dispose the bus is unusable: send/listen/subscribe/setHandler throw StateError.
+  Future<void> dispose();
+
+  /// true once [dispose] has been called
+  bool get isDisposed;
 
   /// Stream for all sent events (event DTO, and whether it had a listener or not)
   Stream<(EventDTO, bool)> get allEventStream;
@@ -136,7 +182,13 @@ abstract class EventBus {
 abstract class EventBusHandlers {
   /// Sets a handler for a specific topic.
   /// If initialData is provided, it will be used as the initial data for the topic.
-  void setHandler<T>({T? initalData, String? path, String? target, required Handler<T> handler});
+  void setHandler<T>({
+    T? initialData,
+    @Deprecated('Use initialData') T? initalData,
+    String? path,
+    String? target,
+    required Handler<T> handler,
+  });
   
   /// Removes a handler from a specific topic.
   void removeHandler<T>({
@@ -164,14 +216,39 @@ class EventBusImpl with EventBusMixin {
 mixin EventBusMixin implements EventBus, EventBusHandlers {
   /// Stream controller for all events sent through the bus
   final StreamController<(EventDTO, bool)> _allEventStream = StreamController<(EventDTO, bool)>.broadcast();
+
+  @override
   Stream<(EventDTO, bool)> get allEventStream => _allEventStream.stream;
 
   /// Map storing all event nodes by their topic
   final Map<Topic, EventNode> _eventsMap = {};
-  
+
+  bool _disposed = false;
+  Future<void>? _disposeFuture;
+
+  @override
+  EventBusHandlers get handlers => this;
+
+  /// true once [dispose] has been called
+  @override
+  bool get isDisposed => _disposed;
+
   @override
   bool get isModelBus => false;
-  // EventBusImpl(this.isModelBus);
+
+  /// Checks the bus state before any operation.
+  void _checkNotDisposed() {
+    if (_disposed) {
+      throw StateError('EventBus is disposed: $this');
+    }
+  }
+
+  /// Adds the event to the all-events stream if the bus is still alive.
+  void _addAllEvent(EventDTO dto, bool delivered) {
+    if (!_allEventStream.isClosed) {
+      _allEventStream.add((dto, delivered));
+    }
+  }
   
   /// Gets the last data sent to a specific topic.
   /// Returns null if no data has been sent to that topic.
@@ -190,52 +267,39 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     return null;
   }
 
+  /// Returns the node of a topic, creating it when needed.
+  EventNode<T> _nodeFor<T>(Topic topic) {
+    var node = _eventsMap[topic];
+    if (node != null && node is EventNode<T>) {
+      return node;
+    }
+    var created = EventNode<T>();
+    _eventsMap[topic] = created;
+    return created;
+  }
+
+  /// Value stream of a topic; the node may be removed when the last subscription is cancelled.
+  Stream<T> _valueStream<T>(Topic topic) {
+    var node = _nodeFor<T>(topic);
+    return node._streamControllerValue.stream.doOnCancel(() {
+      removeNode(topic, node);
+    });
+  }
+
   /// Listens to events on a specific topic.
   /// Creates a new EventNode if one doesn't exist for that topic.
   /// Returns a Stream of the data type T.
   @override
   Stream<T> listen<T>({String? path, String? target}) {
-    var t = Topic.create<T>(path: path, target: target);
-    var node = _eventsMap[t];
-    if (node != null && node is EventNode<T>) {
-      return node._streamControllerValue.stream.doOnCancel(() {
-        removeNode(t, node!);
-      });
-      // return node._streamControllerValue.stream.doOnCancel(() {
-      //   removeNode(t, node!);
-      // }) as Stream<T>;
-    } else {
-      node = EventNode<T>();
-      _eventsMap[t] = node;
-      return node._streamControllerValue.stream.doOnCancel(() {
-        removeNode(t, node!);
-      });
-      // return node._streamControllerValue.stream.doOnCancel(() {
-      //   removeNode(t, node!);
-      // }) as Stream<T>;
-    }
+    _checkNotDisposed();
+    return _valueStream<T>(Topic.create<T>(path: path, target: target));
   }
+
   @override
   StreamSubscription<T> subscribe<T>({String? path, String? target,void Function(T e)? onData, Function? onError, void Function()? onDone, bool? cancelOnError}) {
-    var t = Topic.create<T>(path: path, target: target);
-    var node = _eventsMap[t];
-    if (node != null && node is EventNode<T>) {
-      return node._streamControllerValue.stream.doOnCancel(() {
-        removeNode(t, node!);
-      }).listen(onData,cancelOnError: cancelOnError,onDone: onDone,onError: onError);
-      // return node._streamControllerValue.stream.doOnCancel(() {
-      //   removeNode(t, node!);
-      // }) as Stream<T>;
-    } else {
-      node = EventNode<T>();
-      _eventsMap[t] = node;
-      return node._streamControllerValue.stream.doOnCancel(() {
-        removeNode(t, node!);
-      }).listen(onData,cancelOnError: cancelOnError,onDone: onDone,onError: onError);
-      // return node._streamControllerValue.stream.doOnCancel(() {
-      //   removeNode(t, node!);
-      // }) as Stream<T>;
-    }
+    _checkNotDisposed();
+    return _valueStream<T>(Topic.create<T>(path: path, target: target))
+        .listen(onData, cancelOnError: cancelOnError, onDone: onDone, onError: onError);
   }
 
   /// Sends an event to the bus.
@@ -244,21 +308,22 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
   /// If no handler exists, returns null.
   @override
   Future? send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments}) async {
+    _checkNotDisposed();
     var dto =
         EventDTO<T>(data, path: path, fragment: fragment, arguments: arguments, target: target, completer: Completer());
     var node = _eventsMap[dto.topic];
     if (node != null && node is EventNode<T>) {
       node.send(dto);
-      _allEventStream.add((dto, true));
+      _addAllEvent(dto, true);
       return dto.completer?.future;
     } else if (isModelBus) {
       _eventsMap[dto.topic] = EventNode<T>();
       _eventsMap[dto.topic]!.send(dto);
-      _allEventStream.add((dto, true));
+      _addAllEvent(dto, true);
       return dto.completer?.future;
     }
 
-    _allEventStream.add((dto, false));
+    _addAllEvent(dto, false);
     return null;
   }
 
@@ -266,41 +331,42 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
   /// Disposes of the EventNode if it exists.
   @override
   void removeHandler<T>({String? path, String? target}) {
+    _checkNotDisposed();
     var t = Topic.create<T>(path: path, target: target);
-    var node = _eventsMap[t];
+    var node = _eventsMap.remove(t);
     if (node != null) {
-      node.dispose();
-      _eventsMap.remove(t);
+      unawaited(node.dispose());
     }
   }
 
   /// Adds all handlers from another EventBus to this one.
-  /// Sets up stream cancellation to remove nodes when they're no longer needed.
+  /// Nodes are copied: buses don't share state, disposing one doesn't affect the other.
   @override
   void addAllHandlerFromOtherBus(
     EventBus fromBus,
   ) {
+    _checkNotDisposed();
     if (fromBus is EventBusMixin) {
       for (var element in fromBus._eventsMap.entries) {
-        // if (element.value.handler != null) {
-
-        _eventsMap[element.key] = element.value;
-        element.value._streamController.stream.doOnCancel(() {
-          removeNode(element.key, element.value);
-        });
+        var replaced = _eventsMap[element.key];
+        if (replaced != null && !identical(replaced, element.value)) {
+          unawaited(replaced.dispose());
+        }
+        _eventsMap[element.key] = element.value.copy();
       }
-      // }
     }
   }
 
   /// Removes all handlers that are present in another EventBus from this one.
   @override
   void removeAllHandlerPresentInOtherBus(EventBus otherBus) {
+    _checkNotDisposed();
     if (otherBus is EventBusMixin) {
       for (var element in otherBus._eventsMap.entries) {
-        // if (element.value.handler != null) {
-        _eventsMap.remove(element.key);
-        // }
+        var node = _eventsMap.remove(element.key);
+        if (node != null && !identical(node, element.value)) {
+          unawaited(node.dispose());
+        }
       }
     }
   }
@@ -309,13 +375,24 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
   /// If an EventNode already exists for that topic, it updates the handler.
   /// Otherwise, it creates a new EventNode with the handler and initial data.
   @override
-  void setHandler<T>({T? initalData, String? path, String? target, required Handler<T> handler}) {
+  void setHandler<T>({
+    T? initialData,
+    @Deprecated('Use initialData') T? initalData,
+    String? path,
+    String? target,
+    required Handler<T> handler,
+  }) {
+    _checkNotDisposed();
+    var data = initialData ?? initalData;
     var t = Topic.create<T>(path: path, target: target);
     var node = _eventsMap[t];
     if (node != null && node is EventNode<T>) {
       node.handler = handler;
+      if (data != null) {
+        node.lastData = data;
+      }
     } else {
-      _eventsMap[t] = EventNode<T>(handler: handler, lastData: initalData);
+      _eventsMap[t] = EventNode<T>(handler: handler, lastData: data);
     }
   }
 
@@ -323,7 +400,7 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
   /// The node is removed if it has no listeners, no handler, and this is not a model bus.
   bool removeNode(Topic topic, EventNode node) {
     if (!node._streamControllerValue.hasListener && !isModelBus && !node.isHaveHandler) {
-      node.dispose();
+      unawaited(node.dispose());
       _eventsMap.remove(topic);
       return true;
     }
@@ -346,17 +423,16 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     return node?._streamControllerValue.hasListener ?? false;
   }
 
-  Future<void> dispose()async
-  {
-    
+  /// Closes the all-events stream and every node of the bus.
+  /// Safe to call more than once; after dispose the bus throws StateError on use.
+  @override
+  Future<void> dispose() => _disposeFuture ??= _disposeImpl();
+
+  Future<void> _disposeImpl() async {
+    _disposed = true;
     await _allEventStream.close();
-    for (var e in _eventsMap.values){
-      try {
-        e.dispose();
-      } catch (e) {
-        //TODO
-      }
-    }
+    var nodes = _eventsMap.values.toList(growable: false);
     _eventsMap.clear();
+    await Future.wait(nodes.map((e) => e.dispose()));
   }
 }

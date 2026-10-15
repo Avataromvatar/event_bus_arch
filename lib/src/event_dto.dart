@@ -4,7 +4,8 @@ abstract class EventDTO<T> {
   Topic get topic;
   T get data;
 
-  ///completed with null after call handler, if not completed in handler
+  ///completed with null after call handler, if not completed in handler.
+  ///If the handler throws, the completer is completed with that error.
   Completer? get completer;
 
   static EventDTO<T> create<T>(T data,
@@ -26,6 +27,10 @@ abstract class EventDTO<T> {
         /* route*/
         );
   }
+
+  ///Event representation for logs and serialization.
+  ///Data is returned as is: encoding is up to the caller, so an arbitrary
+  ///object in [data] no longer breaks the method.
   Map<String, dynamic> toJson();
 }
 
@@ -37,8 +42,7 @@ class EventDTOImpl<T> implements EventDTO<T> {
   @override
   Completer? completer;
 
-  @override
-  EventDTOImpl(this.topic, this.data, {Completer? completer}) : completer = completer;
+  EventDTOImpl(this.topic, this.data, {this.completer});
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -51,13 +55,14 @@ class EventDTOImpl<T> implements EventDTO<T> {
 
   @override
   String toString() {
-    return jsonEncode(toJson());
+    return 'EventDTO(${topic.fullTopic}, data: $data)';
   }
 
+  @override
   Map<String, dynamic> toJson() {
     return {
       'topic': topic.fullTopic,
-      'data': data != null ? jsonEncode(data) : null,
+      'data': data,
     };
   }
 

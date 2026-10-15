@@ -45,9 +45,9 @@ void main() {
       );
       
       await isolateBus.waitInit;
-      
+
       // Dispose the bus
-      isolateBus.dispose();
+      await isolateBus.dispose();
       
       // The isolate should be disposed
       // Note: We can't directly test the isolate state, but we can ensure no errors occur
@@ -70,9 +70,9 @@ void main() {
       
       // Send multiple events
       final results = await Future.wait<dynamic>([
-        isolateBus.send<int>(1)!,
-        isolateBus.send<int>(2)!,
-        isolateBus.send<int>(3)!,
+        isolateBus.send<int>(1),
+        isolateBus.send<int>(2),
+        isolateBus.send<int>(3),
       ]);
       
       expect(results, [2, 4, 6]);

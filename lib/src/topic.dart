@@ -5,7 +5,12 @@ const String _shema = 'event';
 
 ///By default Topic equals by Topic.topic
 abstract class Topic /*extends Equatable*/ {
-  String get shema;
+  ///Topic scheme, 'event' by default
+  String get scheme;
+
+  @Deprecated('Use scheme')
+  String get shema => scheme;
+
   String? get target;
   String get type;
 
@@ -26,7 +31,9 @@ abstract class Topic /*extends Equatable*/ {
   ///this string include: fragment and arguments
   String get fullTopic;
 
-  Topic copy({String? target, String? fragment, Map<String, String>? arguments});
+  ///Topic copy. Parameters that are not passed are taken from the current topic
+  ///(including path, fragment and arguments).
+  Topic copy({String? target, String? scheme, String? fragment, Map<String, String>? arguments, String? path});
 
   static Topic create<T>({String? target, String? path, String? fragment, Map<String, String>? arguments}) {
     return Topic.fromParametr(
@@ -61,7 +68,10 @@ class EventTopicImpl implements Topic {
   late final Uri _uri;
 
   @override
-  String get shema => _uri.scheme;
+  String get scheme => _uri.scheme;
+  @override
+  @Deprecated('Use scheme')
+  String get shema => scheme;
   @override
   String? get target => _uri.host.split('.').first;
   @override
@@ -95,7 +105,7 @@ class EventTopicImpl implements Topic {
     if (tmp != null) {
       _uri = tmp;
     } else {
-      throw Exception('Cant parse topic $topic');
+      throw EventBusException('Cant parse topic $topic');
     }
   }
 
@@ -106,14 +116,22 @@ class EventTopicImpl implements Topic {
       String target = _targetDefault,
       String? path,
       String? fragment,
-      String shema = _shema,
+      String scheme = _shema,
+      @Deprecated('Use scheme') String? shema,
       Map<String, String>? arguments}) {
     if (type == null && nameType == null) {
-      throw Exception('Topic.create required type or nameType !');
+      throw EventBusException('Topic.create required type or nameType !');
     }
+    var typeName = '${type ?? nameType}'.replaceAll("?", "^");
+    // the topic host is "target.type": a dot inside a part breaks parsing
+    // and makes addresses collide (a.b.int is indistinguishable from a.int)
+    assert(
+        !target.contains('.') && !typeName.contains('.'),
+        'Topic host must be "target.type": "target" and type name must not '
+        'contain a dot (got "$target.$typeName")');
     _uri = Uri(
-        scheme: shema,
-        host: '$target.${'${type ?? nameType}'.replaceAll("?", "^")}',
+        scheme: shema ?? scheme,
+        host: '$target.$typeName',
         path: path,
         fragment: fragment,
         queryParameters: arguments);
@@ -124,14 +142,14 @@ class EventTopicImpl implements Topic {
   }
 
   @override
-  Topic copy({String? target, String? shema, String? fragment, Map<String, String>? arguments, String? path}) {
+  Topic copy({String? target, String? scheme, String? fragment, Map<String, String>? arguments, String? path}) {
     return EventTopicImpl.create(
         nameType: type,
-        shema: shema ?? this.shema,
+        scheme: scheme ?? this.scheme,
         target: target ?? this.target!,
         fragment: fragment ?? (this.fragment.isEmpty ? null : this.fragment),
         arguments: arguments ?? ((this.arguments?.isEmpty ?? true) ? null : this.arguments),
-        path: path);
+        path: path ?? (this.path.isEmpty ? null : this.path));
   }
 
   @override

@@ -6,57 +6,70 @@ mixin class Scope<T> {
   StreamSubscription<T>? _scopeStreamSubscription;
   Command<T>? _scopeCommand;
   T? lastData;
-  (T?, String?, Map<String, String>?)? get lastCall =>
-      _scopeCommand != null ? _scopeCommand!.lastCall : throw Exception("Scope<${T..runtimeType}> not initalize");
+  (T?, String?, Map<String, String>?)? get lastCall => _scopeCommand != null
+      ? _scopeCommand!.lastCall
+      : throw EventBusException("Scope<${T..runtimeType}> not initalize");
   void Function(T newData)? onUpdate;
-  EventBus? get scopeBus =>
-      _scopeCommand != null ? _scopeCommand!.bindedBus : throw Exception("Scope<${T..runtimeType}> not initalize");
-  void initScope(EventBus bus,
-      {T? initalData,
-      bool initalDataNeedExecute = true,
+  EventBus? get scopeBus => _scopeCommand != null
+      ? _scopeCommand!.bindedBus
+      : throw EventBusException("Scope<${T..runtimeType}> not initalize");
+
+  ///Initializes the scope: subscribes to the bus and creates the call history.
+  ///
+  ///The returned future is worth awaiting: it completes once the initial value
+  ///has gone through the bus (or with a handler error).
+  ///[maxLenForUndo] is the history depth, at least 2 (otherwise there is
+  ///nothing to roll back to).
+  Future<void> initScope(EventBus bus,
+      {T? initialData,
+      @Deprecated('Use initialData') T? initalData,
+      bool initialDataNeedExecute = true,
+      @Deprecated('Use initialDataNeedExecute') bool? initalDataNeedExecute,
       String? path,
-      int maxLenForUndo = 0,
-      void Function(T newData)? onUpdate}) {
+      int maxLenForUndo = 10,
+      void Function(T newData)? onUpdate}) async {
+    var data = initialData ?? initalData;
+    var needExecute = initalDataNeedExecute ?? initialDataNeedExecute;
+
+    if (_scopeCommand != null) {
+      // re-initialization: drop the previous subscription and handler
+      disposeScope();
+    }
+
     this.onUpdate = onUpdate;
     _scopeCommand = Command(bus, path: path, maxLen: maxLenForUndo);
 
-    _scopeStreamSubscription?.cancel();
-    _scopeStreamSubscription = null;
-    _scopeStreamSubscription = bus
-        .listen<T>(
-      path: path,
-    )
-        .listen((event) {
+    _scopeStreamSubscription = bus.listen<T>(path: path).listen((event) {
       lastData = event;
-      onUpdate?.call(event);
+      this.onUpdate?.call(event);
     });
-    if (initalData != null) {
-      if (initalDataNeedExecute) {
-        _scopeCommand!.execute(initalData);
+    if (data != null) {
+      if (needExecute) {
+        await _scopeCommand!.execute(data);
       } else {
-        lastData = initalData;
+        lastData = data;
       }
     }
   }
 
   Future<dynamic> call(T newData, {String? fragment, Map<String, String>? arguments}) {
     if (_scopeCommand == null) {
-      throw Exception("Scope<${T..runtimeType}> not initalize");
+      throw EventBusException("Scope<${T..runtimeType}> not initalize");
     }
     return _scopeCommand!.execute(newData, fragment: fragment, arguments: arguments);
   }
 
-  ///call last event
+  ///Rolls back to the previous value from the history
   Future<dynamic> undo() {
     if (_scopeCommand == null) {
-      throw Exception("Scope<${T..runtimeType}> not initalize");
+      throw EventBusException("Scope<${T..runtimeType}> not initalize");
     }
     return _scopeCommand!.undo();
   }
 
   void disposeScope({bool removeHandler = true}) {
     if (_scopeCommand != null && removeHandler) {
-      (scopeBus as EventBusHandlers).removeHandler<T>(path: _scopeCommand?.path);
+      scopeBus!.handlers.removeHandler<T>(path: _scopeCommand?.path);
     }
     _scopeStreamSubscription?.cancel();
     _scopeStreamSubscription = null;

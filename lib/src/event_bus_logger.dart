@@ -3,7 +3,7 @@ part of event_arch;
 typedef LoggerHandler = void Function(EventDTO dto, bool hasListeners);
 
 mixin class EventBusLogger {
-  Map<EventBus, StreamSubscription> _loggerBusesSubscription = {};
+  final Map<EventBus, StreamSubscription> _loggerBusesSubscription = {};
   bool add(EventBus bus, {LoggerHandler handler = defaultLoggerHandler}) {
     if (!_loggerBusesSubscription.containsKey(bus)) {
       StreamSubscription<(EventDTO<dynamic>, bool)> sub;

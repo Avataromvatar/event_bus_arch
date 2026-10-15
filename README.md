@@ -1,282 +1,248 @@
 # EventBus Arch
 
-EventBus Arch is a Dart package that provides an event-driven architecture for managing communication between different parts of an application. It allows components to communicate with each other through events, promoting loose coupling and better organization of code.
-EventBus have a two type is Model and Common. isModelBus autocreate Node if user try send Event what not have Node. Common EventBus not create Node if user send Event what not have Node. 
+`event_bus_arch` is an event-driven architecture toolkit for Dart and Flutter. Components talk to
+each other through events addressed by a URI-like **topic**, so they stay decoupled and can be
+moved between isolates without changing their logic.
 
-For work with event driven architecture this package additional have Finite State machine and EventBusIsolate and layers separated by isolate  
+On top of the bus the package ships a finite state machine, an isolate bridge, multi-isolate
+"layers", and a scope/command wrapper for stateful values.
+
+* Detailed documentation: **[docs/](docs/README.md)**
+* Full API reference: [docs/06-api-reference.md](docs/06-api-reference.md)
+* What changed in 2.3.0 and what to watch out for: [docs/07-caveats.md](docs/07-caveats.md)
 
 ## Features
 
-- Send and receive events between components
-- Support for event handlers with optional return values
-- Isolate-safe event bus for multi-threaded applications
-- Layers what create isolate with EventBus
-- Finite State Machine (FSM)
-- Event scoping with command pattern support
-- Type-safe event handling
-- Flexible topic-based routing
-- two type EventBus: Model and Common. isModelBus autocreate Node if user try send Event what not have Node, Common EventBus dont create Node
+- Send and receive events between components (`send` / `listen` / `subscribe`)
+- Handlers that can return a result to the sender (`EventDTO.completer`)
+- Two bus flavours: **common** (`EventBus()`) and **model** (`EventBus(isModelBus: true)`) —
+  the model bus keeps the last value per topic even when nobody is listening
+- Topic-based routing: event type + `target` + `path`, plus `fragment` and `arguments` as payload
+- `EventBusIsolate` — the same API, but the events are processed in a worker isolate
+- `Layers` — chains of isolates: `main ↔ isolate₂ ↔ isolate₁ ↔ isolate₀`
+- `FSM` — finite state machine driven by bus events
+- `Scope` / `Command` — stateful value with call history
+- `EventBusLogger` — trace every event that crosses the bus
+- Type-safe handlers, no code generation
 
 ## Installation
 
-Add the following to your `pubspec.yaml` file:
-
 ```yaml
 dependencies:
-  event_bus_arch: ^2.2.0
+  event_bus_arch: ^2.3.0
 ```
-Then run:
+
 ```bash
-flutter pub get
+dart pub get      # or: flutter pub get
 ```
 
-## Usage
+Dart SDK `>=3.0.0 <4.0.0`. The package re-exports `rxdart`, so `BehaviorSubject`,
+`debounceTime`, `doOnCancel` and friends are available without an extra import.
 
-### Basic Usage
+## Quick start
 
 ```dart
 import 'package:event_bus_arch/event_bus_arch.dart';
 
-void main() async {
-  // Create an EventBus
-  EventBus bus = EventBus();
-  
-  // Listen for events
-  bus.listen<String>().listen((event) {
-    print('Received event: $event');
+Future<void> main() async {
+  final bus = EventBus();
+
+  // Receive: every event of that topic, current and future
+  final sub = bus.subscribe<String>(onData: (event) => print('got: $event'));
+
+  // Handle: the handler may answer the sender through dto.completer.
+  // lastData is the PREVIOUS value of this topic, dto.data is the current one.
+  bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+    dto.completer?.complete('processed: ${dto.data}');
   });
-  
-  // Send an event
-  await bus.send('Hello, World!');
+
+  final result = await bus.send<String>('hello');
+  print(result);                 // processed: hello
+
+  // by now the listener has already received the value: send() is a sync point
+  await sub.cancel();
+  await bus.dispose();
 }
 ```
 
-### Event Handlers
+### Topics
 
-```dart
-// Set up an event handler
-(bus as EventBusHandlers).setHandler<String>(handler: (dto, lastData) async {
-  print('Handler received: ${dto.data}');
-  // Optionally complete the event with a result
-  dto.completer?.complete('Processed: ${dto.data}');
-});
+A topic is built from the **static type argument** of the call plus `target` and `path`:
 
-// Send an event and get the result
-var result = await bus.send('Test message');
-print('Result: $result'); // Result: Processed: Test message
+```text
+event://all.String/origin#frag?a=b
+       └ target └ type  └ path  └ fragment, arguments
 ```
 
-### EventBusIsolate
+```dart
+await bus.send<Order>(order, target: 'warehouse', path: '/in', arguments: {'priority': '1'});
 
-For multi-threaded applications, EventBusIsolate provides a way to send events between the main isolate and worker isolates:
+bus.subscribe<Order>(target: 'warehouse', path: '/in', onData: (order) => print(order));
+```
+
+`target` and `path` select the topic; `fragment` and `arguments` are delivered to the handler but
+do not affect routing. Because the type is part of the address, `send<int>` and a handler
+registered with `setHandler<num>` are **different topics** — always be explicit with type
+arguments.
+
+### Model bus vs common bus
+
+| | `EventBus()` | `EventBus(isModelBus: true)` |
+|---|---|---|
+| Creates a node when sending to an unknown topic | no | yes |
+| Keeps `lastData` after the last listener unsubscribes | no | yes |
+| `send` to a topic nobody handles | resolves with `null`, event goes to `allEventStream` with flag `false` | resolves with `null`, node is created |
+
+Use the model bus when the bus is a store of current state, and the common bus when it is a
+message pipe.
+
+### Isolates
 
 ```dart
-///this func run in isolate. And we wait event <int> and send result <String>
-void _initIsolate(EventBus bus) {
-  (bus as EventBusHandlers).setHandler<int>(handler: (dto, lastData) async {
-    // Process event in isolate
-    dto.completer?.complete(dto.data);
-    // Send event back to main thread
-    bus.send(dto.data.toString());
-  });
+import 'dart:isolate';
+import 'package:event_bus_arch/event_bus_arch.dart';
+
+Future<void> main() async {
+  final iso = EventBusIsolate(onInit: _worker, initialData: 'worker');
+  await iso.waitInit;                                  // true when onInit has completed
+
+  iso.subscribe<String>(onData: (e) => print('from worker: $e'));
+  final doubled = await iso.send<int>(21, arguments: {'multiplier': '2'});
+  print(doubled);                                      // 42
+
+  await iso.dispose();
 }
 
-void main() async {
-  EventBusIsolate isolateBus = EventBusIsolate(onInit: _initIsolate);
-  await isolateBus.waitInit;
-  
-  // Listen for events from isolate
-  isolateBus.listen<String>().listen((event) {
-    print('Event from isolate: $event');
+// runs inside the worker isolate — must be a top-level or static function
+Future<void> _worker(EventBus bus, Object? initialData) async {
+  await _heavyInit();                                  // async init is fine
+  bus.handlers.setHandler<int>(handler: (dto, lastData) async {
+    final m = int.tryParse(dto.topic.arguments?['multiplier'] ?? '1') ?? 1;
+    dto.completer?.complete(dto.data * m);
   });
-  
-  // Send event to isolate
-  var result = await isolateBus.send(10);
-  print('Result: $result'); //Result: 10
 }
 ```
 
-### Scoping with Command Pattern
+`EventBusIsolate` behaves like a normal bus on both sides: events sent from the worker reach
+main-isolate listeners, and `send` from main returns the worker's handler result.
 
-The Scope class provides a way to manage event-based state with command pattern support:
+Good to know:
+
+1. Only sendable objects can cross the isolate boundary.
+2. `waitInit` completes when `onInit` has finished (including its `await`s), so events sent right
+   after it are never lost. Errors from `onInit` surface as an `EventBusException` from
+   `waitInit`.
+3. Every request is answered exactly once and correlated by request id, so concurrent requests of
+   the same type each get their own result. A topic the worker knows nothing about resolves to
+   `null`; a handler error is rethrown at the sender; an in-flight request fails with
+   `EventBusException` if the isolate is disposed.
+4. `ping()` only checks liveness ("is the worker alive"), not readiness.
+
+### Layers
 
 ```dart
-Scope<String> scope = Scope<String>();
+final layer = await Layers.createLayers([
+  (_initMiddle, null, true),   // (init function, initial data, isModelBus)
+  (_initBottom, null, true),
+]);
+// main ↔ isolate[middle] ↔ isolate[bottom]
 
-void initScope() {
-  scope.initScope(bus, initalData: 'Initial Value', onUpdate: (data) {
-    print('Data updated: $data');
-  });
-}
-
-// Send an event
-await scope.call('New Value');
-
-// Undo last event
-await scope.undo();
+// createLayers completes only when every layer in the chain is initialized,
+// so events can be sent right away
+layer.bottom!.subscribe<Ping>(onData: (e) => print(e.count));
+layer.bottom!.send(Ping(0));
+await layer.close();
 ```
 
-### Layers 
-The layer consists of two or more parts that are located in different isolates, these isolates work through EventBusIsolate. Each layer can have top and bottom levels.  
-see layer example.
-```dart
-class TestIsolateProvider
-{
-  late Layer layer;
-  Completer _completer = Completer();
-  Future<void> get wait =>_completer.future;
-  TestIsolateProvider()
-  {
-    ///Create Layer with deep 1  
-    ///top layer <-> isolate <-> bottom layer
-    Layers.createLayers([(_initLayers,null,true)]).then((value) {
-      layer = value;
-      layer.bottom!.subscribe<int>(onData: (e) {
-        print('Get from bottom $e');
-      },);
-      _completer.complete();
+Inside a layer, `layer.top` sends to the layer above, `layer.bottom` to the layer below, and
+`layer.current` is the layer's own bus. Init functions may be `async` and may live in any layer;
+`Layer.close()` works from any layer and is safe to call twice. See
+[docs/03-isolate-and-layers.md](docs/03-isolate-and-layers.md#example-two-worker-layers)
+and [example/event_bus_layers_example.dart](example/event_bus_layers_example.dart).
 
-    },);
+### Finite state machine
+
+```dart
+enum State { idle, loading, ready }
+
+class Loader with FSM<State> {
+  Loader(EventBus bus) {
+    initFSM(bus, State.idle);
+    addFSMTransition<Start>(State.idle, State.loading,
+      filter: (current, last, event) => event.url.isNotEmpty,
+      handler: (current, last, event, ignored) async {
+        print('$last -> $current ($event)');
+        return null;
+      });
   }
-  Future<int> send(int data)async
-  {
-    print('SEND $data');
-    layer.bottom!.send(data);
-    var ret = (await layer.bottom!.listen<int>().first);
-    
-    return ret;
-  }
 }
-Future<void> main()async
-{
-  var providerIsolate = TestIsolateProvider();
-  await providerIsolate.wait;
-  print('GET ${await providerIsolate.send(1)}');
-  await providerIsolate.layer.close();
-}
-//This function run in bottom Isolate
-void _initLayers(Layer layer,Object? initalData)async
-{
-    print('Hello From ${Isolate.current.hashCode}');
-    layer.top!.subscribe<int>(onData: (e) {
-      layer.top!.send(e*10);
-    },);
-    
-}
+
+await bus.send(Start('/api/items'));   // State.idle -> State.loading
 ```
 
-### FSM Finite State Machine
+Events arriving while a transition handler is running are collected into the `ignoredEvents`
+argument and are not replayed afterwards.
+
+### Scope and Command
 
 ```dart
-enum FSMTeststate
-{
-  state0,
-  state1,
-  state2,
-  state3
-}
-class FSMTest with FSM<FSMTeststate>
-{
-  final EventBus bus;
-  FSMTest(this.bus)
-  {
-    initFSM(bus, FSMTeststate.state0);
-    addFSMTransition<int>(FSMTeststate.state0, FSMTeststate.state1,filter: (currentState, lastState, event) { return event==1;},handler:(currentState, lastState, event, ignoredEvents) async{
-      print('$lastState -> $currentState with $event');
-    }, );
-    addFSMTransition<int>(FSMTeststate.state1, FSMTeststate.state2,filter: (currentState, lastState, event) { return event==2;},handler:(currentState, lastState, event, ignoredEvents) async{
-      print('$lastState -> $currentState with $event');
-    },);
-    addFSMTransition<String>(FSMTeststate.state2, FSMTeststate.state3,handler: (currentState, lastState, event, ignoredEvents) async{
-      print('$lastState -> $currentState with $event');
-    },);
-  }
+final scope = Scope<int>();
+await scope.initScope(
+  bus,
+  path: '/counter',
+  initialData: 0,
+  maxLenForUndo: 10,                 // history depth; undo needs at least 2 entries
+  onUpdate: (value) => print('value: $value'),
+);
 
-}
-Future<void> main()async
-{
-  var fsm = FSMTest(EventBus());
-  await fsm.bus.send(1);
-  await fsm.bus.send(2);
-  await fsm.bus.send('Test');
-
-}
+await scope.call(1);                 // goes through the bus
+print(scope.lastData);               // 1  (filled by the bus subscription)
+await scope.undo();                  // re-sends the PREVIOUS value from the history
+scope.disposeScope();
 ```
 
-## API Reference
+`Command` keeps the call history (`maxLen`) and `undo()` sends the previous value back through the
+bus. `undo()` returns `null` when there is nothing to roll back to.
 
-### EventBus
+## Documentation
 
-The EventBus class provides core functionality for sending and receiving events.
+Detailed guides live in [docs/](docs/README.md) (Russian):
 
-#### Methods
+| Document | Content |
+|---|---|
+| [01-architecture.md](docs/01-architecture.md) | Topics, DTOs, nodes, the full send/receive flow |
+| [02-event-bus.md](docs/02-event-bus.md) | Practical bus usage, handlers, addressing, recipes |
+| [03-isolate-and-layers.md](docs/03-isolate-and-layers.md) | `EventBusIsolate`, `Layers`, exchange limits |
+| [04-fsm.md](docs/04-fsm.md) | State machine on top of the bus |
+| [05-scope-and-command.md](docs/05-scope-and-command.md) | State with history, command pattern |
+| [06-api-reference.md](docs/06-api-reference.md) | Every public type and member |
+| [07-caveats.md](docs/07-caveats.md) | What was fixed in 2.3.0, what remains by design, checklist |
 
-- `send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments})` - Send an event
-- `listen<T>({String? path, String? target})` - Listen for events
-- `lastData<T>({String? path, String? target})` - Get the last data sent for a topic
-- `haveHandler<T>({String? path, String? target})` - Check if a handler exists for a topic
-- `haveListener<T>({String? path, String? target})` - Check if a listener exists for a topic
+## Version 2 changes
 
-### EventBusHandlers
+- `EventBusIsolate`, `Layers`, `FSM`, `Scope`/`Command`, `subscribe`, `dispose` were added
+- Reduced API surface; the bus always returns a result or `null` (the old `call` method is gone)
+- `EventBusMaster` was removed — buses no longer need names
+- Handlers return values through `EventDTO.completer`
 
-The EventBusHandlers mixin provides methods for managing event handlers.
+## Version 2.3.0 changes
 
-#### Methods
+- `EventBus` now exposes `handlers` (no more `bus as EventBusHandlers`) and an idempotent `dispose()`
+- Handler failures reach the sender instead of hanging it; listeners receive values before
+  `await send(...)` returns
+- `EventBusIsolate` correlates responses by request id, `waitInit` means "onInit completed",
+  and `ping()` checks liveness; in-flight requests fail instead of hanging on dispose
+- `Layers.createLayers` completes only when the whole chain is initialized; `Layer.close()` works
+  from any layer
+- `Scope`/`Command` `undo()` sends the previous value; `Scope.maxLenForUndo` defaults to 10
+- `EventDTO.toJson` no longer encodes data; `Topic.copy` keeps `path`; `EventBusException` is exported
+- Typo'd members got correct names (`queueLength`, `initialData`, `scheme`,
+  `initialDataNeedExecute`) with the old ones kept as `@Deprecated`
 
-- `setHandler<T>({T? initalData, String? path, String? target, required Handler<T> handler})` - Set an event handler
-- `removeHandler<T>({String? path, String? target})` - Remove an event handler
-- `addAllHandlerFromOtherBus(EventBus fromBus)` - Copy all handlers from another bus
-- `removeAllHandlerPresentInOtherBus(EventBus otherBus)` - Remove handlers present in another bus
+The full list with reproductions is in [docs/07-caveats.md](docs/07-caveats.md#what-was-fixed-in-230).
 
-### Command
-
-The Command class provides command pattern support for event handling.
-
-#### Methods
-
-- `execute(T data, {String? fragment, Map<String, String>? arguments})` - Execute a command
-- `undo()` - Undo the last command
-- `queueLenght` - Get the queue length
-- `lastCall` - Get the last call details
-
-### Scope
-
-The Scope class provides scoping for events with command pattern support.
-
-#### Methods
-
-- `initScope(EventBus bus, {T? initalData, bool initalDataNeedExecute = true, String? path, int maxLenForUndo = 0, void Function(T newData)? onUpdate})` - Initialize the scope
-- `call(T newData, {String? fragment, Map<String, String>? arguments})` - Call an event
-- `undo()` - Undo the last event
-- `disposeScope({bool removeHandler = true})` - Dispose the scope
-
-### Topic
-
-The Topic class represents event topics with various components.
-
-#### Properties
-
-- `shema` - The schema of the topic
-- `target` - The target of the topic
-- `type` - The type of the topic
-- `host` - The host of the topic
-- `path` - The path of the topic
-- `fragment` - The fragment of the topic
-- `arguments` - The arguments of the topic
-- `topic` - The topic without fragment and arguments
-- `topicWithFragment` - The topic with fragment
-- `fullTopic` - The full topic with fragment and arguments
-
-## Version 2 Changes
-
-Version 2 introduced several significant changes:
-
-1. **Reduced code base**: Simplified architecture for easier maintenance
-2. **EventBusIsolate**: Added support for isolate-safe event communication
-3. **Simplified event handling**: Removed the "call" method, now always return either a result or null
-4. **Removed EventBusMaster**: Abandoned the need to give names to EventBus
-5. **Improved handler return values**: Handlers can now return results via Completer in EventDTO
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).

@@ -1,10 +1,9 @@
-# 09. v3.0 plan: no Completer, and a NATS transport
+# 09. v3.0 plan: `send` + `fire`, and a NATS transport
 
 [← 08. Transports](08-transports.md) · [Contents](README.md)
 
-**Status: plan.** Nothing in this document exists in 2.3.0, and parts of it describe a breaking
-change to the public API. It follows the analysis in [08-transports.md](08-transports.md) and
-records the decisions taken after it.
+**Status: plan.** Nothing here exists in 2.3.0. It follows the analysis in
+[08-transports.md](08-transports.md) and records the decisions taken after it.
 
 ---
 
@@ -12,83 +11,130 @@ records the decisions taken after it.
 
 | # | Decision | Consequence |
 |---|---|---|
-| 1 | **NATS first, core only — no JetStream.** MQTT kept in mind as the second transport. | At-most-once delivery. No broker dedup, no persistence. `dart_nats` is used as a plain pub/sub client, avoiding its experimental surface. |
-| 2 | **`Completer` is removed in 3.0.** `send` no longer returns a result. | The bus is a bus, not an RPC. `EventBusIsolate` simplifies drastically. **But an error path must replace it** — see §3. |
-| 3 | **`send` returns `bool`.** | Synchronous, and therefore only answerable from state the caller already holds. See §2 for exactly what it can and cannot mean. |
-| 4 | **Ordering and duplicates are delegated** to the NATS/MQTT client library. | Safe under core NATS *provided* the transport uses a single connection — see §7, risk R6. |
-| 5 | **The NATS client runs inside its own isolate**, and sockets never leave it. | Native only: `Isolate.spawn` throws `UnsupportedError` on Flutter Web. See §5.4. |
+| 1 | **NATS first, core only — no JetStream.** MQTT kept in mind. | At-most-once. `dart_nats` used as a plain pub/sub client, avoiding its experimental surface. |
+| 2 | **`send` is kept as it is**, `Completer` and all. | All 83 tests, `EventBusIsolate`, `Scope`, `Command` and the isolate fixes stay untouched. §2.4. |
+| 3 | **A new `fire` carries one-way events** and returns `bool`. | The only dispatch path that crosses a transport. §2. |
+| 4 | **The address becomes broker-native: `target.path.type`.** | `Topic` stops being a URI. One token-order problem and one ambiguity problem to settle first. §4. |
+| 5 | **The NATS wrapper holds filters**, each with its own serializer/deserializer; payload is `Uint8List`. | One structure declares both "what may cross" and "how it is encoded". §5. |
+| 6 | **Ordering and duplicates are delegated** to the client library. | Safe under core NATS *provided* one connection per pipe — risk R5. |
+| 7 | **The NATS client runs in its own isolate**; sockets never leave it. | Native only: `Isolate.spawn` throws `UnsupportedError` on Flutter Web. §6. |
 
-Decisions 2 and 3 are the breaking ones; 1, 4 and 5 are additive.
+Compared with the earlier draft of this plan (which removed the `Completer`), decisions 2 and 3
+shrink the change from a core rewrite into an addition. That is the right trade for v3 — §2.4 says
+why — and the cost is one new rule for users to learn: **`send` for a reply, `fire` for a network.**
 
 ---
 
-## 2. What `send` returning `bool` can mean
+## 2. `send` and `fire`
 
-Three different questions hide behind "отправлено и есть подписчик", and only one of them is
-answerable synchronously:
+### 2.1 Naming: `fire`
 
-| Question | Answerable? |
-|---|---|
-| Is there a local node (handler or listener) for this topic? | Yes — the `_eventsMap` lookup is synchronous. |
-| Is a transport connected and able to accept the event? | Yes, but only from a **cached** state, because the socket lives in another isolate. |
-| Does a *remote* process have a subscriber? | **No.** Core NATS gives no way to ask. |
+Recommended: **`fire`**.
 
-The third line is the important one. In NATS, "did anyone receive this?" is only observable
-through `no_responders`, and that works **exclusively for request/reply** — the server answers a
-*request* whose subject has no subscribers with a 503. Decision 2 removed request/reply, so this
-mechanism is gone too. Plain `pub` is fire-and-forget by design.
+* It names the property that actually distinguishes it: *fire and forget*. A reader who knows the
+  idiom knows the event gets no answer, which is the whole point of the method.
+* It contrasts with `send` on sight. `send` has a destination and may expect something back;
+  `fire` is aimed at no one and expects nothing. Two words, one distinction, no doc needed.
+* It is the established verb in the Dart/Flutter event-bus ecosystem, so it costs a newcomer
+  nothing to learn.
 
-### 2.1 The contract
+Runner-up: **`emit`**. Its argument is real — Node's `EventEmitter.emit()` already returns `true`
+when there were listeners, which is almost exactly this contract, and borrowing an established
+convention is worth something. Against it: in Flutter, `emit` is strongly associated with
+Cubit/BLoC, where `emit(state)` means "publish new state", not "dispatch an event outward". The
+package would be importing a word that already means something else to its main audience, and the
+`send`/`emit` pair reads less clearly than `send`/`fire`.
+
+### 2.2 The contract of `fire`
 
 ```dart
-/// true  — the bus took responsibility for the event:
-///         a local node accepted it, or a live transport accepted it for publishing
-/// false — nothing took it: no local node and no usable transport,
-///         or the transport refused it (down, or over its queue limit)
-bool send<T>(T data, {String? path, String? fragment, String? target,
+/// Dispatches a one-way event. No answer comes back — there is no completer and
+/// nothing to await.
+///
+/// true  — the event was taken: a local node accepted it, or a transport
+///         accepted it for publishing
+/// false — nothing took it, and retrying the same call may help once the
+///         situation changes: no local node, no usable transport, no filter
+///         matched the topic, or the transport is over its queue limit
+///
+/// Throws EventBusException when retrying cannot help: the topic cannot be
+/// mapped to a legal subject, no filter can encode the type, the payload is
+/// over the size limit, or the bus is disposed.
+bool fire<T>(T data, {String? target, String? path, String? fragment,
                       Map<String, String>? arguments});
 ```
 
-`false` means **dropped, and the caller may retry or log it**. It deliberately does not promise
-delivery, and must not be documented as if it did.
+Three things this contract is careful about:
 
-This is a change in kind, not just in type: `send` stops being a query about the world and becomes
-a statement about what the bus did with the event. It is the honest form of what decision 3 asks
-for, and it is the only form that stays true across a network.
+* **`false` never means "not delivered".** It means "not taken". Same reasoning as in
+  [08-transports.md §2](08-transports.md) — over core NATS, whether a remote process received
+  anything is not observable at all. NATS answers "no subscribers" only for *requests*
+  (the `no_responders` 503), and `fire` is not one.
+* **`false` doubles as the backpressure signal.** `SendPort` is unbounded and never blocks, so a
+  slow socket would otherwise grow the transport isolate's mailbox until the process dies.
+  Returning `false` past a configurable in-flight limit turns an OOM into a visible drop —
+  risk R6.
+* **Filtered-out is `false`, not an error.** A topic that matches no filter is normal operation
+  for a wrapper that is meant to keep internal events internal (§5).
 
-### 2.2 Things that throw rather than return `false`
+### 2.3 What `send` does when a transport is attached
 
-`false` means "not accepted now, retryable". Contract violations still throw
-`EventBusException`, because retrying them never helps:
+`send` stays exactly as it is *locally*, and gains one new failure mode:
 
-* the topic cannot be mapped to a legal NATS subject (§4.4);
-* no codec is registered for the static type `T` (§4.3);
-* payload exceeds the local size limit;
-* the bus is disposed (today's behaviour, kept).
+| Situation | Today | v3 |
+|---|---|---|
+| Local node exists | delivered, completer works | **unchanged** |
+| No local node, no transport | returns `null` | **unchanged** |
+| No local node, **transport attached** | returns `null` | **throws**, naming `fire` |
+| Inbound remote event | n/a | the DTO arrives with `completer == null` |
 
-### 2.3 What is lost, and cannot be recovered
+The third row is the safety net. It cannot produce a false positive in any meaningful way: if
+there is no local node, nothing in this program can complete the completer, so a `send` there
+could only ever return `null` or hang — it was already useless. The change converts a silent
+`null` into a loud, actionable error. (On `isModelBus: true` a node is always created, so this
+row does not apply.)
 
-* "There is a remote subscriber" is unknowable. `haveListener` / `haveHandler` keep their exact
-  local meaning and must be documented as **local only**.
-* `send`-as-sync-point ([07-caveats.md, item 3](07-caveats.md#3-delivery-to-listeners-is-asynchronous))
-  holds locally and is meaningless remotely. Under decision 2 it stops being a promise anyone
-  could rely on for a result — which removes the trap rather than hiding it.
+The fourth row is what keeps the two paths from interfering: an event that arrived over the
+network has no sender waiting, so its `completer` is `null`. A handler written for `send` that
+calls `dto.completer?.complete(x)` — the pattern used throughout the package — quietly no-ops when
+the same handler is reached by `fire` or by a remote event. No handler rewrite is needed.
+
+### 2.4 Why keeping `send` is the cheaper plan
+
+Worth stating plainly, because the earlier draft of this plan argued the opposite.
+
+Removing the `Completer` would have simplified `EventBusIsolate` — but `event_bus_isolate.dart` is
+the most-repaired file in the package: fixes #2, #3, #19, #20 and #21 all live in it, five of
+twenty-one. Removing the `Completer` would also have silently killed the error path for throwing
+handlers (fix #6) and broken `Scope.initScope`, which awaits the result of its first send
+([scope.dart:56](../lib/src/scope.dart#L56)).
+
+Keeping `send` costs one thing instead: **two dispatch paths must coexist, and users must know
+which one to reach for.** That is a documentation problem with a clear rule — reply wanted → `send`;
+crossing a process boundary → `fire` — rather than a rewrite of the package's most fragile code.
+The blast radius in §7 reflects that.
+
+### 2.5 Why not auto-mirror
+
+An obvious temptation: when a transport is attached, make `send` also publish. **Rejected.**
+It would deliver the same event twice to a process that has both a local handler and a remote
+subscriber, and it would leave the completer's meaning ambiguous — should it complete on local
+handling, on publish, or on both? One method, one path across the boundary: `fire`.
 
 ---
 
-## 3. The error path that must replace the Completer
+## 3. The error path (smaller than before)
 
-This is the largest single risk in the whole plan, and it is created by decision 2.
+With `send` kept, the error story is mostly intact: a throwing handler still reaches its sender
+through the completer (fix #6). Only two cases have nowhere to report:
 
-Today a handler that throws is visible to the sender, because `EventNode` completes the
-`completer` with the error (fix #6 in [07-caveats.md](07-caveats.md), with tests). Remove the
-`Completer` and a throwing handler has **nowhere to report**. The default would be an unhandled
-async error in the zone — invisible in a Flutter app, fatal in a well-behaved server.
+* a handler that throws while serving a **fired** event — nobody is waiting;
+* a transport-level failure — connection lost, publish rejected, undecodable inbound message.
 
-**The replacement is a first-class error channel:**
+Both need a channel, so `errorStream` is still required, but scoped:
 
 ```dart
-enum EventErrorSource { handler, transport, codec }
+enum EventErrorSource { handler, transport, filter }
 
 class EventBusError {
   final EventDTO? dto;          // null for transport-level failures
@@ -98,125 +144,190 @@ class EventBusError {
 }
 
 abstract class EventBus {
-  /// Replaces "the sender gets the handler error through the completer".
   Stream<EventBusError> get errorStream;
 }
 ```
 
-Rules:
-
-* a handler that throws publishes an `EventBusError(handler)` and the bus carries on;
-* a transport that fails to publish publishes an `EventBusError(transport)`;
-* an undecodable inbound message publishes an `EventBusError(codec)` — this is how a missing
-  registry entry stops being a silent drop;
-* `EventBusLogger` gains an `errorStream` subscription so the default experience is "you see it
-  in the log", matching today's behaviour.
-
-Without this item, v3.0 is a **regression against a documented, tested guarantee**. It should be
-implemented in the same commit that removes the `Completer`, not after.
+`EventBusLogger` subscribes to it, so the default experience is "you see it in the log".
+`EventErrorSource.filter` covers the case that matters most: **an inbound message no filter can
+decode must not be a silent drop** — that is how a registry that drifted between two deployed
+services becomes visible instead of looking like a quiet night.
 
 ---
 
-## 4. Blast radius of removing the Completer
+## 4. The address: `target.path.type`
 
-Measured against 2.3.0: 34 `Completer` references across `lib/`, `test/` and `example/`, and 83
-tests.
+### 4.1 What the order buys, and what it costs
 
-| File | Change | Risk |
-|---|---|---|
-| [topic.dart](../lib/src/topic.dart) | untouched | none — the local address model survives v3 unchanged |
-| [event_dto.dart](../lib/src/event_dto.dart) | `completer` field, the `Completer` parameter and the `completer:` named argument removed; `toJson` shrinks | low |
-| [event_bus.dart](../lib/src/event_bus.dart) | `EventNode._process` loses `_completeIfNeeded` / `_completeErrorIfNeeded`; `EventNode.send` loses the `dto.data is T` completion branch; `EventBus.send` returns `bool`; `errorStream` added | medium — the `data is T` branch also existed to stop foreign-type events hanging a sender; with no sender waiting, that path becomes "report and drop" |
-| [event_bus_isolate.dart](../lib/src/event_bus_isolate.dart) | `_PendingRequest`, `_IsolateResponse`, `_IsolateErrorResponse`, `_IsolateRequest.completer` and most of `failAllPending` disappear. `_IsolateLink` becomes a one-way forwarder plus ping plus status | **high** — this is the most-repaired file in the package (fixes #2, #3, #19, #20, #21 all live here) |
-| [command.dart](../lib/src/command.dart) | `execute` / `undo` return `bool`; `undo()` with a short history returns `false` instead of `null` | low, but see §4.1 |
-| [scope.dart](../lib/src/scope.dart) | `initScope` no longer has a result to await | **high** — see §4.1 |
-| [fsm.dart](../lib/src/fsm.dart) | none — it reads `allEventStream` and never uses the completer | none |
-| [layers.dart](../lib/src/layers.dart) | none structurally; its `EventBusIsolate` shrinks underneath it | low |
-| `test/` (9 files, 34 references) | rewritten around `bool` and `errorStream` | medium — the tests are the only safety net for the isolate fixes |
-| `doc/` (7 documents) | every reference to `send` returning a value | medium — 3,230 lines to re-read |
+```text
+<prefix> . <type> . <target> . <path...>      ← proposed below
+   │         │         │          │
+   │         │         │          └─ free-form, dots allowed
+   │         │         └──────────── free-form, dots allowed
+   │         └────────────────────── exactly ONE token, dot-free
+   └──────────────────────────────── tenant / application namespace
 
-### 4.1 The one non-obvious casualty: `Scope.initScope`
-
-[scope.dart](../lib/src/scope.dart) documents and relies on:
-
-```dart
-/// The returned future is worth awaiting: it completes once the initial value
-/// has gone through the bus (or with a handler error).
-await _scopeCommand!.execute(data);      // scope.dart:56
+acme.shop.OrderPlaced.factory1.line3.machine7.temp
 ```
 
-That await is a `Completer` round-trip. With no `Completer` it cannot complete "after the value
-went through the bus", and `Command.execute` returning `bool` leaves nothing to await.
+Required change to the proposal: **the type must come first, not last.** `target.path.type` reads
+better as a hierarchy — location, then what happened — but it breaks a pattern that is hard to give
+up once noticed.
 
-Options:
+NATS's `>` wildcard matches one or more tokens and is **legal only as the final token**. `*` matches
+exactly one token. That makes the two orders unequal:
 
-* **A (recommended):** `initScope` keeps `Future<void>`, and completes after the value stream has
-  delivered the initial value to its own subscription — a microtask hop, no round-trip. Loses the
-  "handler error surfaces here" clause, which moves to `errorStream`.
-* **B:** `initScope` becomes synchronous `void`. Smaller, blunter, and a wider break for callers.
+| You want | `<prefix>.<type>.<target>.<path>` | `<prefix>.<target>.<path>.<type>` |
+|---|---|---|
+| everything for a tenant | `acme.>` ✓ | `acme.>` ✓ |
+| one type, **any target** | `acme.OrderPlaced.>` ✓ | `acme.>.OrderPlaced` ✗ illegal (`>` not final) |
+| one type, one-token target | `acme.OrderPlaced.*` ✓ | `acme.*.OrderPlaced` ✓ |
+| any type, a given target | `acme.*.warehouse` ✓ | `acme.warehouse.>` ✓ |
+| everything for a target | `acme.>.warehouse` ✗ | `acme.warehouse.>` ✓ |
 
-Either way the doc comment and [05-scope-and-command.md](05-scope-and-command.md) must change.
+The blocking line is the second one. With the type last, "give me every `OrderPlaced` regardless of
+where it came from" is expressible **only if `target` is exactly one token** — `acme.*.OrderPlaced`
+matches one middle token and nothing deeper. The moment `target` may contain dots, as decision 4
+wants, the pattern becomes unwritable at any depth. With the type first it is a single obvious
+`acme.OrderPlaced.>`.
 
-### 4.2 A simplification worth taking
+A second, independent reason: with the type first, the type is at a **fixed position** immediately
+after the prefix, so it can be found by counting, and the rest of the subject can be free-form
+without any parsing rule. With the type last it is found by taking the last token — also fixed —
+but then `>` in a subscription can never cover a multi-token target, as above.
 
-Removing the `Completer` makes `EventBusIsolate` and a network transport **the same shape**: a
-bidirectional pipe that forwards events between two buses, one direction each, with a readiness
-handshake and a status stream.
+Note also that today's order is `target.type/path` — the type in the **middle**. That is the worst
+of the three: it is a fixed position only while `target` is a single token, which is exactly the
+constraint decision 4 wants to lift.
 
-That is the reason to do the `Completer` removal *before* the transport work rather than with it:
-after §3 and §4 are done, `EventBusIsolate` is a 366-line file reduced to roughly a pipe, and a
-NATS transport is the same pipe with a codec bolted on. Doing it in the other order means writing
-the request/reply machinery twice — once for the isolate, once for the broker — and then deleting
-one of them.
+### 4.2 The ambiguity, and the fix
 
-### 4.3 Workspace migration (independent of everything above)
+If both `target` and `path` may contain dots, the reverse mapping becomes ambiguous:
 
-Move to a [pub workspace](https://dart.dev/tools/pub/workspaces): `workspace:` in the root
-pubspec, `resolution: workspace` in members, SDK floor `^3.6.0` (from `>=3.0.0`). No Melos needed.
-Do this as a separate commit before any transport code exists, so the first transport package does
-not have to land in the same change as the monorepo restructure.
+```text
+subject : acme.shop.factory1.line3.machine7.temp.OrderPlaced
+prefix  : acme.shop            (known)
+type    : the fixed token
+middle  : factory1.line3.machine7.temp      ← split where?
+```
+
+`target = factory1.line3`, `path = machine7.temp` and `target = factory1`, `path = line3.machine7.temp`
+produce the same subject. Anything that needs to rebuild `target` and `path` on the receive side
+will pick one, the handler registered under the other will not be found, and the event is dropped
+with no error.
+
+Three ways out:
+
+* **(a) The subject is the key — recommended.** `Topic` equality becomes the subject string.
+  `target` and `path` are *write-side builders*: both `fire<T>(data, target:, path:)` and
+  `setHandler<T>(target:, path:)` build the same subject from their inputs, and the receive path
+  never reconstructs anything — the arriving subject is the key. The ambiguity cannot be reached
+  because nothing is ever parsed back.
+* **(b) Fix the boundary.** Forbid dots in `target` — keep today's `assert` — and let only `path`
+  be free-form. The split becomes deterministic: first token after the prefix is the target, the
+  rest is path. Costs the flexibility decision 4 asked for on `target`, and keeps
+  `dto.topic.target` / `dto.topic.path` meaningful on both sides.
+* **(c) A separator token** between target and path. Ugly, and it reserves a token that can collide
+  with application data.
+
+**Recommendation: (a).** It is the smallest rule set — the subject is the address, full stop — and
+it is the only one that needs no parsing convention to be remembered by every reader.
+
+The cost of (a) must be documented, though: on an **inbound remote event**, `dto.topic.target` and
+`dto.topic.path` cannot be recovered reliably. A handler that branches on them to decide what to do
+will work for locally-sent events and quietly misbehave for remote ones. Handlers should branch on
+the event type and use the subject string for logging and routing. If branching on `target` inside
+a handler is a real pattern in existing code, take option (b) instead — it is the conservative
+choice and it is strictly less powerful, not less correct.
+
+### 4.3 Rules
+
+| Part | Rule | Why |
+|---|---|---|
+| `prefix` | 1+ tokens of `[A-Za-z0-9_-]` | tenant namespace; broker ACLs are written against it |
+| `type` | exactly **one** token, `[A-Za-z0-9_-]`, from the filter table | a dot would shift every following token; this is the token the decoder keys on |
+| `target` | free-form, dots allowed under (a) | decision 4 |
+| `path` | free-form, dots allowed under (a) | decision 4 |
+| any token | non-empty, no whitespace, no `*`, no `>`, no `$`-prefix, no leading/trailing dot | NATS wildcards, reserved `$SYS`/`$JS`/`$KV`, and `..` is not a valid subject |
+| total | ≤ 16 tokens, ≤ 256 chars | NATS's own sizing advice |
+| payload | 1 MiB by default | the NATS server default; configurable, and checked locally so a failure is loud (risk R11) |
+
+Validation happens at `fire` / `setHandler`, not at the socket: a subject that is illegal *for the
+broker* should never reach it. Today's only guard is a debug-mode `assert` on `target`
+([topic.dart:128](../lib/src/topic.dart#L128)), which does nothing in a release build.
+
+### 4.4 Where the type tag comes from
+
+Under the new address the type is an explicit token — which is exactly what
+[08-transports.md §4.1](08-transports.md) said `T.runtimeType` cannot be: it is minified in Flutter
+Web release builds by default, obfuscated under `--obfuscate`, and silently changed by renaming a
+class.
+
+So every type that crosses the wire needs a **declared, dot-free tag**, supplied by the filter
+table (§5). The tension to settle: `Topic.create<T>()` is standalone today and uses `runtimeType`,
+and standalone `Topic` creation has no access to a filter table.
+
+Recommended resolution, in order of preference:
+
+1. **Construction moves into the bus.** `bus.fire<T>()` and `bus.setHandler<T>()` know the bus, the
+   bus knows its filter table, so they build the subject with the declared tag. `Topic.create<T>()`
+   stays for local-only use, where `runtimeType` is fine because nothing leaves the process.
+2. **A bus-level tag registry** consulted by `Topic.create<T>()`. Works, but it is global mutable
+   state and two buses in one process could disagree.
+
+Option 1 keeps the tag where it is used and needs no global state.
 
 ---
 
-## 5. The transport layer
+## 5. The NATS wrapper: filters with codecs
 
 ### 5.1 Shape
 
-Three pieces, one package contract, one implementation per broker.
+One ordered list declares both the routing and the encoding, so "what may cross" and "how it is
+encoded" cannot drift apart:
 
 ```dart
-/// One message as it exists on the wire. Bytes and strings only.
-class TransportMessage {
-  final String subject;
-  final String tag;                       // the event type tag, one NATS token
-  final Uint8List payload;
-  final Map<String, String> headers;      // arguments
+class NatsFilter<T> {
+  final String subject;      // <prefix>.<type>.<target>.<path>, NATS wildcards allowed
+  final Uint8List Function(T value, EventDTO<T> dto) serialize;
+  final T Function(Uint8List bytes, String subject) deserialize;
 }
 
-/// Explicit tag <-> Dart type. The registry is the price of "no code generation".
-class EventCodec {
-  void register<T>(String tag,
-                   T Function(Map<String, dynamic>) fromJson,
-                   Map<String, dynamic> Function(T) toJson);
-  TransportMessage encode(EventDTO dto);
-  EventDTO decode(TransportMessage message);
-}
-
-/// A live connection to a broker, from the bus's point of view.
-abstract class EventPipe {
-  Stream<EventDTO> get incoming;
-  Stream<PipeStatus> get status;          // connecting | connected | lost
-  bool send(EventDTO dto);                // what EventBus.send forwards to
-  void subscribe(Topic topic);
-  void unsubscribe(Topic topic);
-  Future<void> dispose();
-}
+final nats = NatsPipe('nats://localhost:4222', prefix: 'acme.shop')
+  ..filter<OrderPlaced>(
+        subject: 'acme.shop.OrderPlaced.warehouse.>',
+        serialize: (v, dto) => utf8.encode(jsonEncode(v.toJson())),
+        deserialize: (b, s) => OrderPlaced.fromJson(jsonDecode(utf8.decode(b))),
+      );
 ```
 
-`EventBus.send` becomes: local node? → deliver. Else, pipe attached? → `pipe.send(dto)`.
-Else → `false`.
+Properties worth having from this shape:
 
-### 5.2 Where the isolate boundary sits, and who runs the codec
+* **The filter list is the subscription list.** The wrapper subscribes to exactly the patterns that
+  were declared, so a subject nothing declared is never received and never costs traffic.
+* **Omitting a filter is the default deny.** An internal event that nobody registered simply does
+  not leave the process. That is a real safety property, not just tidiness.
+* **Encoding is per filter**, so JSON, msgpack, protobuf or hand-rolled binary all coexist, and
+  `Uint8List` payloads make binary formats first-class rather than a workaround.
+* **Deserialization receives the subject**, so one filter covering `>` can branch on the concrete
+  subject if it needs to.
+
+### 5.2 Decisions this shape needs
+
+* **Overlap and precedence.** Two filters matching one subject is a misroute waiting to happen.
+  Either reject overlaps at registration (checking patterns is cheap and can be done once), or
+  document first-match-wins and make it explicit. **Recommend rejection** — the failure mode is
+  otherwise a silent wrong codec.
+* **One filter per type, or one per subject?** If several filters share a type, the type→filter
+  direction is ambiguous. Keying the table by type and giving each type exactly one subject pattern
+  removes both this and most overlaps.
+* **Wildcards still resolve to concrete subjects on receive**, and a concrete subject must find its
+  node. That works under §4.2(a) because the subject *is* the key; it does not work under (b) or (c)
+  without reconstruction.
+
+---
+
+## 6. Isolate layout
 
 ```text
         main isolate                          transport isolate
@@ -225,197 +336,147 @@ Else → `false`.
 │   _eventsMap                 │         │   Socket ◄──────────► NATS │
 │                              │         │                            │
 │ NatsPipe (main side)         │ SendPort│ NatsPipe (worker side)     │
-│   codec: EventDTO → bytes    │────────►│   pub(subject, bytes)      │
+│   filters: value → bytes     │────────►│   pub(subject, bytes)      │
 │   status cache               │◄────────│   sub(subject) → bytes     │
 └──────────────────────────────┘         └────────────────────────────┘
 ```
 
-**The codec runs on the sending side, in the main isolate.** The transport isolate is a pure byte
-pipe: it never sees a Dart domain class, never imports the application, and can be tested without
-one. Two consequences worth having:
+**Serialization runs in the main isolate**, where the filters — and therefore the application's
+classes — live. The transport isolate never sees a domain object, never imports the application, and
+is testable without it. Bytes cross the port as `TransferableTypedData` (zero-copy; the sender's
+buffer is invalidated, which is fine since serialization just produced it).
 
-* The transport isolate has no dependency on the app's event classes. Its entry point is a
-  top-level function that takes a connect config and a `SendPort` — nothing else.
-* Bytes cross the port as `TransferableTypedData` (zero-copy; the sender's buffer is invalidated,
-  which is fine because the codec just produced it). Inbound bytes arrive the same way and are
-  decoded in the main isolate, where the registry lives.
+Port protocol, following the discipline already proven in
+[event_bus_isolate.dart](../lib/src/event_bus_isolate.dart) — each rule there is somebody's bug fix:
 
-The alternative — codec inside the transport isolate — would force the registry, and therefore the
-application's classes, into the isolate. Rejected.
+* **down:** `_Connect(config)`, `_Publish(subject, TransferableTypedData)`, `_Subscribe(subject)`,
+  `_Unsubscribe(subject)`, `_Dispose()`
+* **up:** `_Ready()`, `_InitError(error)`, `_Message(subject, bytes)`, `_Status(connecting|connected|lost)`,
+  `_PublishFailed(subject, error)`
 
-### 5.3 Port protocol
-
-The message set is small, and the discipline is the one already proven in
-[event_bus_isolate.dart](../lib/src/event_bus_isolate.dart):
-
-* **down:** `_Connect(config)`, `_Publish(subject, tag, TransferableTypedData, headers)`,
-  `_Subscribe(subject)`, `_Unsubscribe(subject)`, `_Dispose()`
-* **up:** `_Ready()`, `_InitError(error)`, `_Message(subject, tag, bytes, headers)`,
-  `_Status(connecting|connected|lost)`, `_PublishFailed(subject, error)`
-
-Rules kept from the current implementation because each one was a bug fix:
-
-1. the port listener **never throws** — an exception there escapes to the zone and kills the
-   isolate;
-2. readiness is signalled only after the client is genuinely connected (`waitInit` semantics,
-   fix #3) — `send` returns `false` until then;
+1. the port listener **never throws** — an exception there escapes to the zone and kills the isolate;
+2. readiness is signalled only after the client is genuinely connected (`waitInit`, fix #3);
+   `fire` returns `false` until then;
 3. `_InitError` completes `waitInit` with an error rather than hanging (fix #20);
-4. the main side mirrors `_Status` into a cached `bool _connected`, because `send` is synchronous
-   and cannot ask the worker.
+4. **the main side mirrors `_Status` into a cached `bool`** — `fire` is synchronous and cannot ask
+   the worker isolate.
 
-### 5.4 Platform: native only
-
-`Isolate.spawn` throws `UnsupportedError` on Flutter Web — the Dart docs state that `dart:isolate`
-"is currently only supported by the Dart Native platform". The package already has this property
-via `EventBusIsolate`; decision 5 extends it to transports.
-
-Therefore:
-
-* on native, the pipe runs in its own isolate by default, with `runInIsolate: false` available for
-  tests and for running inside a `Layers` worker;
-* on web, NATS must run over WebSocket (`wss://`) on the main isolate — supported by `dart_nats`
-  but a different code path;
-* this is a **documentation item**, not a blocker: `event_bus_nats` should declare its platform
-  support explicitly and fail loudly on web rather than behave subtly differently.
-
-### 5.5 Subject mapping (NATS)
-
-```text
-<prefix>.<tag>.<target>.<path token>...
-   │       │      │         │
-   │       │      │         └─ from Topic.path, split on '/'
-   │       │      └─────────── Topic.target (already asserted dot-free)
-   │       └────────────────── the codec registry tag — exactly ONE token
-   └────────────────────────── tenant/application namespace, e.g. "acme.shop"
-
-acme.shop.OrderPlaced.warehouse.created
-```
-
-Rules, all of them testable and all of them enforced at the boundary:
-
-| Part | Rule | Why |
-|---|---|---|
-| `prefix` | 1+ tokens of `[A-Za-z0-9_-]` | tenant namespace; broker ACLs are written against it |
-| `tag` | exactly 1 token of `[A-Za-z0-9_-]` | it is one position in the subject; a dot would shift every following token |
-| `target` | 1 token, no dot | already asserted today (`Topic.create`) |
-| path tokens | from `path.split('/')`, leading empty dropped, empties rejected | today's `path` begins with `/`, which under MQTT would create an empty level |
-| **never** | `*`, `>`, whitespace, `$`-prefix | NATS wildcards and `$SYS`/`$JS`/`$KV` are reserved |
-| total | ≤ 16 tokens, ≤ 256 chars | NATS's own sizing advice |
-
-The reverse mapping (`subject → Topic`) needs `tag → Type` from the registry, which is why the
-registry is bidirectional: without it the receiving bus cannot compute the `Topic` its handler is
-registered under.
-
-**One broker subscription per local topic.** No pattern inference from several topics — NATS
-subscriptions are cheap (trie-based interest graph, the docs call subjects "essentially free to
-create"), and inference would silently widen what a subscriber receives. Explicit wildcard
-subscriptions can be added later as an opt-in; the receive path already supports them, because an
-incoming concrete subject is decoded to a concrete `Topic` and looked up in `_eventsMap` as usual.
-
-### 5.6 Verification needed before implementation
-
-`dart_nats` headers support is documented thinly — the only reference found is reading
-`msg.header?.status`. **Check whether `pub` accepts headers.** If it does not, `arguments` cannot
-travel as NATS headers and must go into the payload envelope:
-
-```json
-{ "tag": "OrderPlaced", "args": {"priority": "1"}, "data": { ... } }
-```
-
-This is a small change to the codec and a real one to the wire format, so it should be settled
-before the first message is published, not after.
+**Platform:** `Isolate.spawn` throws `UnsupportedError` on Flutter Web; `dart:isolate` is
+"currently only supported by the Dart Native platform". The package already has this property
+through `EventBusIsolate`. So: `runInIsolate: false` plus `wss://` on web, an explicit platform
+declaration in the package, and a loud failure rather than subtly different behaviour.
 
 ---
 
-## 6. What becomes possible
+## 7. Blast radius
 
-* **The same API across processes and machines.** `send` / `subscribe` / `setHandler` do not change
-  shape; only the pipe behind them is new.
-* **A much smaller isolate bridge.** Fixes #2, #19 and #21 become unreachable — their subject
-  matter (correlating replies, failing hung requests) stops existing.
-* **One pipe contract, three transports.** MQTT with its retained messages and QoS, and Redis with
-  its reply-channel workaround, are implementations of `EventPipe`, not new architectures.
-* **Non-Dart peers, if the tag is readable.** With `acme.shop.OrderPlaced.warehouse.created` a Go
-  or Python service can route on the subject. This is exactly what percent-encoded
-  `runtimeType` names (`list%3Cint%3E`) made impossible.
-* **An honest failure story.** `bool` plus `errorStream` replaces "a Future that may or may not
-  complete" with two explicit outcomes.
+Small, by design — this is the payoff of decision 2.
+
+| Area | Change |
+|---|---|
+| `lib/src/topic.dart` | address builder rewritten for `target.path.type`; `runtimeType` replaced by a declared tag on the bus path (§4.4); validation moves from `assert` to a real check |
+| `lib/src/event_bus.dart` | `fire` added; `errorStream` added; `send` gains the "no local node + transport attached → throw" rule |
+| `lib/src/event_dto.dart` | unchanged |
+| `lib/src/event_bus_isolate.dart` | **unchanged** |
+| `lib/src/layers.dart`, `fsm.dart`, `scope.dart`, `command.dart` | **unchanged** |
+| `test/` (83 tests) | untouched, plus new tests for `fire`, the address rules and the filters |
+| `doc/` | new document for `fire`; `Topic` sections in 01, 02 and 06 rewritten |
+| `packages/` | new workspace: `event_bus_transport`, `event_bus_nats` |
+
+For comparison, the earlier draft of this plan touched `event_bus_isolate.dart`, `scope.dart`,
+`command.dart` and all 34 `Completer` sites in the tests. That is the difference decision 2 buys.
 
 ---
 
-## 7. Risks
+## 8. What is lost, and what must be documented
+
+* **`send` cannot cross a process boundary**, by construction. Anyone reaching for it from a
+  network context gets a throw and a pointer to `fire`.
+* **`fire` has no delivery guarantee.** `true` means "taken", nothing more.
+* **`haveListener` / `haveHandler` stay local**, and cannot be made remote by any amount of work —
+  §2.2's third question is unanswerable in core NATS.
+* **`dto.topic.target` / `.path` are unreliable on inbound remote events** under §4.2(a).
+* **Ordering.** Delegated to the client library (decision 6) — which is valid only while there is
+  exactly one connection per pipe. Per-subject connections would reorder, so "one connection" is an
+  invariant of the pipe contract, not an implementation detail.
+
+---
+
+## 9. Risks
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | **Handler errors become invisible** after the `Completer` goes | high if §3 slips | **high** — regression against a tested guarantee | Implement `errorStream` in the same commit as the removal; port the existing error tests to it |
-| R2 | **`Scope.initScope` changes meaning** | certain | medium | Decide A or B in §4.1 before touching the code; update [05-scope-and-command.md](05-scope-and-command.md) |
-| R3 | **Regressing the isolate fixes** (#2, #3, #19, #20, #21) while rewriting `event_bus_isolate.dart` | medium | **high** — those bugs were silent hangs | Rewrite against the existing tests; they are the only guard. Do not delete a test because its API disappeared — translate it or prove the scenario is impossible |
-| R4 | **`bool send` documented as "delivered"** | medium | high — the API would lie, and callers would build on it | The doc comment in §2.1 is the contract; a doc test asserting the wording is not absurd here |
-| R5 | **`dart_nats` maturity.** 39 likes, unverified uploader, JetStream experimental, headers thinly documented | certain | medium | Use core pub/sub only; confine it to `packages/event_bus_nats`; the `EventPipe` contract plus a fake implementation keeps the bus testable without the library |
-| R6 | **Delegate-ordering assumption breaks.** "Order is the library's job" holds only while there is **one connection** — per-subject connections would reorder | medium | medium | One connection per pipe, stated as an invariant in the pipe contract, not left implicit |
-| R7 | **Backpressure.** `SendPort` is unbounded and never blocks; a slow socket grows the isolate's mailbox without limit | **high** | medium — memory growth, then OOM | A max-in-flight counter in the pipe; when exceeded, `send` returns `false` rather than queueing. This is the third meaning of `false` and it belongs in §2.1 |
-| R8 | **No codec for a type** — or the static type is a supertype and the registry has only the concrete class | medium | medium | Throw at `send` (never drop); the error names the type. Same class of trap as [07-caveats.md, item 1](07-caveats.md#1-the-type-in-a-topic-is-a-static-type-parameter) |
-| R9 | **Registry drift** between two deployed services | medium | medium | Throw on unknown tag inbound → `errorStream`, plus a startup assertion that registered tags are unique |
-| R10 | **Flutter Web cannot spawn the isolate** | certain | medium | `runInIsolate: false` + `wss://` on web; explicit platform declaration; fail loudly |
-| R11 | **Isolate count grows**: one per `EventBusIsolate` layer plus one per pipe | medium | low–medium on mobile | `runInIsolate: false` when the pipe is created inside a `Layers` worker |
-| R12 | **Workspace migration raises the SDK floor** to `^3.6.0` | certain | low | Separate commit, separate decision, version note in the changelog |
-| R13 | **Payload size.** NATS's default maximum is typically 1 MiB and is server-configurable; locally there is no limit | medium | medium | Local size check → throw; document the broker limit in the transport README |
-| R14 | **`haveListener` / `haveHandler` read as global** | medium | medium | Rename or document as local; they cannot be made remote by any amount of work |
+| R1 | **`send` becomes a trap** over a network — someone uses it for a remote topic and gets a confusing failure | high | medium | The throw names `fire`; document the rule at the top of both methods; a doc test on the wording is not absurd |
+| R2 | **Two dispatch paths confuse users** — which one do I call? | high | medium | The rule is one line: reply wanted → `send`, crossing a boundary → `fire`. Put it in the README's first screen, not in chapter 6 |
+| R3 | **The address rewrite breaks existing users** — any code holding a `Topic` string, parsing it, or matching on it | high | medium | This is the 3.0 break. A migration section listing `event://all.string/p` → `acme.shop.String.all.p` |
+| R4 | **Dots in target and path make the reverse mapping ambiguous** | certain if neither fix is chosen | **high** — silent drops | §4.2; choose (a) or (b) before writing the builder |
+| R5 | **Delegate-ordering assumption breaks** if connections are not one-per-pipe | medium | medium | One connection per pipe, stated as a contract invariant |
+| R6 | **Backpressure.** `SendPort` is unbounded and never blocks; a slow socket grows the isolate mailbox until OOM | **high** | medium | In-flight counter in the pipe; past the limit `fire` returns `false` |
+| R7 | **`dart_nats` maturity** — 39 likes, unverified uploader, JetStream experimental, headers thinly documented | certain | medium | Core pub/sub only; the library is confined to `packages/event_bus_nats`; a fake pipe keeps the bus testable without it |
+| R8 | **Header support unknown.** If `dart_nats` `pub` cannot attach headers, `arguments` cannot travel as NATS headers | medium | medium | **Verify before the first publish.** Fallback: put `tag`, `args` and `data` in a JSON envelope, which changes the wire format |
+| R9 | **Filter overlap produces a misroute** — the wrong serializer for a subject | medium | medium | Key the table by type, one subject pattern per type, reject overlaps at registration (§5.2) |
+| R10 | **Silent drops on an unknown tag inbound** | medium | medium | `EventBusError(filter)` → `errorStream`; never drop quietly |
+| R11 | **Payload size.** NATS default max is typically 1 MiB and server-configurable; locally there is no limit | medium | medium | Local check → throw; document the server limit |
+| R12 | **Flutter Web cannot spawn the isolate** | certain | medium | `runInIsolate: false` + `wss://`; declare platform support |
+| R13 | **Two paths race on one topic** — `send` and `fire` to the same topic from different places | low | medium | Explicitly out of scope: `fire` is not a delivery guarantee, and `send` is local. Document rather than arbitrate |
 
 ---
 
-## 8. Phases
+## 10. Phases
 
-### Phase 0 — v3.0 core, no transports
+### Phase 0 — the address and `fire`, no transports yet
 
-Remove the `Completer`; `send → bool`; add `errorStream`; resolve §4.1; shrink
-`EventBusIsolate` to the pipe shape; rewrite the 34 completer-dependent test sites and the docs.
+Rewrite the address builder for `<prefix>.<type>.<target>.<path>`; add declared type tags;
+add `fire` and `errorStream`; add the `send` guard. No broker anywhere.
 
-**Exit criteria:** 83 tests pass in their v3 form (translated, not deleted); no `Completer` in
-`lib/`; `doc/` and README describe `bool` and `errorStream`; a handler that throws lands in
-`errorStream` with a test proving it.
+*Exit criteria:* the subject format is fixed and tested against the §4.3 rules; `fire` returns the
+documented `bool` in each of the four cases; a handler reached by `fire` that throws lands in
+`errorStream`; `send` throws with a pointer to `fire` when a transport is attached and no local node
+exists; §4.2 is decided in code.
 
 ### Phase 1 — workspace and the pipe contract
 
-`packages/event_bus_transport`: `EventPipe`, `TransportMessage`, `EventCodec`, `SubjectMapper`,
-a `FakePipe`, and a **conformance suite** that any transport must pass.
+`packages/event_bus_transport`: `EventPipe`, the filter table, a `FakePipe`, and a **conformance
+suite** any transport must pass.
 
-**Exit criteria:** the bus runs against `FakePipe` with no changes to core; the conformance suite
-is green against the fake and is written so that a real transport can be dropped into it.
+*Exit criteria:* the bus runs against `FakePipe` with no core changes; the conformance suite is
+written so a real transport drops into it.
 
 ### Phase 2 — `event_bus_nats`
 
-Transport isolate, codec on the sender, subject mapping, status mirroring, reconnect, the
-backpressure limit, `dart_nats` behind the pipe. Core NATS only.
+Transport isolate, filters serializing on the sender, one connection, the in-flight limit,
+`dart_nats` behind the pipe. Core NATS only.
 
-**Exit criteria:** two processes exchange events through a real broker; the conformance suite
-passes against NATS; a handler error in process B reaches B's `errorStream`; killing the broker is
-survivable and `send` returns `false` while it is down; §5.6 is answered and the wire format is
-documented.
+*Exit criteria:* two processes exchange fired events through a real broker; the conformance suite
+passes against NATS; killing the broker is survivable and `fire` returns `false` while it is down;
+R8 is answered and the wire format is documented.
 
 ### Phase 3 — hardening
 
-Reconnect and shutdown tests, a real-broker CI harness (docker), docs, an example, a README
-section on what is *not* guaranteed.
+Reconnect and shutdown tests, a docker CI harness, docs, an example, and a README section on what
+is *not* guaranteed.
 
 ### Later — MQTT
 
-Only after the pipe contract has survived one real transport. Retained messages map onto
-`isModelBus` / `lastData`, MQTT 5 response topic and correlation data are available if request/reply
-is ever wanted back, and user properties cover `arguments` for v5 only.
+Only after the pipe contract survives one real transport. Retained messages map onto
+`isModelBus` / `lastData`; MQTT 5 response topic and correlation data would let `send` cross a
+network if that is ever wanted; user properties cover `arguments` for v5 only.
 
 ---
 
-## 9. Open questions
+## 11. Open questions
 
-1. §4.1 — `initScope`: option A (`Future<void>`, completes on delivery) or B (synchronous)?
-2. §2.1 — is "`false` also means the pipe is over its queue limit" (R7) acceptable in the same
-   `bool`, or does it need a distinct signal?
-3. §5.6 — does `dart_nats` publish headers? This changes the wire format.
-4. Is `errorStream` enough, or does a throwing handler also need to keep its stack trace visible
-   in the default logger?
-5. Does the existing `EventBusIsolate` keep its name in v3, or is it renamed to reflect that it is
-   now one implementation of the pipe?
+1. **§4.1 — token order.** Type first (recommended, keeps `acme.OrderPlaced.>`) or type last as
+   proposed (loses it as soon as `target` may contain dots)?
+2. **§4.2 — (a) subject-as-key or (b) dots forbidden in `target`?** (a) is simpler; (b) keeps
+   `dto.topic.target` / `.path` meaningful on both sides. Says which one depends on whether existing
+   handlers branch on `target`.
+3. **§4.4 — where the type tag lives**: bus-level construction (recommended) or a global registry?
+4. **§5.2 — overlap**: reject at registration (recommended) or first-match-wins?
+5. **§2.2 — `false` for a filtered-out topic**: correct, or should an unmatched outgoing event be a
+   loud error instead?
+6. Does `fire` need a `Future` variant for callers who want to await the publish reaching the socket?
+   The contract says no; confirm that nothing needs it.
 
 ---
 
@@ -423,4 +484,4 @@ is ever wanted back, and user properties cover `arguments` for v5 only.
 
 * [08-transports.md](08-transports.md) — the option analysis behind these decisions.
 * [01-architecture.md](01-architecture.md) — the model that survives v3 unchanged.
-* [07-caveats.md](07-caveats.md) — the guarantees §3 and §4 have to preserve or explicitly drop.
+* [07-caveats.md](07-caveats.md) — the guarantees decision 2 leaves in place.

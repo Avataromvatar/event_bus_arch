@@ -15,6 +15,7 @@ Detailed description of the `event_bus_arch` 2.3.0 package. The main README (in 
 | 06 | [API reference](06-api-reference.md) | Every public type and member with signatures |
 | 07 | [Pitfalls](07-caveats.md) | Known defects, reproductions, workarounds, checklist |
 | 08 | [Transports](08-transports.md) | Running the bus over NATS / Redis / NanoMQ: address model, packaging, pitfalls |
+| 09 | [v3.0 plan](09-v3-plan.md) | **Plan, not shipped:** removing the Completer, `send → bool`, the NATS transport |
 
 ## Quick summary
 

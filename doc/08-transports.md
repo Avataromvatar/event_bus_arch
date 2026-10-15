@@ -386,6 +386,7 @@ runtime type name.
 
 ## What next
 
+* [09-v3-plan.md](09-v3-plan.md) — the decisions taken after this analysis, and the plan for v3.0.
 * [01-architecture.md](01-architecture.md) — the current address model in full.
 * [03-isolate-and-layers.md](03-isolate-and-layers.md) — the existing boundary-crossing design
   that a transport should mirror.

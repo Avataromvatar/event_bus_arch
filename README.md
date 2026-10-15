@@ -7,9 +7,9 @@ moved between isolates without changing their logic.
 On top of the bus the package ships a finite state machine, an isolate bridge, multi-isolate
 "layers", and a scope/command wrapper for stateful values.
 
-* Detailed documentation: **[docs/](docs/README.md)**
-* Full API reference: [docs/06-api-reference.md](docs/06-api-reference.md)
-* What changed in 2.3.0 and what to watch out for: [docs/07-caveats.md](docs/07-caveats.md)
+* Detailed documentation: **[doc/](doc/README.md)**
+* Full API reference: [doc/06-api-reference.md](doc/06-api-reference.md)
+* What changed in 2.3.0 and what to watch out for: [doc/07-caveats.md](doc/07-caveats.md)
 
 ## Features
 
@@ -157,7 +157,7 @@ await layer.close();
 Inside a layer, `layer.top` sends to the layer above, `layer.bottom` to the layer below, and
 `layer.current` is the layer's own bus. Init functions may be `async` and may live in any layer;
 `Layer.close()` works from any layer and is safe to call twice. See
-[docs/03-isolate-and-layers.md](docs/03-isolate-and-layers.md#example-two-worker-layers)
+[doc/03-isolate-and-layers.md](doc/03-isolate-and-layers.md#example-two-worker-layers)
 and [example/event_bus_layers_example.dart](example/event_bus_layers_example.dart).
 
 ### Finite state machine
@@ -210,13 +210,13 @@ Detailed guides live in [docs/](docs/README.md) (Russian):
 
 | Document | Content |
 |---|---|
-| [01-architecture.md](docs/01-architecture.md) | Topics, DTOs, nodes, the full send/receive flow |
-| [02-event-bus.md](docs/02-event-bus.md) | Practical bus usage, handlers, addressing, recipes |
-| [03-isolate-and-layers.md](docs/03-isolate-and-layers.md) | `EventBusIsolate`, `Layers`, exchange limits |
-| [04-fsm.md](docs/04-fsm.md) | State machine on top of the bus |
-| [05-scope-and-command.md](docs/05-scope-and-command.md) | State with history, command pattern |
-| [06-api-reference.md](docs/06-api-reference.md) | Every public type and member |
-| [07-caveats.md](docs/07-caveats.md) | What was fixed in 2.3.0, what remains by design, checklist |
+| [01-architecture.md](doc/01-architecture.md) | Topics, DTOs, nodes, the full send/receive flow |
+| [02-event-bus.md](doc/02-event-bus.md) | Practical bus usage, handlers, addressing, recipes |
+| [03-isolate-and-layers.md](doc/03-isolate-and-layers.md) | `EventBusIsolate`, `Layers`, exchange limits |
+| [04-fsm.md](doc/04-fsm.md) | State machine on top of the bus |
+| [05-scope-and-command.md](doc/05-scope-and-command.md) | State with history, command pattern |
+| [06-api-reference.md](doc/06-api-reference.md) | Every public type and member |
+| [07-caveats.md](doc/07-caveats.md) | What was fixed in 2.3.0, what remains by design, checklist |
 
 ## Version 2 changes
 
@@ -239,7 +239,7 @@ Detailed guides live in [docs/](docs/README.md) (Russian):
 - Typo'd members got correct names (`queueLength`, `initialData`, `scheme`,
   `initialDataNeedExecute`) with the old ones kept as `@Deprecated`
 
-The full list with reproductions is in [docs/07-caveats.md](docs/07-caveats.md#what-was-fixed-in-230).
+The full list with reproductions is in [doc/07-caveats.md](doc/07-caveats.md#what-was-fixed-in-230).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

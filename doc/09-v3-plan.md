@@ -14,14 +14,15 @@
 | 1 | **NATS first, core only — no JetStream.** MQTT kept in mind. | At-most-once. `dart_nats` used as a plain pub/sub client, avoiding its experimental surface. |
 | 2 | **`send` is kept as it is**, `Completer` and all. | All 83 tests, `EventBusIsolate`, `Scope`, `Command` and the isolate fixes stay untouched. §2.4. |
 | 3 | **A new `fire` carries one-way events** and returns `bool`. | The only dispatch path that crosses a transport. §2. |
-| 4 | **The address becomes broker-native: `target.path.type`.** | `Topic` stops being a URI. One token-order problem and one ambiguity problem to settle first. §4. |
-| 5 | **The NATS wrapper holds filters**, each with its own serializer/deserializer; payload is `Uint8List`. | One structure declares both "what may cross" and "how it is encoded". §5. |
-| 6 | **Ordering and duplicates are delegated** to the client library. | Safe under core NATS *provided* one connection per pipe — risk R5. |
-| 7 | **The NATS client runs in its own isolate**; sockets never leave it. | Native only: `Isolate.spawn` throws `UnsupportedError` on Flutter Web. §6. |
+| 4 | **`target` is removed.** The address is `<type>.<path>`, with an explicit `topic` override. | Two address dimensions collapse into one, and the reverse-mapping ambiguity of [08-transports.md §4](08-transports.md) stops existing. §4. |
+| 5 | **`Uri` is dropped from `Topic`.** `scheme` is dead; `arguments` and `fragment` move to the DTO. | `Topic` becomes a thin value object over a string. §4.5. |
+| 6 | **The NATS wrapper holds filters**, each with its own serializer/deserializer; payload is `Uint8List`. | One structure declares "what may cross" and "how it is encoded" — and it is also what makes decoding of a free-form `topic` possible. §5. |
+| 7 | **Ordering and duplicates are delegated** to the client library. | Safe under core NATS *provided* one connection per pipe — risk R6. |
+| 8 | **The NATS client runs in its own isolate**; sockets never leave it. | Native only: `Isolate.spawn` throws `UnsupportedError` on Flutter Web. §6. |
 
-Compared with the earlier draft of this plan (which removed the `Completer`), decisions 2 and 3
-shrink the change from a core rewrite into an addition. That is the right trade for v3 — §2.4 says
-why — and the cost is one new rule for users to learn: **`send` for a reply, `fire` for a network.**
+Decisions 2 and 3 shrink the change from a core rewrite into an addition — §2.4 says why that is
+the right trade. Decisions 4 and 5 are the 3.0 break, and they pay for themselves: they delete a
+concept rather than adding one.
 
 ---
 
@@ -32,20 +33,18 @@ why — and the cost is one new rule for users to learn: **`send` for a reply, `
 Recommended: **`fire`**.
 
 * It names the property that actually distinguishes it: *fire and forget*. A reader who knows the
-  idiom knows the event gets no answer, which is the whole point of the method.
+  idiom knows no answer is coming, which is the whole point of the method.
 * It contrasts with `send` on sight. `send` has a destination and may expect something back;
-  `fire` is aimed at no one and expects nothing. Two words, one distinction, no doc needed.
-* It is the established verb in the Dart/Flutter event-bus ecosystem, so it costs a newcomer
-  nothing to learn.
+  `fire` is aimed at no one and expects nothing.
+* It is the established verb in the Dart/Flutter event-bus ecosystem.
 
 Runner-up: **`emit`**. Its argument is real — Node's `EventEmitter.emit()` already returns `true`
-when there were listeners, which is almost exactly this contract, and borrowing an established
-convention is worth something. Against it: in Flutter, `emit` is strongly associated with
-Cubit/BLoC, where `emit(state)` means "publish new state", not "dispatch an event outward". The
-package would be importing a word that already means something else to its main audience, and the
-`send`/`emit` pair reads less clearly than `send`/`fire`.
+when there were listeners, which is almost exactly this contract. Against it: in Flutter, `emit` is
+strongly associated with Cubit/BLoC, where `emit(state)` means "publish new state", not "dispatch
+an event outward". The package would import a word that already means something else to its main
+audience.
 
-### 2.2 The contract of `fire`
+### 2.2 Signatures
 
 ```dart
 /// Dispatches a one-way event. No answer comes back — there is no completer and
@@ -57,25 +56,31 @@ package would be importing a word that already means something else to its main 
 ///         situation changes: no local node, no usable transport, no filter
 ///         matched the topic, or the transport is over its queue limit
 ///
-/// Throws EventBusException when retrying cannot help: the topic cannot be
-/// mapped to a legal subject, no filter can encode the type, the payload is
-/// over the size limit, or the bus is disposed.
-bool fire<T>(T data, {String? target, String? path, String? fragment,
-                      Map<String, String>? arguments});
+/// Throws EventBusException when retrying cannot help: the address is not a
+/// legal subject, no filter can encode the type, the payload is over the size
+/// limit, or the bus is disposed.
+bool fire<T>(T data, {String? topic, String? path, Map<String, String>? arguments});
+
+/// Unchanged: keeps the Completer, and stays inside this program.
+Future<dynamic>? send<T>(T data, {String? topic, String? path,
+                                  Map<String, String>? arguments});
 ```
 
-Three things this contract is careful about:
+`topic` is not a `fire`-only parameter — it belongs on every bus method that takes an address
+today (`send`, `setHandler`, `listen`, `subscribe`, `lastData`, `haveHandler`, `haveListener`),
+replacing `target` and `path`.
 
-* **`false` never means "not delivered".** It means "not taken". Same reasoning as in
-  [08-transports.md §2](08-transports.md) — over core NATS, whether a remote process received
-  anything is not observable at all. NATS answers "no subscribers" only for *requests*
-  (the `no_responders` 503), and `fire` is not one.
-* **`false` doubles as the backpressure signal.** `SendPort` is unbounded and never blocks, so a
-  slow socket would otherwise grow the transport isolate's mailbox until the process dies.
-  Returning `false` past a configurable in-flight limit turns an OOM into a visible drop —
-  risk R6.
-* **Filtered-out is `false`, not an error.** A topic that matches no filter is normal operation
-  for a wrapper that is meant to keep internal events internal (§5).
+Three rules that must be explicit rather than implied:
+
+* **`topic` wins, and `path` must then be null.** If both are passed, throw. Silent precedence
+  between two ways of naming the same thing is how a call site ends up addressing something other
+  than what it reads as.
+* **`topic` is the local address; the prefix is the transport's job** (§4.4). A topic that works
+  locally keeps working when a transport appears under it.
+* **`fire` never creates a completer**, and an event that arrives over a network carries
+  `completer == null`. A handler written for `send` that calls `dto.completer?.complete(x)` — the
+  pattern used throughout the package — quietly no-ops when reached by `fire`. No handler rewrite
+  is needed.
 
 ### 2.3 What `send` does when a transport is attached
 
@@ -86,44 +91,37 @@ Three things this contract is careful about:
 | Local node exists | delivered, completer works | **unchanged** |
 | No local node, no transport | returns `null` | **unchanged** |
 | No local node, **transport attached** | returns `null` | **throws**, naming `fire` |
-| Inbound remote event | n/a | the DTO arrives with `completer == null` |
+| Inbound remote event | n/a | arrives with `completer == null` |
 
-The third row is the safety net. It cannot produce a false positive in any meaningful way: if
-there is no local node, nothing in this program can complete the completer, so a `send` there
-could only ever return `null` or hang — it was already useless. The change converts a silent
-`null` into a loud, actionable error. (On `isModelBus: true` a node is always created, so this
-row does not apply.)
-
-The fourth row is what keeps the two paths from interfering: an event that arrived over the
-network has no sender waiting, so its `completer` is `null`. A handler written for `send` that
-calls `dto.completer?.complete(x)` — the pattern used throughout the package — quietly no-ops when
-the same handler is reached by `fire` or by a remote event. No handler rewrite is needed.
+The third row cannot produce a false positive in any meaningful way: with no local node, nothing in
+this program can complete the completer, so a `send` there could only ever return `null` or hang —
+it was already useless. The change turns a silent `null` into a loud, actionable error. (On
+`isModelBus: true` a node is always created, so this row does not apply.)
 
 ### 2.4 Why keeping `send` is the cheaper plan
 
-Worth stating plainly, because the earlier draft of this plan argued the opposite.
+Worth stating plainly, because an earlier draft of this plan argued the opposite.
 
-Removing the `Completer` would have simplified `EventBusIsolate` — but `event_bus_isolate.dart` is
-the most-repaired file in the package: fixes #2, #3, #19, #20 and #21 all live in it, five of
-twenty-one. Removing the `Completer` would also have silently killed the error path for throwing
-handlers (fix #6) and broken `Scope.initScope`, which awaits the result of its first send
+Removing the `Completer` would have simplified `EventBusIsolate` — but that is the most-repaired
+file in the package: fixes #2, #3, #19, #20 and #21 all live in it, five of twenty-one. It would
+also have silently killed the error path for throwing handlers (fix #6) and broken
+`Scope.initScope`, which awaits the result of its first send
 ([scope.dart:56](../lib/src/scope.dart#L56)).
 
-Keeping `send` costs one thing instead: **two dispatch paths must coexist, and users must know
-which one to reach for.** That is a documentation problem with a clear rule — reply wanted → `send`;
+Keeping `send` costs one thing instead: **two dispatch paths coexist, and users must know which one
+to reach for.** That is a documentation problem with a one-line rule — reply wanted → `send`;
 crossing a process boundary → `fire` — rather than a rewrite of the package's most fragile code.
-The blast radius in §7 reflects that.
 
 ### 2.5 Why not auto-mirror
 
-An obvious temptation: when a transport is attached, make `send` also publish. **Rejected.**
-It would deliver the same event twice to a process that has both a local handler and a remote
-subscriber, and it would leave the completer's meaning ambiguous — should it complete on local
-handling, on publish, or on both? One method, one path across the boundary: `fire`.
+An obvious temptation: when a transport is attached, make `send` also publish. **Rejected.** It
+would deliver the same event twice to a process with both a local handler and a remote subscriber,
+and it would leave the completer's meaning ambiguous — complete on local handling, on publish, or
+on both? One method, one path across the boundary: `fire`.
 
 ---
 
-## 3. The error path (smaller than before)
+## 3. The error path
 
 With `send` kept, the error story is mostly intact: a throwing handler still reaches its sender
 through the completer (fix #6). Only two cases have nowhere to report:
@@ -150,132 +148,161 @@ abstract class EventBus {
 
 `EventBusLogger` subscribes to it, so the default experience is "you see it in the log".
 `EventErrorSource.filter` covers the case that matters most: **an inbound message no filter can
-decode must not be a silent drop** — that is how a registry that drifted between two deployed
+decode must not be a silent drop** — that is how a filter table that drifted between two deployed
 services becomes visible instead of looking like a quiet night.
 
 ---
 
-## 4. The address: `target.path.type`
+## 4. The address
 
-### 4.1 What the order buys, and what it costs
+### 4.1 One dimension, not two
 
-```text
-<prefix> . <type> . <target> . <path...>      ← proposed below
-   │         │         │          │
-   │         │         │          └─ free-form, dots allowed
-   │         │         └──────────── free-form, dots allowed
-   │         └────────────────────── exactly ONE token, dot-free
-   └──────────────────────────────── tenant / application namespace
+Today an address has two independent free-form parts, `target` and `path`:
 
-acme.shop.OrderPlaced.factory1.line3.machine7.temp
+```dart
+Topic.create<T>(target: 'warehouse', path: '/in')   // event://warehouse.string/in
 ```
 
-Required change to the proposal: **the type must come first, not last.** `target.path.type` reads
-better as a hierarchy — location, then what happened — but it breaks a pattern that is hard to give
-up once noticed.
+`target` is documented as "to whom" and `path` as "about what" — two levels of addressing. But they
+are concatenated into the same string, matched by the same exact-equality lookup, and
+[08-transports.md §4.2](08-transports.md) showed what happens when both may contain a delimiter:
+**the composition is not invertible**. `target: 'factory1.line3'` with `path: 'temp'` and
+`target: 'factory1'` with `path: 'line3.temp'` produce the same address, so a receiver that
+rebuilds `target` and `path` picks one, and the handler registered under the other is never found.
 
-NATS's `>` wildcard matches one or more tokens and is **legal only as the final token**. `*` matches
-exactly one token. That makes the two orders unequal:
+Removing `target` deletes the problem instead of legislating around it. One free-form part composes
+invertibly with a fixed-position part in front of it:
 
-| You want | `<prefix>.<type>.<target>.<path>` | `<prefix>.<target>.<path>.<type>` |
+```text
+<type> . <path...>
+   │         │
+   │         └─ free-form, dots allowed, no parsing rule needed
+   └─────────── exactly one token, from the filter table
+```
+
+Migration is mechanical and small: `target: 'warehouse', path: '/in'` becomes
+`path: 'warehouse.in'`. `target:` appears 16 times in `lib/`, and only **5 times** across all
+tests and examples. `Scope` and `Command` never had a `target` at all, so they are unaffected.
+
+### 4.2 `topic`: the override
+
+```dart
+bus.fire<OrderPlaced>(order, path: 'warehouse.in');
+// address: OrderPlaced.warehouse.in
+
+bus.fire<OrderPlaced>(order, topic: 'legacy.deprecated.orders.placed');
+// address: legacy.deprecated.orders.placed — verbatim
+```
+
+When `topic` is set it **is** the address: the local key, and (with the prefix) the NATS subject.
+No composition, no parsing.
+
+This is the escape hatch that makes a fixed `<type>.<path>` shape acceptable — arbitrary
+hierarchy is still reachable, just spelled out. And it is what makes §4.3 work.
+
+### 4.3 Decoding is driven by the filters, not by the subject
+
+An explicit `topic` is free-form, so the type cannot be recovered by counting tokens. It does not
+need to be: **the filter table already says which type a subject carries** (§5). A filter is keyed
+by type and declares a subject pattern, so:
+
+* outbound — find the filter for `T`, substitute the concrete path, serialize;
+* inbound — match the subject against the filter patterns; **the matching filter supplies the type
+  and the deserializer**.
+
+The type is therefore never discovered by parsing. That removes the "the type must sit at a fixed
+position" constraint entirely, and with it the whole class of bugs where a subject that does not
+match the expected shape is silently unrouteable.
+
+It also means the **type token in the default `<type>.<path>` composition is a convention, not a
+parsing contract**. It is worth keeping anyway, for three real reasons:
+
+* `acme.OrderPlaced.>` subscribes to every `OrderPlaced` regardless of path — a single obvious
+  pattern, and the reason to put the type first rather than last (see below);
+* a non-Dart peer on the same broker can route on the subject;
+* the subject is readable in broker logs and in `nats sub` output.
+
+A user who sets an explicit `topic` without a type token opts out of all three. That must be
+documented on the parameter, not discovered later.
+
+**Type first, not last.** With filter-driven decoding this is no longer a correctness constraint,
+only a subscription-expressiveness one. `>` matches one or more tokens and is legal only as the
+final token; `*` matches exactly one. So with the type first, `acme.OrderPlaced.>` works at any
+path depth, while with the type last the equivalent `acme.>.OrderPlaced` is illegal and
+`acme.*.OrderPlaced` matches only a single-token path. Since the default is `<type>.<path>`, this
+falls out for free.
+
+### 4.4 The prefix
+
+The tenant/application prefix (`acme.shop`) is **added by the transport on publish and stripped on
+receive**. Local addresses stay clean, and a topic that works locally keeps working when a
+transport is attached beneath it. It also keeps two applications on one broker from colliding, and
+gives broker ACLs a stable prefix to be written against.
+
+Validation: a topic that already begins with the prefix must be rejected at the boundary, not
+silently doubled.
+
+### 4.5 Dropping `Uri`
+
+`scheme` is verifiably dead. Outside [topic.dart](../lib/src/topic.dart) it appears exactly once, in
+a test asserting `topic.scheme == 'event'` — a constant that is carried through equality and
+distinguishes nothing. Removing it also removes the only reason `Topic` needs `Uri` for the
+scheme.
+
+What else `Uri` currently provides, and where each goes:
+
+| `Uri` feature | Today | v3 |
 |---|---|---|
-| everything for a tenant | `acme.>` ✓ | `acme.>` ✓ |
-| one type, **any target** | `acme.OrderPlaced.>` ✓ | `acme.>.OrderPlaced` ✗ illegal (`>` not final) |
-| one type, one-token target | `acme.OrderPlaced.*` ✓ | `acme.*.OrderPlaced` ✓ |
-| any type, a given target | `acme.*.warehouse` ✓ | `acme.warehouse.>` ✓ |
-| everything for a target | `acme.>.warehouse` ✗ | `acme.warehouse.>` ✓ |
+| `scheme` | always `'event'` | **removed** |
+| percent-encoding of type names | `List<int>` → `list%3Cint%3E`, `String?` → `string%5E` | **removed** — the type is a declared token, not a runtime type name |
+| `path` | `/in` | a plain dot-separated string, `in` |
+| `arguments` (query) | on the `Topic` | **moves to `EventDTO`** |
+| `fragment` | on the `Topic` | **moves to `EventDTO`** |
 
-The blocking line is the second one. With the type last, "give me every `OrderPlaced` regardless of
-where it came from" is expressible **only if `target` is exactly one token** — `acme.*.OrderPlaced`
-matches one middle token and nothing deeper. The moment `target` may contain dots, as decision 4
-wants, the pattern becomes unwritable at any depth. With the type first it is a single obvious
-`acme.OrderPlaced.>`.
+The last two are the interesting ones, and they are a correction rather than a loss:
+[01-architecture.md](01-architecture.md) already states that `fragment` and `arguments` "are
+**routing payload, not part of the route**" — they are excluded from `Topic` equality and never
+affect node selection. They were payload attached to an address. Moving them to the DTO says so:
 
-A second, independent reason: with the type first, the type is at a **fixed position** immediately
-after the prefix, so it can be found by counting, and the rest of the subject can be free-form
-without any parsing rule. With the type last it is found by taking the last token — also fixed —
-but then `>` in a subscription can never cover a multi-token target, as above.
-
-Note also that today's order is `target.type/path` — the type in the **middle**. That is the worst
-of the three: it is a fixed position only while `target` is a single token, which is exactly the
-constraint decision 4 wants to lift.
-
-### 4.2 The ambiguity, and the fix
-
-If both `target` and `path` may contain dots, the reverse mapping becomes ambiguous:
-
-```text
-subject : acme.shop.factory1.line3.machine7.temp.OrderPlaced
-prefix  : acme.shop            (known)
-type    : the fixed token
-middle  : factory1.line3.machine7.temp      ← split where?
+```dart
+Map<String, String>? get arguments;   // on EventDTO, not on Topic
 ```
 
-`target = factory1.line3`, `path = machine7.temp` and `target = factory1`, `path = line3.machine7.temp`
-produce the same subject. Anything that needs to rebuild `target` and `path` on the receive side
-will pick one, the handler registered under the other will not be found, and the event is dropped
-with no error.
+Handlers reading `dto.topic.arguments` change to `dto.arguments`. This is a documented API change —
+[01-architecture.md](01-architecture.md) names the old path explicitly — and it is one of the few
+places where v3 makes a concept *smaller* rather than different.
 
-Three ways out:
+### 4.6 `Topic` after all this
 
-* **(a) The subject is the key — recommended.** `Topic` equality becomes the subject string.
-  `target` and `path` are *write-side builders*: both `fire<T>(data, target:, path:)` and
-  `setHandler<T>(target:, path:)` build the same subject from their inputs, and the receive path
-  never reconstructs anything — the arriving subject is the key. The ambiguity cannot be reached
-  because nothing is ever parsed back.
-* **(b) Fix the boundary.** Forbid dots in `target` — keep today's `assert` — and let only `path`
-  be free-form. The split becomes deterministic: first token after the prefix is the target, the
-  rest is path. Costs the flexibility decision 4 asked for on `target`, and keeps
-  `dto.topic.target` / `dto.topic.path` meaningful on both sides.
-* **(c) A separator token** between target and path. Ugly, and it reserves a token that can collide
-  with application data.
+A value object over a string, with equality on that string:
 
-**Recommendation: (a).** It is the smallest rule set — the subject is the address, full stop — and
-it is the only one that needs no parsing convention to be remembered by every reader.
+```dart
+class Topic {
+  final String value;          // 'OrderPlaced.warehouse.in'
+  const Topic(this.value);
+  @override bool operator ==(Object other) => other is Topic && other.value == value;
+  @override int get hashCode => value.hashCode;
+}
+```
 
-The cost of (a) must be documented, though: on an **inbound remote event**, `dto.topic.target` and
-`dto.topic.path` cannot be recovered reliably. A handler that branches on them to decide what to do
-will work for locally-sent events and quietly misbehave for remote ones. Handlers should branch on
-the event type and use the subject string for logging and routing. If branching on `target` inside
-a handler is a real pattern in existing code, take option (b) instead — it is the conservative
-choice and it is strictly less powerful, not less correct.
+That is what makes §4.3 work end to end: the subject that arrives **is** the key, so nothing is
+ever reconstructed, and the ambiguity of §4.1 cannot be reached. `Topic.parse` becomes a
+constructor; `Topic.create<T>()` stays for local-only use.
 
-### 4.3 Rules
+### 4.7 Rules
 
 | Part | Rule | Why |
 |---|---|---|
-| `prefix` | 1+ tokens of `[A-Za-z0-9_-]` | tenant namespace; broker ACLs are written against it |
-| `type` | exactly **one** token, `[A-Za-z0-9_-]`, from the filter table | a dot would shift every following token; this is the token the decoder keys on |
-| `target` | free-form, dots allowed under (a) | decision 4 |
-| `path` | free-form, dots allowed under (a) | decision 4 |
-| any token | non-empty, no whitespace, no `*`, no `>`, no `$`-prefix, no leading/trailing dot | NATS wildcards, reserved `$SYS`/`$JS`/`$KV`, and `..` is not a valid subject |
+| `prefix` | 1+ tokens of `[A-Za-z0-9_-]` | tenant namespace; ACLs are written against it; added by the transport |
+| `type` | one token, `[A-Za-z0-9_-]`, from the filter table | a dot would shift every following token; this is what a wildcard subscription keys on |
+| `path` | free-form, dots allowed, each token non-empty | §4.1 |
+| any token | no whitespace, no `*`, no `>`, no `$`-prefix, no leading/trailing dot | NATS wildcards, reserved `$SYS`/`$JS`/`$KV`, and `..` is not a valid subject |
 | total | ≤ 16 tokens, ≤ 256 chars | NATS's own sizing advice |
-| payload | 1 MiB by default | the NATS server default; configurable, and checked locally so a failure is loud (risk R11) |
+| payload | 1 MiB by default | the NATS server default; checked locally so the failure is loud (risk R11) |
 
-Validation happens at `fire` / `setHandler`, not at the socket: a subject that is illegal *for the
-broker* should never reach it. Today's only guard is a debug-mode `assert` on `target`
+Validation happens at `fire` / `setHandler`, not at the socket: an address that is illegal *for the
+broker* must never reach it. Today's only guard is a debug-mode `assert`
 ([topic.dart:128](../lib/src/topic.dart#L128)), which does nothing in a release build.
-
-### 4.4 Where the type tag comes from
-
-Under the new address the type is an explicit token — which is exactly what
-[08-transports.md §4.1](08-transports.md) said `T.runtimeType` cannot be: it is minified in Flutter
-Web release builds by default, obfuscated under `--obfuscate`, and silently changed by renaming a
-class.
-
-So every type that crosses the wire needs a **declared, dot-free tag**, supplied by the filter
-table (§5). The tension to settle: `Topic.create<T>()` is standalone today and uses `runtimeType`,
-and standalone `Topic` creation has no access to a filter table.
-
-Recommended resolution, in order of preference:
-
-1. **Construction moves into the bus.** `bus.fire<T>()` and `bus.setHandler<T>()` know the bus, the
-   bus knows its filter table, so they build the subject with the declared tag. `Topic.create<T>()`
-   stays for local-only use, where `runtimeType` is fine because nothing leaves the process.
-2. **A bus-level tag registry** consulted by `Topic.create<T>()`. Works, but it is global mutable
-   state and two buses in one process could disagree.
-
-Option 1 keeps the tag where it is used and needs no global state.
 
 ---
 
@@ -283,19 +310,18 @@ Option 1 keeps the tag where it is used and needs no global state.
 
 ### 5.1 Shape
 
-One ordered list declares both the routing and the encoding, so "what may cross" and "how it is
-encoded" cannot drift apart:
+One ordered list declares routing, type and encoding together, so they cannot drift apart:
 
 ```dart
 class NatsFilter<T> {
-  final String subject;      // <prefix>.<type>.<target>.<path>, NATS wildcards allowed
+  final String subject;      // <prefix>.<type>.<path>, NATS wildcards allowed
   final Uint8List Function(T value, EventDTO<T> dto) serialize;
   final T Function(Uint8List bytes, String subject) deserialize;
 }
 
 final nats = NatsPipe('nats://localhost:4222', prefix: 'acme.shop')
   ..filter<OrderPlaced>(
-        subject: 'acme.shop.OrderPlaced.warehouse.>',
+        subject: 'acme.shop.OrderPlaced.>',
         serialize: (v, dto) => utf8.encode(jsonEncode(v.toJson())),
         deserialize: (b, s) => OrderPlaced.fromJson(jsonDecode(utf8.decode(b))),
       );
@@ -303,27 +329,27 @@ final nats = NatsPipe('nats://localhost:4222', prefix: 'acme.shop')
 
 Properties worth having from this shape:
 
-* **The filter list is the subscription list.** The wrapper subscribes to exactly the patterns that
-  were declared, so a subject nothing declared is never received and never costs traffic.
-* **Omitting a filter is the default deny.** An internal event that nobody registered simply does
-  not leave the process. That is a real safety property, not just tidiness.
-* **Encoding is per filter**, so JSON, msgpack, protobuf or hand-rolled binary all coexist, and
+* **The filter list is the subscription list.** The wrapper subscribes to exactly the declared
+  patterns, so an undeclared subject is never received and never costs traffic.
+* **Omitting a filter is default deny.** An internal event nobody registered simply does not leave
+  the process. That is a safety property, not just tidiness.
+* **Encoding is per filter**, so JSON, msgpack, protobuf and hand-rolled binary coexist, and
   `Uint8List` payloads make binary formats first-class rather than a workaround.
-* **Deserialization receives the subject**, so one filter covering `>` can branch on the concrete
-  subject if it needs to.
+* **The filter table is what decodes a free-form `topic`** (§4.3). This is the reason the two
+  features — filters and an explicit `topic` — are a matched pair rather than two independent
+  additions.
 
 ### 5.2 Decisions this shape needs
 
 * **Overlap and precedence.** Two filters matching one subject is a misroute waiting to happen.
-  Either reject overlaps at registration (checking patterns is cheap and can be done once), or
-  document first-match-wins and make it explicit. **Recommend rejection** — the failure mode is
-  otherwise a silent wrong codec.
-* **One filter per type, or one per subject?** If several filters share a type, the type→filter
-  direction is ambiguous. Keying the table by type and giving each type exactly one subject pattern
-  removes both this and most overlaps.
-* **Wildcards still resolve to concrete subjects on receive**, and a concrete subject must find its
-  node. That works under §4.2(a) because the subject *is* the key; it does not work under (b) or (c)
-  without reconstruction.
+  **Recommend rejecting overlaps at registration** — the failure mode is otherwise a silent wrong
+  codec. Checking declared patterns is cheap and happens once.
+* **One filter per type.** Keying by type and allowing exactly one subject pattern per type removes
+  most overlap by construction.
+* **Catch-all filters.** A filter whose subject ends in `>` matches several types, so it cannot
+  supply the type by itself. Allowed, but its `deserialize` receives the subject and must branch —
+  and there is no type-based dispatch for it. Document, or forbid `>` when more than one type uses
+  a pattern.
 
 ---
 
@@ -351,8 +377,8 @@ Port protocol, following the discipline already proven in
 
 * **down:** `_Connect(config)`, `_Publish(subject, TransferableTypedData)`, `_Subscribe(subject)`,
   `_Unsubscribe(subject)`, `_Dispose()`
-* **up:** `_Ready()`, `_InitError(error)`, `_Message(subject, bytes)`, `_Status(connecting|connected|lost)`,
-  `_PublishFailed(subject, error)`
+* **up:** `_Ready()`, `_InitError(error)`, `_Message(subject, bytes)`,
+  `_Status(connecting|connected|lost)`, `_PublishFailed(subject, error)`
 
 1. the port listener **never throws** — an exception there escapes to the zone and kills the isolate;
 2. readiness is signalled only after the client is genuinely connected (`waitInit`, fix #3);
@@ -370,35 +396,38 @@ declaration in the package, and a loud failure rather than subtly different beha
 
 ## 7. Blast radius
 
-Small, by design — this is the payoff of decision 2.
-
 | Area | Change |
 |---|---|
-| `lib/src/topic.dart` | address builder rewritten for `target.path.type`; `runtimeType` replaced by a declared tag on the bus path (§4.4); validation moves from `assert` to a real check |
-| `lib/src/event_bus.dart` | `fire` added; `errorStream` added; `send` gains the "no local node + transport attached → throw" rule |
-| `lib/src/event_dto.dart` | unchanged |
-| `lib/src/event_bus_isolate.dart` | **unchanged** |
-| `lib/src/layers.dart`, `fsm.dart`, `scope.dart`, `command.dart` | **unchanged** |
-| `test/` (83 tests) | untouched, plus new tests for `fire`, the address rules and the filters |
-| `doc/` | new document for `fire`; `Topic` sections in 01, 02 and 06 rewritten |
+| `lib/src/topic.dart` | rewritten as a value object over a string; `Uri`, `scheme` and `parse`-from-URI gone; `arguments`/`fragment` removed |
+| `lib/src/event_bus.dart` | `fire` added; `errorStream` added; `target` removed from eight method signatures; `topic` override added; `send` gains the guard of §2.3 |
+| `lib/src/event_dto.dart` | gains `arguments` and `fragment` |
+| `lib/src/fsm.dart` | `addFSMTransition(eventTarget:)` removed |
+| `lib/src/event_bus_isolate.dart` | `target` removed from `send`; **no structural change** |
+| `lib/src/layers.dart`, `scope.dart`, `command.dart` | **unchanged** — they never took a `target` |
+| `test/` (83 tests) | 5 `target:` sites; `topic_dto_test.dart` rewritten for the new address |
+| `doc/` | `Topic` sections of 01, 02, 06 and 07 rewritten; README quick-start; a migration table |
 | `packages/` | new workspace: `event_bus_transport`, `event_bus_nats` |
 
-For comparison, the earlier draft of this plan touched `event_bus_isolate.dart`, `scope.dart`,
-`command.dart` and all 34 `Completer` sites in the tests. That is the difference decision 2 buys.
+For comparison, an earlier draft of this plan (removing the `Completer`) touched
+`event_bus_isolate.dart`, `scope.dart`, `command.dart` and all 34 `Completer` sites in the tests.
+That is the difference decisions 2 and 3 buy.
 
 ---
 
 ## 8. What is lost, and what must be documented
 
-* **`send` cannot cross a process boundary**, by construction. Anyone reaching for it from a
-  network context gets a throw and a pointer to `fire`.
+* **`send` cannot cross a process boundary**, by construction. Reaching for it from a network
+  context throws, with a pointer to `fire`.
 * **`fire` has no delivery guarantee.** `true` means "taken", nothing more.
-* **`haveListener` / `haveHandler` stay local**, and cannot be made remote by any amount of work —
-  §2.2's third question is unanswerable in core NATS.
-* **`dto.topic.target` / `.path` are unreliable on inbound remote events** under §4.2(a).
-* **Ordering.** Delegated to the client library (decision 6) — which is valid only while there is
-  exactly one connection per pipe. Per-subject connections would reorder, so "one connection" is an
-  invariant of the pipe contract, not an implementation detail.
+* **`haveListener` / `haveHandler` stay local**, and cannot be made remote by any amount of work.
+* **`target` is gone.** Any address that used it as a separate dimension becomes a `path` token —
+  and a subscription that relied on `target` being one token loses that guarantee, because `path`
+  is free-form.
+* **An explicit `topic` opts out of the type-token conventions** — no `type.>` wildcarding for it,
+  and nothing stops two types from colliding on one address.
+* **Ordering.** Delegated to the client library (decision 7) — valid only while there is exactly one
+  connection per pipe. Per-subject connections would reorder, so "one connection" is an invariant of
+  the pipe contract, not an implementation detail.
 
 ---
 
@@ -406,19 +435,20 @@ For comparison, the earlier draft of this plan touched `event_bus_isolate.dart`,
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | **`send` becomes a trap** over a network — someone uses it for a remote topic and gets a confusing failure | high | medium | The throw names `fire`; document the rule at the top of both methods; a doc test on the wording is not absurd |
-| R2 | **Two dispatch paths confuse users** — which one do I call? | high | medium | The rule is one line: reply wanted → `send`, crossing a boundary → `fire`. Put it in the README's first screen, not in chapter 6 |
-| R3 | **The address rewrite breaks existing users** — any code holding a `Topic` string, parsing it, or matching on it | high | medium | This is the 3.0 break. A migration section listing `event://all.string/p` → `acme.shop.String.all.p` |
-| R4 | **Dots in target and path make the reverse mapping ambiguous** | certain if neither fix is chosen | **high** — silent drops | §4.2; choose (a) or (b) before writing the builder |
-| R5 | **Delegate-ordering assumption breaks** if connections are not one-per-pipe | medium | medium | One connection per pipe, stated as a contract invariant |
-| R6 | **Backpressure.** `SendPort` is unbounded and never blocks; a slow socket grows the isolate mailbox until OOM | **high** | medium | In-flight counter in the pipe; past the limit `fire` returns `false` |
-| R7 | **`dart_nats` maturity** — 39 likes, unverified uploader, JetStream experimental, headers thinly documented | certain | medium | Core pub/sub only; the library is confined to `packages/event_bus_nats`; a fake pipe keeps the bus testable without it |
-| R8 | **Header support unknown.** If `dart_nats` `pub` cannot attach headers, `arguments` cannot travel as NATS headers | medium | medium | **Verify before the first publish.** Fallback: put `tag`, `args` and `data` in a JSON envelope, which changes the wire format |
-| R9 | **Filter overlap produces a misroute** — the wrong serializer for a subject | medium | medium | Key the table by type, one subject pattern per type, reject overlaps at registration (§5.2) |
-| R10 | **Silent drops on an unknown tag inbound** | medium | medium | `EventBusError(filter)` → `errorStream`; never drop quietly |
-| R11 | **Payload size.** NATS default max is typically 1 MiB and server-configurable; locally there is no limit | medium | medium | Local check → throw; document the server limit |
-| R12 | **Flutter Web cannot spawn the isolate** | certain | medium | `runInIsolate: false` + `wss://`; declare platform support |
-| R13 | **Two paths race on one topic** — `send` and `fire` to the same topic from different places | low | medium | Explicitly out of scope: `fire` is not a delivery guarantee, and `send` is local. Document rather than arbitrate |
+| R1 | **`send` becomes a trap** over a network — someone uses it for a remote topic and gets a confusing failure | high | medium | The throw names `fire`; document the rule at the top of both methods |
+| R2 | **Two dispatch paths confuse users** | high | medium | One line: reply wanted → `send`, crossing a boundary → `fire`. README's first screen, not chapter 6 |
+| R3 | **An explicit `topic` silently loses type routing** for non-Dart peers and wildcard subscriptions | medium | medium | Document on the parameter; the type token is a convention, but a load-bearing one |
+| R4 | **Removing `target` breaks every address** that used it and every pattern that assumed it was one token | **high** | medium | 3.0 break. A migration table: `target: 'x', path: '/y'` → `path: 'x.y'`. Only 5 sites in tests and examples |
+| R5 | **Removing `target` changes wildcard subscriptions** that relied on it as a position | medium | medium | State in the migration table which patterns have no direct equivalent |
+| R6 | **Delegate-ordering assumption breaks** if connections are not one-per-pipe | medium | medium | One connection per pipe, stated as a contract invariant |
+| R7 | **Backpressure.** `SendPort` is unbounded and never blocks; a slow socket grows the isolate mailbox until OOM | **high** | medium | In-flight counter in the pipe; past the limit `fire` returns `false` |
+| R8 | **`dart_nats` maturity** — 39 likes, unverified uploader, JetStream experimental, headers thinly documented | certain | medium | Core pub/sub only; confined to `packages/event_bus_nats`; a fake pipe keeps the bus testable without it |
+| R9 | **Header support unknown.** If `dart_nats` `pub` cannot attach headers, `arguments` cannot travel as NATS headers | medium | medium | **Verify before the first publish.** Fallback: a JSON envelope carrying `tag`, `args` and `data`, which changes the wire format |
+| R10 | **Filter overlap produces a misroute** | medium | medium | Key by type, one pattern per type, reject overlaps at registration |
+| R11 | **Silent drops on an unknown subject inbound** | medium | medium | `EventBusError(filter)` → `errorStream`; never drop quietly |
+| R12 | **Payload size.** NATS default max is typically 1 MiB and server-configurable; locally there is no limit | medium | medium | Local check → throw; document the server limit |
+| R13 | **Flutter Web cannot spawn the isolate** | certain | medium | `runInIsolate: false` + `wss://`; declare platform support |
+| R14 | **`argparse`-style confusion between `topic` and `path`** — callers passing both | medium | low | Throw when both are set (§2.2) |
 
 ---
 
@@ -426,13 +456,14 @@ For comparison, the earlier draft of this plan touched `event_bus_isolate.dart`,
 
 ### Phase 0 — the address and `fire`, no transports yet
 
-Rewrite the address builder for `<prefix>.<type>.<target>.<path>`; add declared type tags;
-add `fire` and `errorStream`; add the `send` guard. No broker anywhere.
+`Topic` becomes a value object over a string; `Uri`, `scheme` and `target` go;
+`arguments`/`fragment` move to `EventDTO`; the `topic` override is added everywhere an address is
+taken; `fire` and `errorStream` are added; the `send` guard of §2.3 is added. No broker anywhere.
 
-*Exit criteria:* the subject format is fixed and tested against the §4.3 rules; `fire` returns the
-documented `bool` in each of the four cases; a handler reached by `fire` that throws lands in
-`errorStream`; `send` throws with a pointer to `fire` when a transport is attached and no local node
-exists; §4.2 is decided in code.
+*Exit criteria:* the address rules of §4.7 are fixed and tested; `fire` returns the documented
+`bool` in each of the four cases; a handler reached by `fire` that throws lands in `errorStream`;
+`send` throws with a pointer to `fire` when a transport is attached and no local node exists;
+passing both `topic` and `path` throws; the migration table is written and the docs are updated.
 
 ### Phase 1 — workspace and the pipe contract
 
@@ -449,7 +480,7 @@ Transport isolate, filters serializing on the sender, one connection, the in-fli
 
 *Exit criteria:* two processes exchange fired events through a real broker; the conformance suite
 passes against NATS; killing the broker is survivable and `fire` returns `false` while it is down;
-R8 is answered and the wire format is documented.
+R9 is answered and the wire format is documented.
 
 ### Phase 3 — hardening
 
@@ -466,22 +497,22 @@ network if that is ever wanted; user properties cover `arguments` for v5 only.
 
 ## 11. Open questions
 
-1. **§4.1 — token order.** Type first (recommended, keeps `acme.OrderPlaced.>`) or type last as
-   proposed (loses it as soon as `target` may contain dots)?
-2. **§4.2 — (a) subject-as-key or (b) dots forbidden in `target`?** (a) is simpler; (b) keeps
-   `dto.topic.target` / `.path` meaningful on both sides. Says which one depends on whether existing
-   handlers branch on `target`.
-3. **§4.4 — where the type tag lives**: bus-level construction (recommended) or a global registry?
+1. **§2.2 — `topic` naming.** Is `topic` right for the override, given the method already computes a
+   topic? The alternatives are `subject` (NATS vocabulary) or `address`.
+2. **§4.3 — catch-all filters.** Forbid `>` in a filter subject, or allow it with a branching
+   `deserialize`?
+3. **§4.6 — does `Topic` still need `Topic.create<T>()`** as a standalone, or does all construction
+   move to the bus now that `runtimeType` is only a local fallback?
 4. **§5.2 — overlap**: reject at registration (recommended) or first-match-wins?
 5. **§2.2 — `false` for a filtered-out topic**: correct, or should an unmatched outgoing event be a
    loud error instead?
-6. Does `fire` need a `Future` variant for callers who want to await the publish reaching the socket?
-   The contract says no; confirm that nothing needs it.
+6. Does `fire` need a `Future` variant for callers who want to await the publish reaching the
+   socket? The contract says no; confirm that nothing needs it.
 
 ---
 
 ## What next
 
 * [08-transports.md](08-transports.md) — the option analysis behind these decisions.
-* [01-architecture.md](01-architecture.md) — the model that survives v3 unchanged.
-* [07-caveats.md](07-caveats.md) — the guarantees decision 2 leaves in place.
+* [01-architecture.md](01-architecture.md) — the model v3 changes, and the parts it leaves alone.
+* [07-caveats.md](07-caveats.md) — the guarantees decision 2 keeps in place.

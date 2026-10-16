@@ -12,39 +12,41 @@ Two wrappers over the bus for working with the "current value":
 
 ```dart
 abstract class Command<T> {
-  factory Command(EventBus busBinded, {String? path, int maxLen = 10});
+  factory Command(EventBus busBinded, {List<String>? paths, int maxLen = 10});
 
-  Future<dynamic> execute(T data, {String? fragment, Map<String, String>? arguments});
+  Future<dynamic> execute(T data, {Map<String, String>? arguments});
   Future<dynamic> undo();
   EventBus get bindedBus;
   int get queueLength;                            // history depth
-  @Deprecated('Use queueLength') int get queueLenght;
-  String? get path;
-  (T data, String? fragment, Map<String, String>? arguments)? get lastCall;
+  List<String>? get paths;
+  (T data, Map<String, String>? arguments)? get lastCall;
 }
 ```
 
 ```dart
 final bus = EventBus();
-(bus as EventBusHandlers).setHandler<int>(path: '/counter', handler: (dto, lastData) async {
+bus.handlers.setHandler<int>(paths: ['counter'], handler: (dto, lastData) async {
   dto.completer?.complete(dto.data);
 });
 
-final command = Command<int>(bus, path: '/counter', maxLen: 10);
+final command = Command<int>(bus, paths: ['counter'], maxLen: 10);
 
 await command.execute(1);              // sent to the bus, history: [1]
 await command.execute(2);              // history: [1, 2]
 command.queueLength;                   // 2
-command.lastCall;                      // (2, null, null)  → (data, fragment, arguments)
+command.lastCall;                      // (2, null)  → (data, arguments)
 await command.undo();                  // see below
 ```
 
 `execute` returns the same as `bus.send`: the handler result (or `null`).
 
-The history stores `(data, arguments, fragment)` tuples; `lastCall` returns them in the order
-`(data, fragment, arguments)`. `maxLen` caps the history depth: on overflow the oldest
-value is evicted. A value less than one is clamped to 1, so `maxLen: 0`
-no longer breaks the very first call.
+The history stores `(data, arguments)` pairs and `lastCall` returns the newest one in that order.
+`maxLen` caps the history depth: on overflow the oldest value is evicted. A value less than one is
+clamped to 1, so `maxLen: 0` no longer breaks the very first call.
+
+`paths` is the address of the command: every `execute` sends to `Topic.create<T>(paths: paths)`, so
+a handler registered with the same paths answers it. Without `paths` the command addresses the
+type alone.
 
 ### What `undo()` does
 
@@ -71,17 +73,17 @@ mixin class Scope<T> {
   T? lastData;
   void Function(T newData)? onUpdate;
   EventBus get scopeBus;
-  (T?, String?, Map<String, String>?)? get lastCall;
+  (T?, Map<String, String>?)? get lastCall;
 
   Future<void> initScope(EventBus bus, {
     T? initialData,
-    bool initialDataNeedExecute = true,      // old initalData* names still work as @Deprecated
-    String? path,
+    bool initialDataNeedExecute = true,
+    List<String>? paths,
     int maxLenForUndo = 10,       // history depth; undo needs >= 2
     void Function(T newData)? onUpdate,
   });
 
-  Future<dynamic> call(T newData, {String? fragment, Map<String, String>? arguments});
+  Future<dynamic> call(T newData, {Map<String, String>? arguments});
   Future<dynamic> undo();
   void disposeScope({bool removeHandler = true});
 }
@@ -94,14 +96,14 @@ it directly (`final scope = Scope<int>()`).
 
 ```dart
 final bus = EventBus(isModelBus: true);
-(bus as EventBusHandlers).setHandler<int>(path: '/counter', handler: (dto, lastData) async {
+bus.handlers.setHandler<int>(paths: ['counter'], handler: (dto, lastData) async {
   dto.completer?.complete('accepted ${dto.data}');
 });
 
 final scope = Scope<int>();
 await scope.initScope(
   bus,
-  path: '/counter',
+  paths: ['counter'],
   initialData: 0,         // will be sent to the bus (initialDataNeedExecute: true by default)
   maxLenForUndo: 10,      // rollback history depth
   onUpdate: (value) => print('current value: $value'),
@@ -110,7 +112,7 @@ await scope.initScope(
 print(await scope.call(1));   // 'accepted 1' — handler result
                               // onUpdate will print 'current value: 1'
 print(scope.lastData);        // 1
-print(scope.lastCall);        // (1, null, null) — from the Command queue
+print(scope.lastCall);        // (1, null) — from the Command queue
 
 scope.disposeScope();         // remove the handler from the bus and unsubscribe
 ```
@@ -118,14 +120,14 @@ scope.disposeScope();         // remove the handler from the bus and unsubscribe
 ### What happens inside
 
 ```text
-scope.initScope(bus, path: '/counter')
-   ├─ creates Command<T>(bus, path: '/counter', maxLen: maxLenForUndo)
-   ├─ subscribes: bus.listen<T>(path: '/counter') → lastData = value; onUpdate(value)
+scope.initScope(bus, paths: ['counter'])
+   ├─ creates Command<T>(bus, paths: ['counter'], maxLen: maxLenForUndo)
+   ├─ subscribes: bus.listen<T>(paths: ['counter']) → lastData = value; onUpdate(value)
    └─ if initialData != null
          └─ initialDataNeedExecute: true  → await Command.execute(initialData)  (goes through the bus)
             initialDataNeedExecute: false → lastData = initialData              (local only)
 
-scope.call(value)   → Command.execute → bus.send<T>(value, path, fragment, arguments)
+scope.call(value)   → Command.execute → bus.send<T>(value, paths, arguments)
 scope.undo()        → Command.undo    → repeats the previous value (see above)
 scope.disposeScope()→ removeHandler from the bus (if removeHandler: true) + cancel the subscription
 ```
@@ -136,14 +138,19 @@ returns). If a topic has no node and the bus is common, the value will not reach
 subscriber — but since `initScope` creates the subscription itself (and therefore the
 node), the value will arrive.
 
+`arguments` passed to `call` travel with the event and are readable in the handler as
+`dto.arguments`; they are kept in the command history next to the data, so `undo()` re-sends them
+with the previous value.
+
 ### Common mistakes
 
 | Mistake | What happens |
 |---|---|
 | `maxLenForUndo < 2` | `undo()` cannot roll back: there is no previous value in the history |
-| Calling `call` before `initScope` | `Exception("Scope<int> not initalize")` |
+| Calling `call` before `initScope` | `EventBusException("Scope<int> not initialize")` |
 | Accessing `lastCall`/`scopeBus` before `initScope` | the same exception |
 | `disposeScope(removeHandler: true)` when the topic has foreign listeners | the node is destroyed entirely: the handler is removed, `lastData` is lost, listener streams are closed |
+| `maxLenForUndo` smaller than the number of steps you undo | the history is capped, so the older values are already evicted |
 
 A repeated `initScope` removes the handler of the previous topic itself (it calls `disposeScope`), so
 re-initialization does not leave "dead" handlers behind.

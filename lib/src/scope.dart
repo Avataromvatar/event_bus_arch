@@ -8,11 +8,11 @@ mixin class Scope<T> {
   T? lastData;
   (T?, Map<String, String>?)? get lastCall => _scopeCommand != null
       ? _scopeCommand!.lastCall
-      : throw EventBusException("Scope<${T..runtimeType}> not initalize");
+      : throw EventBusException("Scope<$T> not initialize");
   void Function(T newData)? onUpdate;
   EventBus? get scopeBus => _scopeCommand != null
       ? _scopeCommand!.bindedBus
-      : throw EventBusException("Scope<${T..runtimeType}> not initalize");
+      : throw EventBusException("Scope<$T> not initialize");
 
   ///Initializes the scope: subscribes to the bus and creates the call history.
   ///
@@ -52,9 +52,9 @@ mixin class Scope<T> {
     }
   }
 
-  Future<dynamic> call(T newData, {String? fragment, Map<String, String>? arguments}) {
+  Future<dynamic> call(T newData, {Map<String, String>? arguments}) {
     if (_scopeCommand == null) {
-      throw EventBusException("Scope<${T..runtimeType}> not initalize");
+      throw EventBusException("Scope<$T> not initialize");
     }
     return _scopeCommand!.execute(newData, arguments: arguments);
   }
@@ -62,7 +62,7 @@ mixin class Scope<T> {
   ///Rolls back to the previous value from the history
   Future<dynamic> undo() {
     if (_scopeCommand == null) {
-      throw EventBusException("Scope<${T..runtimeType}> not initalize");
+      throw EventBusException("Scope<$T> not initialize");
     }
     return _scopeCommand!.undo();
   }

@@ -177,55 +177,121 @@ void main() {
 
     test('Should send event with different topic paths', () async {
       final bus = EventBus();
-      
+
       // Set up handler for specific path
       (bus as EventBusHandlers).setHandler<String>(
-        path: 'test',
+        paths: ['test'],
         handler: (dto, lastData) async {
           dto.completer?.complete('handled');
         },
       );
-      
+
       // Send event to specific path
-      final result = await bus.send('test data', path: 'test');
-      
+      final result = await bus.send('test data', paths: ['test']);
+
       // Should return a future
       expect(result, isNotNull);
     });
 
     test('Should handle event with arguments', () async {
       final bus = EventBus();
-      
+      Map<String, String>? seen;
+
       // Set up handler
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
+          seen = dto.arguments;
           dto.completer?.complete('handled');
         },
       );
-      
+
       // Send event with arguments
       final result = await bus.send('test data', arguments: {'key': 'value'});
-      
+
       // Should return a future
       expect(result, isNotNull);
+      // the handler reads the arguments of the call from the dto
+      expect(seen, {'key': 'value'});
     });
 
-    test('Should handle event with target', () async {
+    test('Should handle event with a multi-token path', () async {
       final bus = EventBus();
-      
-      // Set up handler for specific target
+
+      // Set up handler for a path of two tokens
       (bus as EventBusHandlers).setHandler<String>(
-        target: 'specific_target',
+        paths: ['specific', 'path'],
         handler: (dto, lastData) async {
           dto.completer?.complete('handled');
         },
       );
-      
-      // Send event to specific target
-      final result = await bus.send('test data', target: 'specific_target');
-      
+
+      // Send event to a different path: a different node, no handler
+      final result = await bus.send('test data', paths: ['specific']);
+
       // Should return a future
-      expect(result, isNotNull);
+      expect(result, isNull);
+    });
+
+    test('Should keep paths of the same type apart', () async {
+      final bus = EventBus();
+      final received = <String>[];
+
+      (bus as EventBusHandlers).setHandler<String>(
+        paths: ['a'],
+        handler: (dto, lastData) async {
+          received.add('a: ${dto.data}');
+        },
+      );
+      bus.handlers.setHandler<String>(
+        paths: ['b'],
+        handler: (dto, lastData) async {
+          received.add('b: ${dto.data}');
+        },
+      );
+
+      await bus.send('to a', paths: ['a']);
+      await bus.send('to b', paths: ['b']);
+
+      expect(received, ['a: to a', 'b: to b']);
+    });
+
+    test('Should separate topics by a custom separator', () async {
+      final bus = EventBus();
+      var called = false;
+
+      (bus as EventBusHandlers).setHandler<String>(
+        paths: ['a', 'b'],
+        separator: '/',
+        handler: (dto, lastData) async {
+          called = true;
+          dto.completer?.complete('slash');
+        },
+      );
+
+      // the default separator builds a different address, so nothing is found
+      expect(await bus.send('x', paths: ['a', 'b']), isNull);
+      expect(called, false);
+
+      expect(await bus.send('x', paths: ['a', 'b'], separator: '/'), 'slash');
+      expect(called, true);
+    });
+
+    test('Should use defaultTopicPathSeparator for calls without one', () async {
+      final bus = EventBus();
+      (bus as EventBusImpl).defaultTopicPathSeparator = '/';
+      var called = false;
+
+      bus.handlers.setHandler<String>(
+        paths: ['a', 'b'],
+        handler: (dto, lastData) async {
+          called = true;
+        },
+      );
+
+      await bus.send('x', paths: ['a', 'b']);
+
+      expect(called, true);
+      expect(bus.haveHandler<String>(paths: ['a', 'b']), true);
     });
   });
 }

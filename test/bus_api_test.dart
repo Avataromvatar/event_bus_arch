@@ -111,12 +111,15 @@ void main() {
       await bus.dispose();
     });
 
-    test('the old name initalData keeps working', () async {
-      final bus = EventBus();
-      // ignore: deprecated_member_use_from_same_package
-      bus.handlers.setHandler<String>(initalData: 'old', handler: (dto, lastData) async {});
+    test('initialData is applied to a topic with paths', () async {
+      final bus = EventBus(isModelBus: true);
 
-      expect(bus.lastData<String>(), 'old');
+      bus.handlers.setHandler<int>(initialData: 5, paths: ['counter'],
+          handler: (dto, lastData) async {});
+
+      expect(bus.lastData<int>(paths: ['counter']), 5);
+      // another topic of the same type is untouched
+      expect(bus.lastData<int>(), null);
       await bus.dispose();
     });
   });

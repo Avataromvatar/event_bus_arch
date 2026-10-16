@@ -10,7 +10,7 @@ separate import is needed.
 ## Contents
 
 * [Typedefs](#typedefs)
-* [Topic](#topic) / [EventTopicImpl](#eventtopicimpl)
+* [Topic](#topic) / [TopicImpl](#topicimpl)
 * [EventDTO](#eventdto) / [EventDTOImpl](#eventdtoimpl)
 * [EventNode](#eventnode)
 * [EventBus](#eventbus) / [EventBusHandlers](#eventbushandlers) / [EventBusImpl](#eventbusimpl) / [EventBusMixin](#eventbusmixin)
@@ -19,6 +19,7 @@ separate import is needed.
 * [FSM](#fsm)
 * [Scope](#scope) / [Command](#command)
 * [EventBusLogger](#eventbuslogger)
+* [Errors](#errors)
 * [What is not exported](#what-is-not-exported)
 
 ## Typedefs
@@ -37,56 +38,65 @@ typedef LoggerHandler = void Function(EventDTO dto, bool hasListeners);
 
 ## Topic
 
-`abstract class Topic` — the event address (format details are in [01-architecture.md](01-architecture.md#1-topic--the-event-address)).
+`abstract class Topic` — the event address. The format, the separator and the equality rules are
+in [01-architecture.md](01-architecture.md#1-topic--the-event-address).
 
 ```dart
 // Getters
-String get shema;                       // 'event'
-String? get target;                     // 'all' by default
-String get type;                        // type name (lowercase), e.g. 'string'
-String get host;                        // 'target.type'
-String get path;                        // '/p' or ''
-String? get fragment;
-Map<String, String>? get arguments;
-String get topic;                       // routing key: fragment and arguments are not included
-String get topicWithFragment;
-String get fullTopic;                   // full URI
+String get type;                        // the first token: 'String'
+List<String> get paths;                 // the path tokens: ['a', 'b']; empty when there is none
+String get separator;                   // joins type and paths: '.' by default
+String get topic;                       // the routing key: 'String.a.b'
 
 // Creation
-static Topic create<T>({String? target, String? path, String? fragment, Map<String, String>? arguments});
-factory Topic.fromParametr({Type? type, String? nameType, String? target, String? path,
-                            String? fragment, Map<String, String>? arguments});
-factory Topic.parse(String fullTopic);   // == fromString
-factory Topic.fromString(String topic);
+static Topic create<T>({List<String>? paths, String separator = '.'});
+factory Topic.fromParametr({Type? type, List<String>? paths, String separator = '.'});
+factory Topic.parse(String str, {String separator = '.'});   // == fromString
+factory Topic.fromString(String topic, {String separator = '.'});
 
-Topic copy({String? target, String? fragment, Map<String, String>? arguments});
-String toString();                       // returns fullTopic
+Topic copy({List<String>? paths, String? separator});   // the type is kept
+String toString();                                      // returns topic
 ```
-
-Equality: by `topic` (the scheme + `target.type` + `path`). `fragment` and `arguments` are ignored,
-so topics that differ only in them are equal.
-
-`Topic.create<T>` takes only the type and the parameters; `Topic.fromParametr` additionally accepts a `Type`
-or a `nameType` (string type name) and **requires at least one of them**, otherwise it throws
-`Exception('Topic.create required type or nameType !')`.
-
-## EventTopicImpl
-
-`class EventTopicImpl implements Topic` — the only implementation, returned by all factories.
 
 ```dart
-EventTopicImpl.parse(String topic);      // uses Uri.tryParse; throws EventBusException on failure
-EventTopicImpl.create({Type? type, String? nameType, String target = 'all', String? path,
-                       String? fragment, String scheme = 'event',
-                       @Deprecated('Use scheme') String? shema,
-                       Map<String, String>? arguments});
-Topic copy({String? target, String? scheme, String? fragment,
-            Map<String, String>? arguments, String? path});
+Topic.create<String>();                              // String
+Topic.create<String>(paths: ['a', 'b']);             // String.a.b
+Topic.create<String>(paths: ['a', 'b'], separator: '/');  // String/a/b
+Topic.parse('String.a.b');                           // type String, paths ['a', 'b']
+Topic.fromParametr(type: MyEvent, paths: ['p']);     // MyEvent.p
 ```
 
-`copy` keeps the `path`, `fragment` and `arguments` of the source topic unless they are overridden.
-In debug mode an `assert` rejects a dot in `target` and in the type name: the topic host is
-`target.type`, and a dot inside a part breaks addressing.
+**Equality is by `topic`** — the type, the separator and the paths in the string form. `arguments`
+live on the [EventDTO](#eventdto) and are not part of the address, so two calls that differ only in
+`arguments` reach the same handler. The comparison is `other is Topic`, so any implementation with
+the same routing key is equal.
+
+`Topic.parse` splits the string by `separator` and rejects an empty type with an
+`EventBusException` (`Topic.parse('')`, `Topic.parse('.a')`). `Topic.fromParametr` throws the same
+exception when `type` is null. `copy` keeps the type and replaces only what is passed.
+
+## TopicImpl
+
+`class TopicImpl implements Topic` — the only implementation, returned by all factories.
+
+```dart
+TopicImpl(String type, {String separator = '.', List<String> paths = const []});
+
+String get topic;          // 'String.a.b', or just the type when paths is empty
+Topic copy({List<String>? paths, String? separator});
+bool operator ==(Object other);   // other is Topic && other.topic == topic
+int get hashCode;                 // Object.hashAll([topic])
+String toString();                // returns topic
+```
+
+Two things worth knowing about the class itself:
+
+* `TopicImpl implements Topic`, so the `toString` body on the abstract class is **not** inherited —
+  the implementation repeats it. Without that override `toString` would be
+  `Instance of 'TopicImpl'`.
+* `paths` is held as passed, not copied. Do not mutate the list you handed in: the routing key and
+  the hash are computed from it on every access, so a mutation changes the address of a topic that
+  is already a key in `_eventsMap`.
 
 ## EventDTO
 
@@ -94,43 +104,52 @@ In debug mode an `assert` rejects a dot in `target` and in the type name: the to
 abstract class EventDTO<T> {
   Topic get topic;
   T get data;
+  Map<String, String>? get arguments;    // parameters of this call; not part of the address
   Completer? get completer;              // response channel, may be null
 
-  static EventDTO<T> create<T>(T data, {String? target, String? path,
-      Map<String, String>? arguments, String? fragment, Completer? completer});
+  static EventDTO<T> create<T>(T data, {List<String>? paths, String? separator,
+      Map<String, String>? arguments, Completer? completer});
 
-  factory EventDTO(T data, {Topic? topic, String? target, String? path,
-      Map<String, String>? arguments, String? fragment, Completer? completer});
+  factory EventDTO(T data, {Topic? topic, List<String>? paths, String? separator,
+      Map<String, String>? arguments, Completer? completer});
 
   Map<String, dynamic> toJson();
 }
 ```
 
 The factory creates `EventDTOImpl`. If `topic` is not passed, it is built from `T` and the
-`target`/`path`/`fragment`/`arguments` parameters.
+`paths`/`separator` parameters; `separator` defaults to `'.'` when not given.
+
+`arguments` reach the handler on the DTO it is given: the node rebuilds the event for type `T` and
+carries `topic`, `arguments` and `completer` over. `EventBusIsolate` does the same, so `arguments`
+survive the isolate boundary.
 
 ## EventDTOImpl
 
 ```dart
 class EventDTOImpl<T> implements EventDTO<T> {
-  EventDTOImpl(Topic topic, T data, {Completer? completer});   // topic and data are positional!
+  EventDTOImpl(Topic topic, T data, {Completer? completer, Map<String, String>? arguments});
+                                                       // topic and data are positional!
 
   Topic topic;
   T data;
   Completer? completer;
+  Map<String, String>? arguments;
 
   static EventDTO<T> fromJson<T>(Map<String, dynamic> json,
       {T Function(String topic, dynamic data)? dataConverter});
 
-  Map<String, dynamic> toJson();     // {'topic': fullTopic, 'data': data} — without encoding
+  Map<String, dynamic> toJson();     // {'topic': topic.topic, 'data': data} — without encoding
   bool operator ==(Object other);    // by (topic, data)
   int get hashCode;                  // Object.hashAll([topic, data])
-  String toString();                 // 'EventDTO(<fullTopic>, data: <data>)'
+  String toString();                 // 'EventDTO(<topic>, data: <data>)'
 }
 ```
 
 `toJson` returns the data **as is**, without `jsonEncode`: encoding is the caller's
 job, so an arbitrary object in `data` no longer breaks either `toJson` or `toString`.
+`arguments` are **not** part of the JSON form, and `fromJson` does not restore them — carry them
+in your own envelope if a wire format has to preserve them.
 
 ## EventNode
 
@@ -158,21 +177,36 @@ The abstract bus interface. The factory always returns `EventBusImpl`.
 factory EventBus({bool isModelBus = false});
 
 bool get isModelBus;
+String get defaultTopicPathSeparator;          // '.'; the fallback for every address parameter
 EventBusHandlers get handlers;                 // bus.handlers.setHandler(...) without a cast
 Future<void> dispose();                        // idempotent; after it the bus throws StateError
 bool get isDisposed;
 Stream<(EventDTO, bool)> get allEventStream;   // (event, whether it reached a node)
 
-Future<dynamic>? send<T>(T data, {String? path, String? fragment, String? target,
+Future<dynamic>? send<T>(T data, {List<String>? paths, String? separator,
                                   Map<String, String>? arguments});
-Stream<T> listen<T>({String? path, String? target});
-StreamSubscription<T> subscribe<T>({String? path, String? target, void Function(T e)? onData,
-                                    Function? onError, void Function()? onDone, bool? cancelOnError});
-T? lastData<T>({String? path, String? target});
+Stream<T> listen<T>({List<String>? paths, String? separator});
+StreamSubscription<T> subscribe<T>({List<String>? paths, String? separator,
+                                    void Function(T e)? onData, Function? onError,
+                                    void Function()? onDone, bool? cancelOnError});
+T? lastData<T>({List<String>? paths, String? separator});
 
-bool haveHandler<T>({String? path, String? target});
-bool haveListener<T>({String? path, String? target});
+bool haveHandler<T>({List<String>? paths, String? separator});
+bool haveListener<T>({List<String>? paths, String? separator});
 ```
+
+Every method that takes an address resolves `separator ?? defaultTopicPathSeparator`, so changing
+the field on an `EventBusImpl` changes the fallback for all of them at once:
+
+```dart
+final bus = EventBusImpl(false);
+bus.defaultTopicPathSeparator = '/';
+bus.handlers.setHandler<int>(paths: ['a', 'b'], handler: ...);   // int/a/b
+await bus.send<int>(1, paths: ['a', 'b']);                       // int/a/b — found
+```
+
+`defaultTopicPathSeparator` is a **field** on `EventBusMixin`, not a setter on the interface, so a
+variable of type `EventBus` has to be cast (`(bus as EventBusImpl).defaultTopicPathSeparator = '/'`).
 
 Behavior is described in [02-event-bus.md](02-event-bus.md#sending-an-event). After `dispose` the
 `send`/`listen`/`subscribe`/`setHandler` methods throw `StateError`.
@@ -184,12 +218,11 @@ A separate interface for managing handlers (accessible through a cast: `bus as E
 ```dart
 void setHandler<T>({
   T? initialData,                              // initial value of lastData
-  @Deprecated('Use initialData') T? initalData,
-  String? path,
-  String? target,
+  List<String>? paths,
+  String? separator,
   required Handler<T> handler,
 });
-void removeHandler<T>({String? path, String? target});
+void removeHandler<T>({List<String>? paths, String? separator});
 void addAllHandlerFromOtherBus(EventBus fromBus);
 void removeAllHandlerPresentInOtherBus(EventBus otherBus);
 ```
@@ -209,6 +242,7 @@ All the behavior comes from the mixin; the class's own code only stores the flag
 
 ```dart
 mixin EventBusMixin implements EventBus, EventBusHandlers {
+  String defaultTopicPathSeparator = '.';         // the address fallback, writable
   // all EventBus and EventBusHandlers methods
   EventBusHandlers get handlers;                  // returns this
   bool get isDisposed;
@@ -226,16 +260,16 @@ last subscription is cancelled.
 class EventBusIsolate extends EventBusImpl {
   EventBusIsolate({
     required FutureOr<void> Function(EventBus bus, Object? initialData) onInit,  // can be async
-    Object? initalData,           // @Deprecated name: initialData
+    Object? initialData,
   });
 
-  final FutureOr<void> Function(EventBus isolateBu, Object? initalData) onInit;
+  final FutureOr<void> Function(EventBus isolateBu, Object? initialData) onInit;
   Future<bool> get waitInit;      // true — the worker completed onInit; an error — the isolate failed to start
   bool get isInit;                // true after a successful onInit
   bool get isDisposed;
 
   @override
-  Future<dynamic> send<T>(T data, {String? path, String? fragment, String? target,
+  Future<dynamic> send<T>(T data, {List<String>? paths, String? separator,
                                    Map<String, String>? arguments});   // throws StateError before waitInit
   Future<bool> ping({Duration timeout = const Duration(seconds: 2)});     // liveness check
   @override
@@ -246,6 +280,10 @@ class EventBusIsolate extends EventBusImpl {
 Inherits `listen`, `subscribe`, `lastData`, `haveHandler`, `haveListener`, `allEventStream` from
 `EventBusImpl`. Note: `onInit` is a public field, but assigning it again restarts
 nothing (the isolate is already created in the constructor).
+
+`send` on the isolate side **is** the boundary call: it builds the DTO, serializes it through the
+`SendPort` and awaits the reply. Paths, separator and arguments cross with it, so a worker handler
+addressed by paths answers on the same address.
 
 Exchange specifics and limitations — [03-isolate-and-layers.md](03-isolate-and-layers.md#guarantees-and-limitations).
 
@@ -288,8 +326,7 @@ mixin class FSM<T> {
 
   void initFSM(EventBus bus, T currentState, {T? lastState});
   void addFSMTransition<E>(T fromState, T toState, {FSMHandler<T, E>? handler,
-      FSMFilter<T, E>? filter, String? eventTarget, String? eventPath,
-      String? eventFragment, Map<String, String>? arguments});
+      FSMFilter<T, E>? filter, List<String>? eventPaths});
   void changeState(T newState);
   @Deprecated('Use changeState') void changeStateByEvent(T newState);
 
@@ -297,6 +334,13 @@ mixin class FSM<T> {
   void dispose();
 }
 ```
+
+`addFSMTransition` registers the transition under `Topic.create<E>(paths: eventPaths)`, so the
+event has to be sent with the same type and paths to match. `arguments` never take part in the
+lookup — in 2.x a transition also took `eventTarget`/`eventPath`/`eventFragment`.
+
+`changeStateByEvent` is a kept alias for `changeState`; it is the only deprecated member left in
+the package.
 
 Details and transition rules — [04-fsm.md](04-fsm.md).
 
@@ -308,17 +352,15 @@ mixin class Scope<T> {
   void Function(T newData)? onUpdate;
 
   EventBus? get scopeBus;     // throws EventBusException if not initialized
-  (T?, String?, Map<String, String>?)? get lastCall;   // (data, fragment, arguments)
+  (T?, Map<String, String>?)? get lastCall;   // (data, arguments)
 
   Future<void> initScope(EventBus bus, {
       T? initialData,
-      @Deprecated('Use initialData') T? initalData,
       bool initialDataNeedExecute = true,
-      @Deprecated('Use initialDataNeedExecute') bool? initalDataNeedExecute,
-      String? path,
+      List<String>? paths,
       int maxLenForUndo = 10,       // history depth; undo needs >= 2
       void Function(T newData)? onUpdate});
-  Future<dynamic> call(T newData, {String? fragment, Map<String, String>? arguments});
+  Future<dynamic> call(T newData, {Map<String, String>? arguments});
   Future<dynamic> undo();                     // sends the previous value from the history
   void disposeScope({bool removeHandler = true});
 }
@@ -332,24 +374,24 @@ of the previous topic itself. Details are in [05-scope-and-command.md](05-scope-
 
 ```dart
 abstract class Command<T> {
-  factory Command(EventBus busBinded, {String? path, int maxLen = 10});
+  factory Command(EventBus busBinded, {List<String>? paths, int maxLen = 10});
 
-  Future<dynamic> execute(T data, {String? fragment, Map<String, String>? arguments});
+  Future<dynamic> execute(T data, {Map<String, String>? arguments});
   Future<dynamic> undo();                 // sends the previous value; null if there is nothing to roll back
   EventBus get bindedBus;
   int get queueLength;                    // history depth
-  @Deprecated('Use queueLength') int get queueLenght;
-  String? get path;
-  (T data, String? fragment, Map<String, String>? arguments)? get lastCall;
+  List<String>? get paths;
+  (T data, Map<String, String>? arguments)? get lastCall;
 }
 
 class CommandImpl<T> implements Command<T> {
-  CommandImpl(EventBus bus, {String? path, int maxLen = 10});
+  CommandImpl(EventBus bus, {List<String>? paths, int maxLen = 10});
 }
 ```
 
 `maxLen` is the call history depth; values less than 1 are clamped to 1. For a meaningful
 `undo` you need at least two calls in the history, so the practical minimum is 2.
+`maxLen` is a field of `CommandImpl`, not a member of the `Command<T>` interface.
 
 ## EventBusLogger
 
@@ -363,6 +405,7 @@ mixin class EventBusLogger {
 
 `add` subscribes to the `allEventStream` of the given bus; a repeated `add` for the same bus returns
 `false`. When `allEventStream` closes, the subscription is removed automatically (`onDone`).
+The default handler prints `Event:<topic> hasListeners <bool>`, where `<topic>` is the routing key.
 
 ## Errors
 
@@ -374,22 +417,21 @@ class EventBusException implements Exception {
 }
 ```
 
-`EventBusException` is exported and used in `Topic` (an invalid topic), `Scope`/`Command`
-(access before initialization), and `EventBusIsolate` (exchange problems with the isolate). `StateError`
-is thrown when a closed (`disposed`) bus is used — this is a usage error,
+`EventBusException` is exported and used in `Topic` (an address that cannot be parsed or built),
+`Scope`/`Command` (access before initialization), and `EventBusIsolate` (exchange problems with the
+isolate). `StateError` is thrown when a closed (`disposed`) bus is used — this is a usage error,
 not a domain error.
 
 ## What is not exported
 
 * Internal types: `_FSM`, `_FSMNode`, `_EventBusForIsolate`, `_IsolateLink`, `_LayerInitDto`,
-  `_worker`, `_initLayer`, service messages of the isolate protocol, the `_targetDefault` and
-  `_shema` constants.
+  `_worker`, `_initLayer`, and the service messages of the isolate protocol.
 
 ## What is missing from the API
 
 * no unsubscribe "by topic" without a subscription: only `cancel()` on a `StreamSubscription`;
 * no event replay for new subscribers (`replay`) — use `lastData` and the model bus for that;
-* no templates/masks in `path` and `target` — matching is always exact;
+* no templates/masks in `paths` — matching is always exact, on the whole routing key;
 * no priorities for handlers and listeners; one handler per topic;
 * no buffering in `allEventStream` — the stream is broadcast, with no buffer;
-* no multiple handlers per topic (use subscriptions or different `target`/`path`).
+* no multiple handlers per topic (use subscriptions or different `paths`).

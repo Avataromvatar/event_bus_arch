@@ -31,7 +31,7 @@ class CommandImpl<T> implements Command<T> {
   @override
   int get queueLength => _queue.length;
 
-  ///data, arguments, fragment
+  ///data, arguments
   final Queue<(T, Map<String, String>?)> _queue = Queue();
   @override
   (T data,  Map<String, String>? arguments)? get lastCall => getLastCall();

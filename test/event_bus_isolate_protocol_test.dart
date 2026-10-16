@@ -44,6 +44,20 @@ Future<void> failingInitWorker(EventBus bus, Object? initialData) async {
   throw StateError('init failed');
 }
 
+///Answers with the arguments of the call, so a lost arguments map is visible.
+void argumentWorker(EventBus bus, Object? initialData) {
+  bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+    dto.completer?.complete('multiplier=${dto.arguments?['multiplier']}');
+  });
+}
+
+///A handler addressed by paths, not by the type alone.
+void pathWorker(EventBus bus, Object? initialData) {
+  bus.handlers.setHandler<int>(paths: ['counter'], handler: (dto, lastData) async {
+    dto.completer?.complete(dto.data * 2);
+  });
+}
+
 Future<void> failingLayerInit(Layer layer, Object? initialData) async {
   throw StateError('layer init failed');
 }
@@ -185,6 +199,28 @@ void main() {
       await iso.dispose();
 
       expect(iso.isDisposed, isTrue);
+    });
+  });
+
+  group('EventBusIsolate: addressing', () {
+    test('the arguments of a call reach the worker handler', () async {
+      final iso = EventBusIsolate(onInit: argumentWorker);
+      await iso.waitInit;
+
+      expect(await iso.send<String>('x', arguments: {'multiplier': '10'}),
+          'multiplier=10');
+      await iso.dispose();
+    });
+
+    test('a worker handler is addressed by paths', () async {
+      final iso = EventBusIsolate(onInit: pathWorker);
+      await iso.waitInit;
+
+      expect(await iso.send<int>(21, paths: ['counter']), 42);
+      // another path is another topic: the worker has no node for it
+      expect(await iso.send<int>(21, paths: ['other']).timeout(const Duration(seconds: 5)),
+          null);
+      await iso.dispose();
     });
   });
 

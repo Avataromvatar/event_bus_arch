@@ -11,8 +11,8 @@ and scope/command are built on top of the bus.
 
 | Layer | Type | Role |
 |---|---|---|
-| Addressing | `Topic` | URI-like event address: type + target + path (+ fragment, arguments) |
-| Event envelope | `EventDTO<T>` | Data + topic + `Completer` for the response |
+| Addressing | `Topic` | Event address: a type plus a path, `OrderPlaced.warehouse.in` |
+| Event envelope | `EventDTO<T>` | Data + topic + `arguments` + `Completer` for the response |
 | Routing cell | `EventNode<T>` | Stores the handler and the last data for a specific topic |
 | Registry | `EventBus` / `EventBusMixin` | `Map<Topic, EventNode>` + a stream of all events |
 | Isolate boundaries | `EventBusIsolate`, `Layer`, `Layers` | Forwarding events between isolates and multi-isolate chains |
@@ -21,10 +21,10 @@ and scope/command are built on top of the bus.
 ## The flow of a single event
 
 ```text
-   call                    EventBus.send<T>(data, path:, fragment:, target:, arguments:)
+   call                    EventBus.send<T>(data, paths:, separator:, arguments:)
      │                                        │
      │                                        ▼
-     │                            EventDTO<T> {topic, data, completer}
+     │                        EventDTO<T> {topic, data, arguments, completer}
      │                                        │
      │                            node lookup by dto.topic in _eventsMap
      │                                        │
@@ -49,72 +49,84 @@ and scope/command are built on top of the bus.
 
 ## 1. Topic — the event address
 
-A topic is an object that behaves like a URI:
+An address is a **type** followed by a **path**:
 
 ```text
-event://all.String/origin#frag?a=b
- ^      ^    ^     ^      ^    ^
- │      │    │     │      │    └─ arguments (queryParameters)
- │      │    │     │      └────── fragment
- │      │    │     └───────────── path
- │      │    └─────────────────── event type (T.runtimeType, lowercased)
- │      └──────────────────────── target ("all" by default)
- └─────────────────────────────── scheme: always "event"
+String.a.b
+  │    │
+  │    └── paths: the free-form part, one token per path element
+  └─────── type: the static type parameter T of the call
 ```
 
-Creating:
+The routing key is the type and the paths joined by the **separator** (`.` by default):
 
 ```dart
-Topic.create<String>();                                  // event://all.string
-Topic.create<String>(path: '/origin');                   // event://all.string/origin
-Topic.create<int>(target: 'user42', path: '/p',
-                  fragment: 'f', arguments: {'a': 'b'}); // event://user42.int/p?a=b#f
-Topic.fromParametr(nameType: 'MyEvent');                 // when the type is given as a string
-Topic.parse('event://all.string/origin');                // parsing from a string
+Topic.create<String>();                                   // String
+Topic.create<String>(paths: ['origin']);                  // String.origin
+Topic.create<int>(paths: ['warehouse', 'in']);            // int.warehouse.in
+Topic.create<int>(paths: ['a', 'b'], separator: '/');     // int/a/b
+Topic.fromParametr(type: MyEvent);                         // when the type is a runtime value
+Topic.parse('String.origin');                             // parsing from a string
 ```
+
+`Topic.create<T>` takes the type from the **static type parameter**, so the same rules as
+everywhere else on the bus apply: `create<int>` and `create<num>` are different addresses.
 
 ### Key point: topic equality
 
-`EventTopicImpl` compares only `topic` —
+`TopicImpl` compares only `topic` —
 
 ```dart
-bool operator ==(Object other) => other is EventTopicImpl && other.topic == topic;
+bool operator ==(Object other) => other is Topic && other.topic == topic;
 int get hashCode => Object.hashAll([topic]);
 ```
 
-and `topic` is `scheme://target.type/path`, **without fragment and without arguments**.
+and `topic` is the type and the paths joined by the separator. Consequences:
 
-Consequences:
-
-* `setHandler<String>(path: '/p')` and `send('x', path: '/p', fragment: 'f', arguments: {'a': '1'})`
-  are the **same** topic, and the handler will be called (verified).
-* `fragment` and `arguments` are **routing payload, not part of the route**. They are available
-  to the handler via `dto.topic.arguments`, but they do not affect node selection.
-* `target` and `path` do affect node selection. These are two levels of addressing: `target` is
-  "to whom" (device/module/actor), `path` is "about what" (a channel inside the addressee).
+* `setHandler<String>(paths: ['p'])` and `send('x', paths: ['p'], arguments: {'a': '1'})`
+  are the **same** topic, and the handler will be called (verified). `arguments` are not part
+  of the address.
+* The comparison accepts **any** `Topic` implementation, so an alternative implementation
+  with the same routing key finds the same node (this was `other is EventTopicImpl` in 2.x).
+* A path token must not contain the separator: `paths: ['a.b']` and `paths: ['a', 'b']` build
+  the same `String.a.b` and are therefore the same node. Use `separator: '/'` if a token has
+  to contain a dot.
 
 ### Additional properties
 
 | Getter | Value |
 |---|---|
-| `topic` | `event://all.string/p` — the routing key |
-| `topicWithFragment` | the same + `#fragment` |
-| `fullTopic` | the full URI, including arguments: `event://user42.int/p?a=b#f` |
-| `shema`, `target`, `type`, `host`, `path`, `fragment`, `arguments` | the parsed parts |
-
-`toString()` returns `fullTopic`.
+| `topic` | `String.a.b` — the routing key |
+| `type` | the first token: `String` |
+| `paths` | the path tokens: `['a', 'b']`, empty when there is no path |
+| `separator` | the string joining them: `.` by default |
+| `copy({paths, separator})` | a copy with those replaced; the type is kept |
+| `toString()` | returns `topic` |
 
 ### The type name in the topic
 
-The type name is the result of `T.runtimeType` passed through `Uri`, so:
+The type is `'$T'` of the static type parameter — the plain type name, as written:
 
-* the case is lowercased: `String` → `string`, `TestIntData` → `testintdata`;
-* special characters are encoded: `List<int>` → `list%3Cint%3E`;
-* `?` in a type name is replaced with `^` (otherwise `Uri` would take it for the start of the
-  query): `String?` → `string%5E`.
+* the case is **not** lowercased: `String` stays `String` (in 2.x it became `string`);
+* nothing is percent-encoded: `List<int>` is `List<int>`, and `String?` is `String?`
+  (in 2.x these were `list%3Cint%3E` and `string%5E`);
+* the type is still **part of the address**, not just an annotation — details and examples are
+  in [07-caveats.md, item 1](07-caveats.md#1-the-type-in-a-topic-is-a-static-type-parameter).
 
-The type is **part of the address**, not just an annotation. Details and examples are in
-[07-caveats.md, item 1](07-caveats.md#1-the-type-in-a-topic-is-a-static-type-parameter).
+### The separator
+
+Every method that takes an address takes `separator`, and falls back to
+`EventBus.defaultTopicPathSeparator` (`.` by default) when it is not passed:
+
+```dart
+final bus = EventBus();
+bus.handlers.setHandler<int>(paths: ['a', 'b'], handler: ...);         // int.a.b
+await bus.send<int>(1, paths: ['a', 'b']);                             // int.a.b — found
+await bus.send<int>(1, paths: ['a', 'b'], separator: '/');             // int/a/b — another node
+```
+
+The separator is part of the address only through the string it produces: two topics with
+different separators are equal when their `topic` strings are equal.
 
 ## 2. EventDTO — the event envelope
 
@@ -122,10 +134,14 @@ The type is **part of the address**, not just an annotation. Details and example
 abstract class EventDTO<T> {
   Topic get topic;
   T get data;
-  Completer? get completer;   // the response channel; may be null
+  Map<String, String>? get arguments;   // parameters of this call; not part of the address
+  Completer? get completer;             // the response channel; may be null
 }
 ```
 
+* `arguments` are the parameters of a specific call. They do not select a node — two calls
+  that differ only in `arguments` reach the same handler. In 2.x they lived on `Topic` as
+  `dto.topic.arguments`; they are payload, so they live on the envelope.
 * `completer` is how the handler returns a result to the sender. If the handler did not call
   `completer.complete(...)`, the node completes it with `null` right after the handler finishes.
 * If the handler throws, `completer` completes with an **error** — the sender receives it from
@@ -134,7 +150,7 @@ abstract class EventDTO<T> {
   `completer` completes with `null` immediately, waiting for nothing.
 * `EventDTOImpl` implements `==`/`hashCode` over the `(topic, data)` pair and supports
   `toJson()`/`fromJson()`. `toJson` returns the data as is (without `jsonEncode`) — the caller
-  does the encoding.
+  does the encoding. `arguments` are not part of the JSON form.
 
 ## 3. EventNode — the topic cell
 
@@ -164,7 +180,8 @@ Processing order in the node:
    (the event does not "hang").
 2. `lastData = dto.data` — synchronously, before the event goes to the streams.
 3. The event stream gets the pair "`EventDTO` + the previous `lastData`"; the handler
-   receives `handler(dto, previous)`.
+   receives `handler(dto, previous)`. The DTO handed to the handler is rebuilt for type `T`,
+   keeping the topic, the `arguments` and the `completer` of the original event.
 4. Listeners receive the value from the value stream **before** the sender returns from
    `await send(...)`, and regardless of how the handler finishes.
 5. When the handler has finished: if `completer` is not completed yet — `completer.complete(null)`;
@@ -179,18 +196,20 @@ for the case when the send is not awaited).
 ```dart
 abstract class EventBus {
   bool get isModelBus;
+  String get defaultTopicPathSeparator;         // '.' unless changed
   EventBusHandlers get handlers;                // no cast: bus.handlers.setHandler(...)
   bool get isDisposed;                          // true after dispose
   Future<void> dispose();                       // idempotent; closes the nodes and allEventStream
   Stream<(EventDTO, bool)> get allEventStream;  // (the event, whether it was delivered to a node)
-  bool haveListener<T>({String? path, String? target});
-  bool haveHandler<T>({String? path, String? target});
-  Future<dynamic>? send<T>(T data, {String? path, String? fragment, String? target,
+  bool haveListener<T>({List<String>? paths, String? separator});
+  bool haveHandler<T>({List<String>? paths, String? separator});
+  Future<dynamic>? send<T>(T data, {List<String>? paths, String? separator,
                                     Map<String, String>? arguments});
-  Stream<T> listen<T>({String? path, String? target});
-  StreamSubscription<T> subscribe<T>({String? path, String? target, void Function(T e)? onData,
-                                      Function? onError, void Function()? onDone, bool? cancelOnError});
-  T? lastData<T>({String? path, String? target});
+  Stream<T> listen<T>({List<String>? paths, String? separator});
+  StreamSubscription<T> subscribe<T>({List<String>? paths, String? separator,
+                                      void Function(T e)? onData, Function? onError,
+                                      void Function()? onDone, bool? cancelOnError});
+  T? lastData<T>({List<String>? paths, String? separator});
   factory EventBus({bool isModelBus = false}) => EventBusImpl(isModelBus);
 }
 ```

@@ -84,7 +84,10 @@ class EventNode<T> {
   void send(EventDTO dto) {
     if (dto.data is T) {
       var previous = lastData;
-      var d = EventDTO<T>(dto.data, topic: dto.topic, completer: dto.completer);
+      // arguments are rebuilt with the event: they belong to the call, and the
+      // handler reads them from the dto it is given
+      var d = EventDTO<T>(dto.data,
+          topic: dto.topic, completer: dto.completer, arguments: dto.arguments);
       lastData = dto.data;
       _streamController.add(_NodeEvent<T>(d, previous));
     } else {
@@ -303,8 +306,13 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
   @override
   Future? send<T>(T data, {List<String>? paths,String? separator, Map<String, String>? arguments}) async {
     _checkNotDisposed();
-    var dto =
-        EventDTO<T>(data, paths: paths, arguments: arguments,completer: Completer());
+    var dto = EventDTO<T>(data,
+        paths: paths,
+        // the same fallback as setHandler/listen/lastData: otherwise a send
+        // would address a node nobody else can address
+        separator: separator ?? defaultTopicPathSeparator,
+        arguments: arguments,
+        completer: Completer());
     var node = _eventsMap[dto.topic];
     if (node != null && node is EventNode<T>) {
       node.send(dto);

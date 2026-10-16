@@ -3,7 +3,7 @@ part of event_arch;
 ///Layer init function. It runs INSIDE the layer isolate, so it must be
 ///top-level/static. It may be async: the layer is considered initialized only
 ///after it returns.
-typedef fnInitLayer = FutureOr<void> Function(Layer, Object? initalData);
+typedef fnInitLayer = FutureOr<void> Function(Layer, Object? initialData);
 
 class _LayerInitDto {
   final List<(fnInitLayer, Object?, bool)> data;
@@ -52,7 +52,7 @@ class Layers {
   ///Layers create layer what split by isolate. Top layer have current and bottom eventbus, bottom eventbus this is EventBusIsolate,
   /// middle layer have top eventbus for connect to top layer and bottom eventbus for cnnect bottom layer if they present
   ///
-  ///[(fnInitLayer,Object?,bool)] - inital function, inital data, flag what create model current bus in isolate
+  ///[(fnInitLayer,Object?,bool)] - init function, initial data, flag what create model current bus in isolate
   ///
   ///The future completes when EVERY layer of the chain is initialized, including
   ///async init functions. An init failure of any layer surfaces here as well.
@@ -67,7 +67,7 @@ class Layers {
 
     Layer l = Layer(
         current: EventBus(isModelBus: currentIsModelBus),
-        bottom: EventBusIsolate(onInit: _initLayer, initalData: storage));
+        bottom: EventBusIsolate(onInit: _initLayer, initialData: storage));
     var waitInit = (l.bottom as EventBusIsolate).waitInit;
     if (timeout != null) {
       await waitInit.timeout(timeout, onTimeout: () {
@@ -93,7 +93,7 @@ Future<void> _initLayer(EventBus bus, Object? initData) async {
   Layer l = Layer(
       current: EventBus(isModelBus: dto.data[index].$3),
       top: bus,
-      bottom: dto.index < dto.data.length ? EventBusIsolate(onInit: _initLayer, initalData: dto) : null);
+      bottom: dto.index < dto.data.length ? EventBusIsolate(onInit: _initLayer, initialData: dto) : null);
   if (l.bottom != null) {
     // wait not only for the next isolate to start, but for it to be initialized
     await (l.bottom as EventBusIsolate).waitInit;

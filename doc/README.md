@@ -1,6 +1,6 @@
 # event_bus_arch documentation
 
-Detailed description of the `event_bus_arch` 2.3.0 package. The main README (in English) —
+Detailed description of the `event_bus_arch` 3.0.0 package. The main README (in English) —
 [../README.md](../README.md).
 
 ## Contents
@@ -15,7 +15,6 @@ Detailed description of the `event_bus_arch` 2.3.0 package. The main README (in 
 | 06 | [API reference](06-api-reference.md) | Every public type and member with signatures |
 | 07 | [Pitfalls](07-caveats.md) | Known defects, reproductions, workarounds, checklist |
 | 08 | [Transports](08-transports.md) | Running the bus over NATS / Redis / NanoMQ: address model, packaging, pitfalls |
-| 09 | [v3.0 plan](09-v3-plan.md) | **Plan, not shipped:** removing the Completer, `send → bool`, the NATS transport |
 
 ## Quick summary
 
@@ -32,7 +31,7 @@ bus.handlers.setHandler<String>(handler: (dto, lastData) async {
   dto.completer?.complete('processed: ${dto.data}');
 });
 
-// send: address = type + target + path, parameters go in arguments/fragment
+// send: the address is type + paths, call parameters go in arguments
 final result = await bus.send<String>('hello');             // 'processed: hello'
 
 await sub.cancel();
@@ -52,10 +51,12 @@ What you need to know right away:
 
 ## Package status
 
-* Version: 2.3.0, SDK `>=3.0.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
-* Tests: 83 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO) —
+* Version: 3.0.0, SDK `>=3.0.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
+* Tests: 110 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO) —
   they pass.
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
   (FSM), `example/event_bus_layers_example.dart` (layers).
 * The fix history of version 2.3.0 is in [07-caveats.md](07-caveats.md#what-was-fixed-in-230).
+* What changed in 3.0.0 (the address) is in
+  [07-caveats.md](07-caveats.md#what-changed-in-300) and [CHANGELOG.md](../CHANGELOG.md).
 * What remains unchanged (intentional design) — items 1–2 in [07-caveats.md](07-caveats.md#what-remains-by-design).

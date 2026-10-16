@@ -178,7 +178,8 @@ class _IsolateLink {
 ///reply reaches the sender in any case.
 Future? _dispatchIncoming(EventBusMixin bus, EventDTO dto) {
   var completer = Completer();
-  var dtoCopy = EventDTOImpl(dto.topic, dto.data, completer: completer);
+  var dtoCopy = EventDTOImpl(dto.topic, dto.data,
+      completer: completer, arguments: dto.arguments);
   var node = bus._eventsMap[dtoCopy.topic];
   if (node != null) {
     node.send(dtoCopy);
@@ -224,9 +225,8 @@ class EventBusIsolate extends EventBusImpl {
   EventBusIsolate({
     required this.onInit,
     Object? initialData,
-    @Deprecated('Use initialData') Object? initalData,
   }) : super(false) {
-    _init(initalData: initialData ?? initalData);
+    _init(initialData: initialData);
   }
 
   @override
@@ -274,11 +274,11 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   void _init({
-    Object? initalData,
+    Object? initialData,
   }) async {
     _receivePort = ReceivePort();
     try {
-      _isolate = await Isolate.spawn(_worker, [_receivePort!.sendPort, onInit, initalData]);
+      _isolate = await Isolate.spawn(_worker, [_receivePort!.sendPort, onInit, initialData]);
     } catch (error, stackTrace) {
       _completeInitError(EventBusException('Isolate.spawn failed: $error'), stackTrace);
       return;
@@ -319,7 +319,7 @@ class EventBusIsolate extends EventBusImpl {
 void _worker(dynamic data) async {
   var sendPort = data[0] as SendPort;
   var onInit = data[1] as FutureOr<void> Function(EventBus, Object?);
-  Object? initalData = data[2];
+  Object? initialData = data[2];
 
   var innerReceivePort = ReceivePort();
   var s = innerReceivePort.asBroadcastStream();
@@ -330,7 +330,7 @@ void _worker(dynamic data) async {
   sendPort.send(innerReceivePort.sendPort);
 
   try {
-    await onInit(eventBus, initalData);
+    await onInit(eventBus, initialData);
     sendPort.send(const _IsolateReady());
   } catch (error, stackTrace) {
     sendPort.send(_IsolateInitError(error, stackTrace));

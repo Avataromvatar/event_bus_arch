@@ -9,9 +9,12 @@ abstract class EventDTO<T> {
   Completer? get completer;
 
   static EventDTO<T> create<T>(T data,
-      {List<String>? paths, Map<String, String>? arguments, Completer? completer}) {
+      {List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments,
+      Completer? completer}) {
     return EventDTO<T>(data,
-        paths: paths, completer: completer, arguments: arguments);
+        paths: paths, separator: separator, completer: completer, arguments: arguments);
   }
 
   factory EventDTO(T data,
@@ -42,6 +45,7 @@ class EventDTOImpl<T> implements EventDTO<T> {
   T data;
   @override
   Completer? completer;
+  @override
   Map<String, String>? arguments;
   EventDTOImpl(this.topic, this.data, {this.completer,this.arguments});
   @override

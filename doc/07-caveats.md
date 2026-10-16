@@ -3,8 +3,65 @@
 [← 06. API reference](06-api-reference.md) · [Contents](README.md)
 
 This document grew out of an analysis of version 2.2.0: the defects found (with runtime reproductions)
-were fixed in **2.3.0**, while some of the behavior remains intentional design. Below is exactly what
+were fixed in **2.3.0**, and the address model was reworked in **3.0.0**. Below is exactly what
 changed and what you still need to remember.
+
+---
+
+## What changed in 3.0.0
+
+The address lost a dimension. `Topic` is no longer URI-like: there is no `scheme`, no `target`, no
+`fragment`, and `arguments` moved from the address to the event envelope.
+
+| # | Topic | Was (2.3.0) | Now (3.0.0) |
+|---|---|---|---|
+| 1 | The address shape | `event://<target>.<type><path>` | `<type><separator><paths...>` |
+| 2 | `target` | a second addressing dimension, `all` by default | **removed** — the first path token takes its place |
+| 3 | `fragment` | a label on the topic, outside the routing key | **removed** — nothing replaced it |
+| 4 | `arguments` | `Map` on the `Topic`, read as `dto.topic.arguments` | on the `EventDTO`, read as `dto.arguments` |
+| 5 | `scheme` / `shema` | always `'event'` | **removed** — it distinguished nothing |
+| 6 | `path` (a `String` with a leading `/`) | `path: '/in'` | `paths` (a `List<String>`): `paths: ['in']` |
+| 7 | The type in the address | lowercased and percent-encoded by `Uri` | `'$T'` as written: `List<int>` stays `List<int>` |
+| 8 | `topic`, `topicWithFragment`, `fullTopic` | three strings | one: `topic` (`toString()` returns it) |
+| 9 | `Topic.parse` | parsed a URI | splits on the separator; an empty type is an `EventBusException` |
+| 10 | The separator | fixed (`.` inside the host, `/` in the path) | a parameter, falling back to `EventBus.defaultTopicPathSeparator` |
+| 11 | Topic equality | `other is EventTopicImpl` | `other is Topic` — any implementation with the same key is equal |
+| 12 | The deprecated aliases | `queueLenght`, `initalData`, `initalDataNeedExecute`, `shema` | **removed**; only `changeStateByEvent` remains deprecated |
+| 13 | `EventBus.send` and the separator | — | `send` forwards the separator and falls back to `defaultTopicPathSeparator` like every other method |
+| 14 | `arguments` reaching a handler | — | the node and the isolate bridge rebuild the event with `arguments`, so a handler sees them |
+| 15 | `Topic.toString()` | `fullTopic` | the routing key — `Instance of 'TopicImpl'` before the override was restored |
+
+### Migration table
+
+| 2.3.0 | 3.0.0 |
+|---|---|
+| `send(x, path: '/in')` | `send(x, paths: ['in'])` |
+| `send(x, target: 'warehouse', path: '/in')` | `send(x, paths: ['warehouse', 'in'])` |
+| `send(x, fragment: 'f')` | *removed* — send it in `arguments` or in the data |
+| `setHandler<T>(path: '/in')` | `setHandler<T>(paths: ['in'])` |
+| `listen<T>(path: '/in')`, `subscribe<T>(path: '/in')` | `listen<T>(paths: ['in'])` |
+| `lastData<T>(path: '/in')` | `lastData<T>(paths: ['in'])` |
+| `haveHandler<T>(path: '/in')`, `haveListener<T>(path: '/in')` | `haveHandler<T>(paths: ['in'])` |
+| `Command(bus, path: '/in')` | `Command(bus, paths: ['in'])` |
+| `initScope(bus, path: '/in')` | `initScope(bus, paths: ['in'])` |
+| `addFSMTransition<E>(a, b, eventTarget: t, eventPath: p, eventFragment: f, arguments: m)` | `addFSMTransition<E>(a, b, eventPaths: [...])` |
+| `Topic.create<T>(target:, path:, fragment:, arguments:)` | `Topic.create<T>(paths:, separator:)` |
+| `Topic.create<T>(path: '/p').path` | `Topic.create<T>(paths: ['p']).paths` |
+| `Topic.parse('event://all.string/origin')` | `Topic.parse('String.origin')` |
+| `topic.target`, `topic.host` | *removed* — the first token of `topic.paths` |
+| `topic.fullTopic`, `topic.topicWithFragment` | `topic.topic` |
+| `topic.arguments` | `dto.arguments` |
+| `topic.copy(target:, scheme:, fragment:, arguments:)` | `topic.copy(paths:, separator:)` |
+| `EventDTO(x, target:, path:, fragment:)` | `EventDTO(x, paths:, separator:, arguments:)` |
+| `command.queueLenght` | `command.queueLength` |
+| `setHandler<T>(initalData: v)` | `setHandler<T>(initialData: v)` |
+| `initScope(bus, initalData: v, initalDataNeedExecute: b)` | `initScope(bus, initialData: v, initialDataNeedExecute: b)` |
+| `EventBusIsolate(onInit: f, initalData: v)` | `EventBusIsolate(onInit: f, initialData: v)` |
+
+`target: 'x', path: '/y'` becomes `paths: ['x', 'y']` and produces the same kind of address
+(`String.x.y`), so the migration is mechanical. What is **not** mechanical: an address that used
+`target` as a separate dimension loses the guarantee that it was exactly one token, because a path
+token is free-form.
 
 ---
 
@@ -25,18 +82,21 @@ changed and what you still need to remember.
 | 11 | `Layer.close()` | threw `TypeError` inside a worker layer, did not close `current` | works in any layer, closes both branches and the local bus, idempotent |
 | 12 | An event of a "foreign" type in a node | was silently lost, the sender waited forever | the `completer` completes with `null` |
 | 13 | `EventDTO.toJson` / `toString` | `jsonEncode(data)` — crashed on non-JSON data | the data is returned as is, the caller does the encoding |
-| 14 | `Topic.copy` | lost `path` | keeps `path`, `fragment` and `arguments` |
-| 15 | A `Topic` with a dot in `target` | silently broke addressing (`a.b.int` collided with `a.int`) | `assert` in debug mode |
+| 14 | `Topic.copy` | lost `path` | keeps the paths (in 3.0.0: the type, the paths and the separator) |
+| 15 | An address part containing the separator | silently broke addressing (`a.b.int` collided with `a.int`) | the separator is a parameter, and the collision is documented (see [01-architecture.md](01-architecture.md#key-point-topic-equality)) |
 | 16 | `EventBusException` | was not exported, errors were bare `Exception`s | exported, `Topic`/`Scope` throw it |
 | 17 | `FSM` | there was no way to unsubscribe from the bus | `FSM.dispose()`, a repeated `initFSM` does not multiply subscriptions |
-| 18 | Typos in the public API | `queueLenght`, `initalData`, `shema`, `initalDataNeedExecute` | new names + the old ones as `@Deprecated` |
+| 18 | Typos in the public API | `queueLenght`, `initalData`, `shema`, `initalDataNeedExecute` | correct names in 2.3.0; the deprecated aliases were removed in 3.0.0 |
 | 19 | `EventBusIsolate.send` | returned `null` if the isolate was not ready | before `waitInit` it throws `StateError`; type `Future<dynamic>` without null |
 | 20 | Isolate initialization error | `waitInit` could never complete | an `Isolate.spawn`/`onInit` error arrives in `waitInit`, the isolate is freed |
 | 21 | Hanging requests on close | `await send(...)` could never complete | `dispose` and worker death complete pending waits with `EventBusException` |
+| 22 | `Topic` with no paths (3.0.0) | `Bad state: No element` from `paths.reduce` — **every** call without paths crashed | the routing key is the type alone |
+| 23 | `Topic.parse` (3.0.0) | `'$l[0]'` interpolated the whole list, so `type` was `'[String, a, b][0]'` | the type is the first token |
+| 24 | `arguments` in a handler (3.0.0) | the node and the isolate rebuilt the DTO without them, so `dto.arguments` was always null | moved along with the event |
 
 Tests for every item are in `test/event_node_test.dart`, `test/bus_api_test.dart`,
 `test/command_scope_test.dart`, `test/fsm_test.dart`, `test/topic_dto_test.dart`,
-`test/event_bus_isolate_protocol_test.dart`.
+`test/naming_test.dart`, `test/event_bus_isolate_protocol_test.dart`.
 
 ---
 
@@ -46,18 +106,21 @@ These are not defects but properties of the model — keep them in mind when des
 
 ### 1. The type in a topic is a static type parameter
 
-The event address is built from `T.runtimeType`, where `T` is the type parameter **at the call site**:
+The event address is built from the type parameter `T` **at the call site**:
 
 ```dart
 bus.handlers.setHandler<num>(handler: ...);
 
 await bus.send<num>(1);       // handler called
-await bus.send<int>(1);       // NOT called: event://all.int ≠ event://all.num
+await bus.send<int>(1);       // NOT called: int ≠ num
 bus.haveHandler<String>();    // a separate topic even for String?
 ```
 
 Build events on your own types (`class OrderPlaced`), not on `String`/`int`/`Map`, and
 specify the type parameter explicitly when the value comes from a wide-typed variable.
+
+Because the type is `'$T'`, a class rename silently changes the address — the same hazard a
+transport has with `runtimeType` (see [08-transports.md §4.1](08-transports.md#41-truntimetype-cannot-be-a-wire-address)).
 
 ### 2. A node and `lastData` live exactly until the last subscription
 
@@ -105,21 +168,32 @@ error — in an application it shows up in the log/zone. This is a deliberate ch
 
 A repeated `setHandler` replaces the handler, `removeHandler` destroys the node entirely (together with
 `lastData` and the listener streams — they get `onDone`). For several reactions to one event
-use subscriptions (`listen`/`subscribe`) or different `target`/`path`.
+use subscriptions (`listen`/`subscribe`) or different `paths`.
 
-### 6. Everything that crosses an isolate boundary must be sendable
+### 6. A path token must not contain the separator
+
+The routing key is a string, so `paths: ['a.b']` and `paths: ['a', 'b']` are the same node:
+
+```dart
+Topic.create<String>(paths: ['a.b']) == Topic.create<String>(paths: ['a', 'b']);   // true
+```
+
+If a token has to contain a dot, address the topic with another separator
+(`separator: '/'`) — and pass the same separator everywhere that addresses the topic.
+
+### 7. Everything that crosses an isolate boundary must be sendable
 
 `EventBusIsolate` and `Layer` send data between isolates: your own classes are sendable (copied),
 closures, `StreamController`, open files are not. Initialization functions (`onInit`,
 `fnInitLayer`) must be top-level/static.
 
-### 7. One transition per (event, state) pair in the FSM
+### 8. One transition per (event, state) pair in the FSM
 
 A repeated `addFSMTransition` with the same event type and the same `fromState` overwrites the previous one.
 Events that arrive while a transition handler is running go into `ignoredEvents` and
 **are not replayed** after it completes.
 
-### 8. `Scope` owns its topic
+### 9. `Scope` owns its topic
 
 `initScope` subscribes to the topic and creates a history. `disposeScope(removeHandler: true)`
 (by default) removes the handler entirely — if the topic is shared with other
@@ -132,6 +206,7 @@ consumers, call `disposeScope(removeHandler: false)`.
 * [ ] A decision is made for each topic: `isModelBus: true` (we keep state) or common (delivery only).
 * [ ] Type parameters are explicit in `send`/`listen`/`setHandler`/`haveHandler`.
 * [ ] Event types are custom classes, not `String`/`int`/`Map`.
+* [ ] A path token never contains the separator, or the topic is addressed with another one.
 * [ ] Handlers whose response is awaited complete the `completer` (including with an error) — or
       the send is deliberately one-way.
 * [ ] `Scope.initScope` is called with `maxLenForUndo >= 2` if `undo` is planned.

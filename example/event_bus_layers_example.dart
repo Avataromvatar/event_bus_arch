@@ -72,7 +72,7 @@ class TestBottomIsolateController
 class TestIsolateProvider
 {
   late Layer layer;
-  Completer _completer = Completer();
+  final Completer _completer = Completer();
   Future<void> get wait =>_completer.future;
   TestIsolateProvider()
   {
@@ -106,7 +106,7 @@ Future<void> main()async
 }
 
 //This function run in middle Isolate
-void _initMiddleLayers(Layer layer,Object? initalData)async
+void _initMiddleLayers(Layer layer,Object? initialData)async
 {
     print('Hello From Middle ${Isolate.current.hashCode}');
     
@@ -117,7 +117,7 @@ void _initMiddleLayers(Layer layer,Object? initalData)async
       controller.dispose();
     },);
 }
-void _initBottomLayers(Layer layer,Object? initalData) async
+void _initBottomLayers(Layer layer,Object? initialData) async
 {
   print('Hello From Bottom ${Isolate.current.hashCode}');
     var controller = TestBottomIsolateController(layer);

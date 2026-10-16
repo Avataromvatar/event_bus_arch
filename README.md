@@ -1,15 +1,15 @@
 # EventBus Arch
 
 `event_bus_arch` is an event-driven architecture toolkit for Dart and Flutter. Components talk to
-each other through events addressed by a URI-like **topic**, so they stay decoupled and can be
-moved between isolates without changing their logic.
+each other through events addressed by a **topic** — a type plus a path — so they stay decoupled
+and can be moved between isolates without changing their logic.
 
 On top of the bus the package ships a finite state machine, an isolate bridge, multi-isolate
 "layers", and a scope/command wrapper for stateful values.
 
 * Detailed documentation: **[doc/](doc/README.md)**
 * Full API reference: [doc/06-api-reference.md](doc/06-api-reference.md)
-* What changed in 2.3.0 and what to watch out for: [doc/07-caveats.md](doc/07-caveats.md)
+* Upgrading from 2.x: [doc/07-caveats.md](doc/07-caveats.md#what-changed-in-300)
 
 ## Features
 
@@ -17,7 +17,7 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 - Handlers that can return a result to the sender (`EventDTO.completer`)
 - Two bus flavours: **common** (`EventBus()`) and **model** (`EventBus(isModelBus: true)`) —
   the model bus keeps the last value per topic even when nobody is listening
-- Topic-based routing: event type + `target` + `path`, plus `fragment` and `arguments` as payload
+- Topic-based routing: event type + `paths`, plus `arguments` as call parameters
 - `EventBusIsolate` — the same API, but the events are processed in a worker isolate
 - `Layers` — chains of isolates: `main ↔ isolate₂ ↔ isolate₁ ↔ isolate₀`
 - `FSM` — finite state machine driven by bus events
@@ -29,7 +29,7 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 
 ```yaml
 dependencies:
-  event_bus_arch: ^2.3.0
+  event_bus_arch: ^3.0.0
 ```
 
 ```bash
@@ -67,23 +67,33 @@ Future<void> main() async {
 
 ### Topics
 
-A topic is built from the **static type argument** of the call plus `target` and `path`:
+A topic is the **static type argument** of the call plus an optional path:
 
 ```text
-event://all.String/origin#frag?a=b
-       └ target └ type  └ path  └ fragment, arguments
+OrderPlaced.warehouse.in
+     │            │
+     │            └── paths: ['warehouse', 'in']
+     └─────────────── type: the type parameter T of the call
 ```
 
 ```dart
-await bus.send<Order>(order, target: 'warehouse', path: '/in', arguments: {'priority': '1'});
+await bus.send<Order>(order, paths: ['warehouse', 'in'], arguments: {'priority': '1'});
 
-bus.subscribe<Order>(target: 'warehouse', path: '/in', onData: (order) => print(order));
+bus.subscribe<Order>(paths: ['warehouse', 'in'], onData: (order) => print(order));
 ```
 
-`target` and `path` select the topic; `fragment` and `arguments` are delivered to the handler but
-do not affect routing. Because the type is part of the address, `send<int>` and a handler
+`paths` selects the topic; `arguments` are delivered to the handler as `dto.arguments` but do not
+affect routing. Because the type is part of the address, `send<int>` and a handler
 registered with `setHandler<num>` are **different topics** — always be explicit with type
 arguments.
+
+A path token must not contain the separator (`.` by default): `paths: ['a.b']` and
+`paths: ['a', 'b']` build the same address. Pass `separator: '/'` to address such a topic,
+or change the fallback for a whole bus:
+
+```dart
+final bus = EventBusImpl(false)..defaultTopicPathSeparator = '/';
+```
 
 ### Model bus vs common bus
 
@@ -117,14 +127,15 @@ Future<void> main() async {
 Future<void> _worker(EventBus bus, Object? initialData) async {
   await _heavyInit();                                  // async init is fine
   bus.handlers.setHandler<int>(handler: (dto, lastData) async {
-    final m = int.tryParse(dto.topic.arguments?['multiplier'] ?? '1') ?? 1;
+    final m = int.tryParse(dto.arguments?['multiplier'] ?? '1') ?? 1;
     dto.completer?.complete(dto.data * m);
   });
 }
 ```
 
 `EventBusIsolate` behaves like a normal bus on both sides: events sent from the worker reach
-main-isolate listeners, and `send` from main returns the worker's handler result.
+main-isolate listeners, and `send` from main returns the worker's handler result. Paths, separator
+and `arguments` cross the boundary with the event.
 
 Good to know:
 
@@ -169,6 +180,7 @@ class Loader with FSM<State> {
   Loader(EventBus bus) {
     initFSM(bus, State.idle);
     addFSMTransition<Start>(State.idle, State.loading,
+      eventPaths: ['api', 'items'],            // the transition listens on Start.api.items
       filter: (current, last, event) => event.url.isNotEmpty,
       handler: (current, last, event, ignored) async {
         print('$last -> $current ($event)');
@@ -177,11 +189,11 @@ class Loader with FSM<State> {
   }
 }
 
-await bus.send(Start('/api/items'));   // State.idle -> State.loading
+await bus.send(Start('/api/items'), paths: ['api', 'items']);   // State.idle -> State.loading
 ```
 
 Events arriving while a transition handler is running are collected into the `ignoredEvents`
-argument and are not replayed afterwards.
+argument and are not replayed afterwards. `FSM.dispose()` unsubscribes the machine from the bus.
 
 ### Scope and Command
 
@@ -189,7 +201,7 @@ argument and are not replayed afterwards.
 final scope = Scope<int>();
 await scope.initScope(
   bus,
-  path: '/counter',
+  paths: ['counter'],
   initialData: 0,
   maxLenForUndo: 10,                 // history depth; undo needs at least 2 entries
   onUpdate: (value) => print('value: $value'),
@@ -206,7 +218,7 @@ bus. `undo()` returns `null` when there is nothing to roll back to.
 
 ## Documentation
 
-Detailed guides live in [docs/](docs/README.md) (Russian):
+Detailed guides live in [doc/](doc/README.md):
 
 | Document | Content |
 |---|---|
@@ -216,7 +228,23 @@ Detailed guides live in [docs/](docs/README.md) (Russian):
 | [04-fsm.md](doc/04-fsm.md) | State machine on top of the bus |
 | [05-scope-and-command.md](doc/05-scope-and-command.md) | State with history, command pattern |
 | [06-api-reference.md](doc/06-api-reference.md) | Every public type and member |
-| [07-caveats.md](doc/07-caveats.md) | What was fixed in 2.3.0, what remains by design, checklist |
+| [07-caveats.md](doc/07-caveats.md) | What 3.0.0 changed, what remains by design, checklist |
+| [08-transports.md](doc/08-transports.md) | Running the bus over NATS / Redis / NanoMQ: analysis |
+
+## Version 3.0.0 changes
+
+The address model changed; this is a breaking release.
+
+- `Topic` is no longer URI-like: **`scheme`, `target` and `fragment` are gone**
+- `path: '/in'` became **`paths: ['in']`** — a list of tokens joined by a configurable `separator`
+  (`.` by default, `EventBus.defaultTopicPathSeparator`)
+- **`arguments` moved from `Topic` to `EventDTO`**: `dto.topic.arguments` is now `dto.arguments`,
+  both locally and across an isolate
+- The type in the address is `'$T'` as written — no lowercasing, no percent-encoding
+- `topic.topic` is the single routing key (`fullTopic`/`topicWithFragment` are gone)
+- The deprecated `queueLenght`, `initalData`, `initialDataNeedExecute` and `shema` aliases were removed
+
+The full migration table is in [doc/07-caveats.md](doc/07-caveats.md#migration-table).
 
 ## Version 2 changes
 
@@ -235,9 +263,9 @@ Detailed guides live in [docs/](docs/README.md) (Russian):
 - `Layers.createLayers` completes only when the whole chain is initialized; `Layer.close()` works
   from any layer
 - `Scope`/`Command` `undo()` sends the previous value; `Scope.maxLenForUndo` defaults to 10
-- `EventDTO.toJson` no longer encodes data; `Topic.copy` keeps `path`; `EventBusException` is exported
+- `EventDTO.toJson` no longer encodes data; `EventBusException` is exported
 - Typo'd members got correct names (`queueLength`, `initialData`, `scheme`,
-  `initialDataNeedExecute`) with the old ones kept as `@Deprecated`
+  `initialDataNeedExecute`) — those aliases were removed again in 3.0.0
 
 The full list with reproductions is in [doc/07-caveats.md](doc/07-caveats.md#what-was-fixed-in-230).
 

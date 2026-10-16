@@ -18,41 +18,43 @@ class TestStrData
 Future<void> main()async
 {
   print('Main Isolate ${Isolate.current.hashCode}');
-  var isolateBus = EventBusIsolate(onInit: _initIsolate,initalData: 'Test');
-  await isolateBus.waitInit;  
-  ///When subscribe or listen you can add some parametr for filtering event by path and target
-  ///listen return Stream<T> 
-  isolateBus.listen<TestStrData>(path: 'origin').listen((e){
+  var isolateBus = EventBusIsolate(onInit: _initIsolate,initialData: 'Test');
+  await isolateBus.waitInit;
+  ///When subscribe or listen you can add paths for narrowing the address:
+  ///the topic is type + paths, so 'TestStrData.origin' is not 'TestStrData'
+  ///listen return Stream<T>
+  isolateBus.listen<TestStrData>(paths: ['origin']).listen((e){
     print(e.value);
   });
-  ///subscribe return StreamSubscription<T> 
+  ///subscribe return StreamSubscription<T>
   isolateBus.subscribe<TestStrData>(onData: (e) {
     print(e.value);
   },);
   await isolateBus.send(TestStrData('Hello from main isolate'));
-  ///If you sethandler for event you can call completer 
+  ///If you sethandler for event you can call completer
   ///what return result
-  ///You can send arguments in dto 
-  var ret = await isolateBus.send<TestIntData>(TestIntData(1),arguments: {'multiplier':10.toString()});
+  ///You can send arguments in dto
+  var ret = await isolateBus.send<TestIntData>(TestIntData(1),paths: ['calc'],arguments: {'multiplier':10.toString()});
   print(ret);
   await Future.delayed(Duration(seconds: 1));
   await isolateBus.dispose();
 }
 
 
-void _initIsolate(EventBus bus,Object? initalData) async
+void _initIsolate(EventBus bus,Object? initialData) async
 {
-  var name = initalData as String;
+  var name = initialData as String;
   print('Worker Isolate ${Isolate.current.hashCode}');
   bus.subscribe<TestStrData>(onData: (e) {
     bus.send(TestStrData('$name get ${e.value}'));
-    bus.send(TestStrData(e.value),path: 'origin');
+    bus.send(TestStrData(e.value),paths: ['origin']);
   },);
   ///sethandler what can return result
-  (bus as EventBusHandlers).setHandler<TestIntData>(handler: (dto, lastData) async{
+  ///the handler answers on the address TestIntData.calc
+  (bus as EventBusHandlers).setHandler<TestIntData>(paths: ['calc'],handler: (dto, lastData) async{
 
-     print('Arguments:'+dto.topic.arguments.toString()); 
-     var multStr = dto.topic.arguments?['multiplier']??'';
+     print('Arguments:${dto.arguments}');
+     var multStr = dto.arguments?['multiplier']??'';
      dto.completer?.complete(dto.data.value*(int.tryParse(multStr)??1));
   },);
 }

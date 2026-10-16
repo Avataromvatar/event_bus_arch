@@ -3,27 +3,28 @@ part of event_arch;
 abstract class EventDTO<T> {
   Topic get topic;
   T get data;
-
+  Map<String, String>? get arguments;
   ///completed with null after call handler, if not completed in handler.
   ///If the handler throws, the completer is completed with that error.
   Completer? get completer;
 
   static EventDTO<T> create<T>(T data,
-      {String? target, String? path, Map<String, String>? arguments, String? fragment, Completer? completer}) {
+      {List<String>? paths, Map<String, String>? arguments, Completer? completer}) {
     return EventDTO<T>(data,
-        target: target, path: path, completer: completer, fragment: fragment, arguments: arguments);
+        paths: paths, completer: completer, arguments: arguments);
   }
 
   factory EventDTO(T data,
-      {Topic? topic,
-      String? target,
-      String? path,
+      {
+      Topic? topic,
+      List<String>? paths,
       Map<String, String>? arguments,
-      String? fragment,
+      String? separator,
       Completer? completer}) {
     return EventDTOImpl<T>(
-        topic ?? Topic.create<T>(target: target, path: path, fragment: fragment, arguments: arguments), data,
-        completer: completer
+        topic ?? Topic.create<T>(paths: paths, separator: separator??'.' ), data,
+        completer: completer,
+        arguments:arguments,
         /* route*/
         );
   }
@@ -41,8 +42,8 @@ class EventDTOImpl<T> implements EventDTO<T> {
   T data;
   @override
   Completer? completer;
-
-  EventDTOImpl(this.topic, this.data, {this.completer});
+  Map<String, String>? arguments;
+  EventDTOImpl(this.topic, this.data, {this.completer,this.arguments});
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -55,13 +56,13 @@ class EventDTOImpl<T> implements EventDTO<T> {
 
   @override
   String toString() {
-    return 'EventDTO(${topic.fullTopic}, data: $data)';
+    return 'EventDTO(${topic.topic}, data: $data)';
   }
 
   @override
   Map<String, dynamic> toJson() {
     return {
-      'topic': topic.fullTopic,
+      'topic': topic.topic,
       'data': data,
     };
   }

@@ -230,7 +230,7 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  Future<dynamic> send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments}) async {
+  Future<dynamic> send<T>(T data, {List<String>? paths, String? separator, Map<String, String>? arguments}) async {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
     }
@@ -238,7 +238,7 @@ class EventBusIsolate extends EventBusImpl {
       throw StateError('EventBusIsolate is not initialized: await waitInit before send');
     }
     var dto =
-        EventDTO<T>(data, path: path, fragment: fragment, arguments: arguments, target: target, completer: null);
+        EventDTO<T>(data, paths: paths,  arguments: arguments,separator: separator, completer: null);
     return _link.request(dto);
   }
 
@@ -355,12 +355,12 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  Future<dynamic> send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments}) async {
+  Future<dynamic> send<T>(T data, {List<String>? paths, String? separator, Map<String, String>? arguments}) async {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
     var dto =
-        EventDTO<T>(data, path: path, fragment: fragment, arguments: arguments, target: target, completer: null);
+        EventDTO<T>(data, paths: paths,  arguments: arguments,separator: separator, completer: null);
     return _link.request(dto);
   }
 }

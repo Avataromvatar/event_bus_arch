@@ -80,12 +80,12 @@ mixin class FSM<T> {
     T toState, {
     FSMHandler<T, E>? handler,
     FSMFilter<T, E>? filter,
-    String? eventTarget,
-    String? eventPath,
-    String? eventFragment,
-    Map<String, String>? arguments,
+    
+    List<String>? eventPaths,
+    
+    
   }) {
-    var topic = Topic.create<E>(arguments: arguments,fragment: eventFragment,path: eventPath,target: eventTarget);
+    var topic = Topic.create<E>(paths: eventPaths);
     var eventChannel = _fsm._map[topic];
     if (eventChannel != null) {
       eventChannel[fromState] = _FSMNode<T, E>(

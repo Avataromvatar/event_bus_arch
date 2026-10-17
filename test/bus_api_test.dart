@@ -78,7 +78,7 @@ void main() {
       await busA.dispose();
 
       expect(await busB.send<int>(3), 'from B: 3');
-      expect(busB.lastData<int>(), 3);
+      expect(busB.currentData<int>(), 3);
       await busB.dispose();
     });
 
@@ -103,11 +103,11 @@ void main() {
       final bus = EventBus(isModelBus: true);
       bus.handlers.setHandler<int>(initialData: 1, handler: (dto, lastData) async {});
       await bus.send<int>(2);
-      expect(bus.lastData<int>(), 2);
+      expect(bus.currentData<int>(), 2);
 
       bus.handlers.setHandler<int>(initialData: 10, handler: (dto, lastData) async {});
 
-      expect(bus.lastData<int>(), 10);
+      expect(bus.currentData<int>(), 10);
       await bus.dispose();
     });
 
@@ -117,9 +117,9 @@ void main() {
       bus.handlers.setHandler<int>(initialData: 5, paths: ['counter'],
           handler: (dto, lastData) async {});
 
-      expect(bus.lastData<int>(paths: ['counter']), 5);
+      expect(bus.currentData<int>(paths: ['counter']), 5);
       // another topic of the same type is untouched
-      expect(bus.lastData<int>(), null);
+      expect(bus.currentData<int>(), null);
       await bus.dispose();
     });
   });

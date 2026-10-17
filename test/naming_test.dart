@@ -53,7 +53,7 @@ void main() {
 
       expect(bus.haveHandler<int>(paths: ['c'], separator: '.'), true);
       expect(bus.haveListener<int>(paths: ['c'], separator: '.'), false);
-      expect(bus.lastData<int>(paths: ['c'], separator: '.'), null);
+      expect(bus.currentData<int>(paths: ['c'], separator: '.'), null);
 
       final sub = bus.subscribe<int>(
           paths: ['c'],
@@ -77,7 +77,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       bus.handlers.setHandler<int>(initialData: 3, handler: (dto, lastData) async {});
 
-      expect(bus.lastData<int>(), 3);
+      expect(bus.currentData<int>(), 3);
       await bus.dispose();
     });
   });

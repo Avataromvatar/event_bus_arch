@@ -71,7 +71,7 @@ void main() {
       await subscription2.cancel();
     });
 
-    test('Should get last data', () {
+    test('Should get last data', () async{
       final bus = EventBus();
       
       // Set initial data
@@ -82,10 +82,10 @@ void main() {
       );
       
       // Send event
-      bus.send('test data');
+      await bus.send('test data');
       
       // Get last data
-      final last = bus.lastData<String>();
+      final last = bus.currentData<String>();
       expect(last, 'test data');
     });
 

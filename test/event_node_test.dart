@@ -25,13 +25,13 @@ void main() {
       await bus.dispose();
     });
 
-    test('lastData is updated synchronously, right after send', () {
+    test('lastData is updated synchronously, right after send', () async{
       final bus = EventBus();
       bus.handlers.setHandler<String>(handler: (dto, lastData) async {});
 
-      bus.send<String>('data');
+      await bus.send<String>('data');
 
-      expect(bus.lastData<String>(), 'data');
+      expect(bus.currentData<String>(), 'data');
     });
 
     test('lastData in the handler does not depend on the initial value', () async {
@@ -44,7 +44,7 @@ void main() {
       await bus.send<int>(7);
 
       expect(previous, 5);
-      expect(bus.lastData<int>(), 7);
+      expect(bus.currentData<int>(), 7);
     });
   });
 

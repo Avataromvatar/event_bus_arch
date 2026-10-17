@@ -15,7 +15,7 @@ class EventNodeNatsImpl<T> implements EventNode<T> {
   Handler<T>? handler;
 
   @override
-  T? lastData;
+  T? currentData;
   @override
   // TODO: implement isDisposed
   bool get isDisposed => throw UnimplementedError();
@@ -49,4 +49,9 @@ class EventNodeNatsImpl<T> implements EventNode<T> {
 class EventBusNats with EventBusMixin {
   Map<String, EventDTOSerialization> serializator;
   Map<String, EventDTODeserialization> deserializator;
+
+  @override
+  EventNode<T> createNode<T>({T? currentData, Handler<T>? handler}) {
+    return EventNodeNatsImpl(currentData: currentData, handler: handler);
+  }
 }

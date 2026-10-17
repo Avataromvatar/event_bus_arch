@@ -9,7 +9,7 @@ resolution: workspace
 # Add regular dependencies here.
 dependencies:
   # path: ^1.9.0
-  event_bus_arch: ^2.3.0
+  event_bus_arch: ^3.0.0
   dart_nats: ^1.6.1
 
 dev_dependencies:

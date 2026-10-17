@@ -1,0 +1,17 @@
+name: event_bus_nats
+description: A starting point for Dart libraries or applications.
+version: 1.0.0
+# repository: https://github.com/my_org/my_repo
+
+environment:
+  sdk: ^3.12.0
+resolution: workspace
+# Add regular dependencies here.
+dependencies:
+  # path: ^1.9.0
+  event_bus_arch: ^2.3.0
+  dart_nats: ^1.6.1
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

@@ -24,7 +24,7 @@ void main() {
           // Set up a handler in the isolate
           (bus as EventBusHandlers).setHandler<String>(
               handler: (dto, lastData) async {
-            dto.completer?.complete('Processed: ${dto.data}');
+            return 'Processed: ${dto.data}';
           });
         },
       );
@@ -59,7 +59,7 @@ void main() {
           // Set up a handler in the isolate
           (bus as EventBusHandlers).setHandler<int>(
               handler: (dto, lastData) async {
-            dto.completer?.complete(dto.data * 2);
+            return dto.data * 2;
           });
         },
       );

@@ -11,7 +11,7 @@ class NameEvent {}
 
 void _worker(EventBus bus, Object? initialData) {
   bus.handlers.setHandler<String>(handler: (dto, lastData) async {
-    dto.completer?.complete('$initialData: ${dto.data}');
+    return '$initialData: ${dto.data}';
   });
 }
 
@@ -35,7 +35,7 @@ void main() {
         separator: '/',
         handler: (dto, lastData) async {
           seen = dto.arguments;
-          dto.completer?.complete(dto.data);
+          return dto.data;
         },
       );
 
@@ -95,12 +95,11 @@ void main() {
           topic: topic.copy(),
           paths: ['p'],
           separator: '/',
-          arguments: {'a': '1'},
-          completer: null);
+          arguments: {'a': '1'});
       expect(dto.topic, isA<Topic>());
 
       final created = EventDTO.create<int>(1,
-          paths: ['p'], separator: '/', arguments: {'a': '1'}, completer: null);
+          paths: ['p'], separator: '/', arguments: {'a': '1'});
       expect(created.topic.topic, 'int/p');
 
       final restored = EventDTOImpl.fromJson<int>({'topic': 'int', 'data': 1},

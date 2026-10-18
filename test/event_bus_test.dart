@@ -17,7 +17,7 @@ void main() {
       // Set up handler
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
-          dto.completer?.complete('handled');
+          return 'handled';
         },
       );
 
@@ -44,7 +44,7 @@ void main() {
       // Set up handler
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
-          dto.completer?.complete('handled');
+          return 'handled';
         },
       );
 
@@ -77,7 +77,7 @@ void main() {
       // Set initial data
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
-          dto.completer?.complete('handled');
+          return 'handled';
         },
       );
 
@@ -98,7 +98,7 @@ void main() {
       // Set handler
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
-          dto.completer?.complete('handled');
+          return 'handled';
         },
       );
 
@@ -129,7 +129,7 @@ void main() {
       // Set handler
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
-          dto.completer?.complete('handled');
+          return 'handled';
         },
       );
 
@@ -143,13 +143,13 @@ void main() {
       expect(bus.haveHandler<String>(), false);
     });
 
-    test('Should send event with completer result', () async {
+    test('Should return the handler result', () async {
       final bus = EventBus();
 
       // Set up handler that returns a result
       (bus as EventBusHandlers).setHandler<int>(
         handler: (dto, lastData) async {
-          dto.completer?.complete(42);
+          return 42;
         },
       );
 
@@ -179,7 +179,7 @@ void main() {
       (bus as EventBusHandlers).setHandler<String>(
         paths: ['test'],
         handler: (dto, lastData) async {
-          dto.completer?.complete('handled');
+          return 'handled';
         },
       );
 
@@ -198,7 +198,7 @@ void main() {
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
           seen = dto.arguments;
-          dto.completer?.complete('handled');
+          return 'handled';
         },
       );
 
@@ -219,7 +219,7 @@ void main() {
       (bus as EventBusHandlers).setHandler<String>(
         paths: ['specific', 'path'],
         handler: (dto, lastData) async {
-          dto.completer?.complete('handled');
+          return 'handled';
         },
       );
 
@@ -262,7 +262,7 @@ void main() {
         separator: '/',
         handler: (dto, lastData) async {
           called = true;
-          dto.completer?.complete('slash');
+          return 'slash';
         },
       );
 

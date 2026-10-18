@@ -203,7 +203,7 @@ Asynchronous failures are reported on `errors`. Errors that happen before
   with multiple publishers is not.
 * **Local-only members stay local.** `haveListener` and `haveHandler` inspect
   this process; `allEventStream` sees outgoing events, not incoming ones.
-* **`completer` is local.** Remote request/reply is not implemented; the
+* **`request` is local-only.** Remote request/reply is not implemented; the
   connection carries `replyTo` for a future API.
 * **`runtimeType` is not a stable wire address.** Web release builds minify
   type names, AOT obfuscation renames them. Use `typeTags` or stable explicit

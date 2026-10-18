@@ -32,8 +32,8 @@ Future<void> main() async {
   );
   isolateBus.fire(TestStrData('Hello from main isolate'));
 
-  ///If you sethandler for event you can call completer
-  ///what return result
+  ///If you sethandler for event you can return a result
+  ///from the handler as the request response
   ///You can send arguments in dto
   var ret = await isolateBus.request<TestIntData>(TestIntData(1),
       paths: ['calc'], arguments: {'multiplier': 10.toString()});
@@ -59,7 +59,7 @@ void _initIsolate(EventBus bus, Object? initialData) async {
     handler: (dto, lastData) async {
       print('Arguments:${dto.arguments}');
       var multStr = dto.arguments?['multiplier'] ?? '';
-      dto.completer?.complete(dto.data.value * (int.tryParse(multStr) ?? 1));
+      return dto.data.value * (int.tryParse(multStr) ?? 1);
     },
   );
 }

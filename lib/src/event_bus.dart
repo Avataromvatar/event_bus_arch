@@ -2,9 +2,9 @@ part of event_arch;
 
 ///Handler function type for request responders.
 ///
-///The handler receives the event and the previous value of the topic. It may
-///complete `dto.completer` or return a value; `request` completes with
-///whichever comes first. An exception becomes the error of the request.
+///The handler receives the event and the previous value of the topic. The
+///returned value is the response; an exception becomes the error of the
+///request.
 typedef Handler<T> = Future<dynamic> Function(EventDTO<T> dto, T? lastData);
 
 ///Alias for EventNode type
@@ -430,9 +430,7 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
       accepts: (data) => data is T,
       invoke: (dto, lastData) {
         final typed = EventDTO<T>(dto.data as T,
-            topic: dto.topic,
-            arguments: dto.arguments,
-            completer: dto.completer);
+            topic: dto.topic, arguments: dto.arguments);
         return handler(typed, lastData as T?);
       },
     );
@@ -476,31 +474,19 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
 
     final node = _nodeFor<T>(topic);
     final previous = node.currentData;
-    final dto = EventDTO<T>(data,
-        topic: topic, arguments: arguments, completer: Completer());
+    final dto = EventDTO<T>(data, topic: topic, arguments: arguments);
     node.deliver(dto);
     _addAllEvent(dto, true);
-    unawaited(_invoke(registration, dto, previous));
 
-    final future = dto.completer!.future;
+    final future = _invoke(registration, dto, previous);
     return timeout == null ? await future : await future.timeout(timeout);
   }
 
-  ///Runs the user handler and completes the request completer with either its
-  ///returned value or the value it completed directly.
-  Future<void> _invoke(
-      RequestHandler registration, EventDTO dto, Object? lastData) async {
-    final completer = dto.completer;
-    try {
-      final value = await registration.invoke(dto, lastData);
-      if (completer != null && !completer.isCompleted) {
-        completer.complete(value);
-      }
-    } catch (error, stackTrace) {
-      if (completer != null && !completer.isCompleted) {
-        completer.completeError(error, stackTrace);
-      }
-    }
+  ///Runs the user handler. Its returned value is the response; an exception
+  ///becomes the error of the request.
+  Future<dynamic> _invoke(
+      RequestHandler registration, EventDTO dto, Object? lastData) {
+    return registration.invoke(dto, lastData);
   }
 
   ///Dispatches an event received from another isolate.
@@ -528,17 +514,9 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
     }
 
     final previous = node.currentData;
-    final completer = Completer();
-    final localDto = EventDTO<dynamic>(
-      dto.data,
-      topic: dto.topic,
-      arguments: dto.arguments,
-      completer: completer,
-    );
-    node.deliver(localDto);
-    _addAllEvent(localDto, true);
-    unawaited(_invoke(registration, localDto, previous));
-    return completer.future;
+    node.deliver(dto);
+    _addAllEvent(dto, true);
+    return _invoke(registration, dto, previous);
   }
 
   @override

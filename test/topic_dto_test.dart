@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
 
@@ -209,14 +207,6 @@ void main() {
       );
 
       expect(restored.data, 7);
-    });
-
-    test('completer is not part of event equality', () {
-      final a = EventDTO<int>(1, completer: Completer());
-      final b = EventDTO<int>(1);
-
-      expect(a, b);
-      expect(a.hashCode, b.hashCode);
     });
   });
 }

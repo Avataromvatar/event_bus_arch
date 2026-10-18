@@ -29,7 +29,7 @@ final sub = bus.subscribe<String>(onData: (e) => print(e));
 
 // a handler that returns a result
 bus.handlers.setHandler<String>(handler: (dto, lastData) async {
-  dto.completer?.complete('processed: ${dto.data}');
+  return 'processed: ${dto.data}';
 });
 
 // send: the address is type + paths, call parameters go in arguments
@@ -60,7 +60,7 @@ What you need to know right away:
 ## Package status
 
 * Version: 3.0.0, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
-* Tests: 119 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO) —
+* Tests: 117 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO) —
   they pass. The NATS transport has its own suite in `packages/event_bus_nats/test`.
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
   (FSM), `example/event_bus_layers_example.dart` (layers),

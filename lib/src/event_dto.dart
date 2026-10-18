@@ -1,36 +1,27 @@
 part of event_arch;
 
+///One event: its topic, the data and the call arguments.
 abstract class EventDTO<T> {
   Topic get topic;
   T get data;
   Map<String, String>? get arguments;
 
-  ///completed with null after call handler, if not completed in handler.
-  ///If the handler throws, the completer is completed with that error.
-  Completer? get completer;
-
   static EventDTO<T> create<T>(T data,
       {List<String>? paths,
       String? separator,
-      Map<String, String>? arguments,
-      Completer? completer}) {
+      Map<String, String>? arguments}) {
     return EventDTO<T>(data,
-        paths: paths,
-        separator: separator,
-        completer: completer,
-        arguments: arguments);
+        paths: paths, separator: separator, arguments: arguments);
   }
 
   factory EventDTO(T data,
       {Topic? topic,
       List<String>? paths,
       Map<String, String>? arguments,
-      String? separator,
-      Completer? completer}) {
+      String? separator}) {
     return EventDTOImpl<T>(
       topic ?? Topic.create<T>(paths: paths, separator: separator ?? '.'),
       data,
-      completer: completer,
       arguments: arguments,
       /* route*/
     );
@@ -48,10 +39,8 @@ class EventDTOImpl<T> implements EventDTO<T> {
   @override
   T data;
   @override
-  Completer? completer;
-  @override
   Map<String, String>? arguments;
-  EventDTOImpl(this.topic, this.data, {this.completer, this.arguments});
+  EventDTOImpl(this.topic, this.data, {this.arguments});
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;

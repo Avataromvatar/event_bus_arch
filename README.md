@@ -14,7 +14,7 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 ## Features
 
 - Send and receive events between components (`fire` / `request` / `listen` / `subscribe`)
-- Handlers that can return a result to the sender (`EventDTO.completer`)
+- Handlers that return a result to `request`
 - Two bus flavours: **common** (`EventBus()`) and **model** (`EventBus(isModelBus: true)`) —
   the model bus keeps the last value per topic even when nobody is listening
 - Topic-based routing: event type + `paths`, plus `arguments` as call parameters
@@ -50,10 +50,10 @@ Future<void> main() async {
   // Receive: every event of that topic, current and future
   final sub = bus.subscribe<String>(onData: (event) => print('got: $event'));
 
-  // Handle: the handler may answer the sender through dto.completer.
+  // Handle: the handler returns the response; request waits for it.
   // lastData is the PREVIOUS value of this topic, dto.data is the current one.
   bus.handlers.setHandler<String>(handler: (dto, lastData) async {
-    dto.completer?.complete('processed: ${dto.data}');
+    return 'processed: ${dto.data}';
   });
 
   final result = await bus.request<String>('hello');
@@ -132,7 +132,7 @@ Future<void> _worker(EventBus bus, Object? initialData) async {
   await _heavyInit();                                  // async init is fine
   bus.handlers.setHandler<int>(handler: (dto, lastData) async {
     final m = int.tryParse(dto.arguments?['multiplier'] ?? '1') ?? 1;
-    dto.completer?.complete(dto.data * m);
+    return dto.data * m;
   });
 }
 ```

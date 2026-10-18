@@ -189,8 +189,8 @@ bus.errors;               // stream of asynchronous transport/node errors
 - The local-only members keep their local meaning: `haveListener` and
   `haveHandler` only see this process, and `allEventStream` sees outgoing
   events, not incoming ones.
-- `EventDTO.completer` is local. Remote request/reply is not implemented yet;
-  `msg.replyTo` is carried by the connection for a future API.
+- `request` is local-only in this package. Remote request/reply is not
+  implemented yet; `msg.replyTo` is carried by the connection for a future API.
 - `EventNodeNatsImpl.copy()` throws: a node cannot be rebound to another bus.
 - `runtimeType` as a wire address is not stable under web minification or AOT
   obfuscation. Use `typeTags` (or a type whose name is stable) before deploying.

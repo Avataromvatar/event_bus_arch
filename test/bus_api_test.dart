@@ -8,7 +8,7 @@ void main() {
 
       expect(bus.handlers, isA<EventBusHandlers>());
       bus.handlers.setHandler<String>(handler: (dto, lastData) async {
-        dto.completer?.complete('ok');
+        return 'ok';
       });
       expect(bus.haveHandler<String>(), true);
       expect(await bus.request<String>('x'), 'ok');
@@ -74,7 +74,7 @@ void main() {
       busB.handlers.setHandler<int>(
           initialData: 1,
           handler: (dto, lastData) async {
-            dto.completer?.complete('from B: ${dto.data}');
+            return 'from B: ${dto.data}';
           });
 
       busA.handlers.addAllHandlerFromOtherBus(busB);

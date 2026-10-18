@@ -9,7 +9,7 @@ void silentWorker(EventBus bus, Object? initialData) {}
 
 void doublingWorker(EventBus bus, Object? initialData) {
   bus.handlers.setHandler<int>(handler: (dto, lastData) async {
-    dto.completer?.complete(dto.data * 2);
+    return dto.data * 2;
   });
 }
 
@@ -17,7 +17,7 @@ void doublingWorker(EventBus bus, Object? initialData) {
 Future<void> slowInitWorker(EventBus bus, Object? initialData) async {
   await Future<void>.delayed(const Duration(milliseconds: 50));
   bus.handlers.setHandler<String>(handler: (dto, lastData) async {
-    dto.completer?.complete('ready: ${dto.data}');
+    return 'ready: ${dto.data}';
   });
 }
 
@@ -26,7 +26,7 @@ void slowByValueWorker(EventBus bus, Object? initialData) {
   bus.handlers.setHandler<int>(handler: (dto, lastData) async {
     await Future<void>.delayed(
         Duration(milliseconds: dto.data == 1 ? 200 : 10));
-    dto.completer?.complete(dto.data);
+    return dto.data;
   });
 }
 
@@ -48,7 +48,7 @@ Future<void> failingInitWorker(EventBus bus, Object? initialData) async {
 ///Answers with the arguments of the call, so a lost arguments map is visible.
 void argumentWorker(EventBus bus, Object? initialData) {
   bus.handlers.setHandler<String>(handler: (dto, lastData) async {
-    dto.completer?.complete('multiplier=${dto.arguments?['multiplier']}');
+    return 'multiplier=${dto.arguments?['multiplier']}';
   });
 }
 
@@ -57,7 +57,7 @@ void pathWorker(EventBus bus, Object? initialData) {
   bus.handlers.setHandler<int>(
       paths: ['counter'],
       handler: (dto, lastData) async {
-        dto.completer?.complete(dto.data * 2);
+        return dto.data * 2;
       });
 }
 

@@ -17,7 +17,7 @@ void main() {
           initialData: 'INIT',
           handler: (dto, lastData) async {
             seen.add(lastData);
-            dto.completer?.complete(dto.data);
+            return dto.data;
           });
 
       await bus.request<String>('one');
@@ -87,25 +87,12 @@ void main() {
         if (dto.data == 1) {
           throw StateError('boom');
         }
-        dto.completer?.complete(dto.data * 10);
+        return dto.data * 10;
       });
 
       await expectLater(bus.request<int>(1), throwsStateError);
       expect(await bus.request<int>(2), 20);
       expect(calls, 2);
-      await bus.dispose();
-    });
-
-    test(
-        'a handler that completes the completer and then throws does not surface StateError',
-        () async {
-      final bus = EventBus();
-      bus.handlers.setHandler<String>(handler: (dto, lastData) async {
-        dto.completer?.complete('result');
-        throw StateError('boom after complete');
-      });
-
-      expect(await bus.request<String>('x'), 'result');
       await bus.dispose();
     });
   });
@@ -118,15 +105,15 @@ void main() {
           bus.subscribe<String>(onData: (e) => order.add('listener:$e'));
       bus.handlers.setHandler<String>(handler: (dto, lastData) async {
         order.add('handler-start');
-        dto.completer?.complete('ok');
         order.add('handler-end');
+        return 'ok';
       });
 
       await bus.request<String>('x');
       order.add('sender');
 
       // delivery to the listener runs in a separate microtask, but is scheduled BEFORE
-      // the completer wakes up the sender
+      // the handler future wakes up the sender
       expect(order.indexOf('listener:x'),
           greaterThan(order.indexOf('handler-start')));
       expect(order.indexOf('listener:x'), lessThan(order.indexOf('sender')));
@@ -164,7 +151,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       // the node is created for Object, but a String arrives
       bus.handlers.setHandler<Object>(handler: (dto, lastData) async {
-        dto.completer?.complete('handled');
+        return 'handled';
       });
 
       await expectLater(

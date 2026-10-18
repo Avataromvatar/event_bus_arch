@@ -1,5 +1,5 @@
 name: event_bus_nats
-description: A starting point for Dart libraries or applications.
+description: NATS transport for event_bus_arch.
 version: 1.0.0
 # repository: https://github.com/my_org/my_repo
 

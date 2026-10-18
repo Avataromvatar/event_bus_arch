@@ -67,12 +67,12 @@ class EventNodeImp<T> implements EventNode<T> {
     var prev = currentData;
     currentData = event.data;
     _streamControllerValue.add(event.data);
-     try {
-    var h = handler;
-    if (h == null) {
-      _completeIfNeeded(event.completer, null);
-      return;
-    }
+    try {
+      var h = handler;
+      if (h == null) {
+        _completeIfNeeded(event.completer, null);
+        return;
+      }
       h(event, prev).then(
         (_) => _completeIfNeeded(event.completer, _),
         onError: (Object error, StackTrace stackTrace) =>
@@ -110,7 +110,7 @@ class EventNodeImp<T> implements EventNode<T> {
       // handler reads them from the dto it is given
       var d = EventDTO<T>(dto.data,
           topic: dto.topic, completer: dto.completer, arguments: dto.arguments);
-      
+
       _streamController.add(d);
     } else {
       // an event of a foreign type: it must not be dropped silently, otherwise
@@ -122,7 +122,8 @@ class EventNodeImp<T> implements EventNode<T> {
   /// Creates an independent node with the same handler and last data.
   /// Used to move handlers between buses without sharing state.
   @override
-  EventNode<T> copy() => EventNodeImp<T>(handler: handler, currentData: currentData);
+  EventNode<T> copy() =>
+      EventNodeImp<T>(handler: handler, currentData: currentData);
 
   /// Disposes of the node, closing all stream controllers and cancelling subscriptions.
   @override
@@ -260,9 +261,26 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     }
   }
 
-  EventNode<T> createNode<T>({T? currentData, Handler<T>? handler}) {
+  /// Creates the node for a topic.
+  ///
+  /// The topic is part of the node's identity: a transport bus overrides this
+  /// method and returns a node that publishes to and listens from its broker.
+  /// The default node is local-only and ignores the topic.
+  EventNode<T> createNode<T>({
+    required Topic topic,
+    T? currentData,
+    Handler<T>? handler,
+  }) {
     return EventNode<T>.create(handler: handler, currentData: currentData);
   }
+
+  /// Whether [send] should create a node when the topic has none.
+  ///
+  /// A model bus stores every event it sends, so it creates the node. A
+  /// transport bus overrides this to create a node only for topics it
+  /// actually knows. With the default `false`, `send` to a topic without a
+  /// node returns `null`, exactly like the local bus.
+  bool shouldCreateNodeOnSend(Topic topic) => isModelBus;
 
   /// Adds the event to the all-events stream if the bus is still alive.
   void _addAllEvent(EventDTO dto, bool delivered) {
@@ -295,7 +313,7 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     if (node != null && node is EventNode<T>) {
       return node;
     }
-    var created = createNode<T>(); // EventNode<T>.create();
+    var created = createNode<T>(topic: topic);
     _eventsMap[topic] = created;
     return created;
   }
@@ -355,9 +373,10 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
       node.send(dto);
       _addAllEvent(dto, true);
       return dto.completer?.future;
-    } else if (isModelBus) {
-      _eventsMap[dto.topic] = createNode<T>();
-      _eventsMap[dto.topic]!.send(dto);
+    } else if (shouldCreateNodeOnSend(dto.topic)) {
+      var created = createNode<T>(topic: dto.topic);
+      _eventsMap[dto.topic] = created;
+      created.send(dto);
       _addAllEvent(dto, true);
       return dto.completer?.future;
     }
@@ -432,7 +451,8 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
         node.currentData = data;
       }
     } else {
-      _eventsMap[t] = createNode<T>(handler: handler, currentData: data);
+      _eventsMap[t] =
+          createNode<T>(topic: t, handler: handler, currentData: data);
     }
   }
 

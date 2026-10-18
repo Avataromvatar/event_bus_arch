@@ -38,7 +38,16 @@ void main() {
       expect(Topic.create<num>(paths: ['p']).topic, 'num.p');
       expect(Topic.create<int>(paths: ['p']).topic, 'int.p');
       expect(Topic.create<String?>(paths: ['p']).topic, 'String?.p');
-      expect(Topic.create<List<int>>(paths: ['p']).topic, 'List<int>.p');
+      // Generic type tokens are normalised to broker-safe characters.
+      expect(Topic.create<List<int>>(paths: ['p']).topic, 'List(int).p');
+      expect(Topic.create<Map<String, int>>(paths: ['p']).topic,
+          'Map(String_int).p');
+    });
+
+    test('a normalised generic topic parses back to the same key', () {
+      var created = Topic.create<List<int>>(paths: ['p']);
+
+      expect(Topic.parse(created.topic), created);
     });
 
     test('toString returns the routing key', () {

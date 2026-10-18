@@ -8,6 +8,11 @@ part of event_arch;
 ///Two topics are equal when their [topic] strings are equal — the type and the
 ///paths are what select a node. Call parameters (`arguments`) are payload and
 ///live on the [EventDTO], not here.
+///
+///The type token is derived from `$T`, so it is normalised to a token that is
+///safe in a broker subject: `<` becomes `(`, `>` becomes `)`, and commas and
+///whitespace become `_`. Without this a generic type such as `List<int>` would
+///produce `List<int>`, and `>` is a wildcard in NATS.
 abstract class Topic /*extends Equatable*/ {
   ///The event type — the first token of the address, usually `T` of the call.
   String get type;
@@ -38,11 +43,13 @@ abstract class Topic /*extends Equatable*/ {
     if (l.isEmpty || l.first.isEmpty) {
       throw EventBusException('Cant parse topic $str');
     }
-    return TopicImpl(l[0], paths: l.length > 1 ? l.sublist(1) : [], separator: separator);
+    return TopicImpl(l[0],
+        paths: l.length > 1 ? l.sublist(1) : [], separator: separator);
   }
 
   ///The topic of an explicitly given [type], for a type known only at runtime.
-  factory Topic.fromParametr({Type? type, List<String>? paths, String separator = '.'}) {
+  factory Topic.fromParametr(
+      {Type? type, List<String>? paths, String separator = '.'}) {
     if (type == null) {
       throw EventBusException('Topic.fromParametr required type !');
     }
@@ -59,8 +66,19 @@ abstract class Topic /*extends Equatable*/ {
   }
 }
 
+///Replaces characters that cannot appear in a broker subject token.
+String _normalizeTypeToken(String raw) {
+  return raw
+      .replaceAll('<', '(')
+      .replaceAll('>', ')')
+      .replaceAll(',', '_')
+      .replaceAll(RegExp(r'\s+'), '_')
+      .replaceAll(RegExp(r'_+'), '_');
+}
+
 class TopicImpl implements Topic {
-  TopicImpl(this.type, {this.separator = '.', this.paths = const []});
+  TopicImpl(String type, {this.separator = '.', this.paths = const []})
+      : type = _normalizeTypeToken(type);
 
   @override
   final String separator;
@@ -73,11 +91,13 @@ class TopicImpl implements Topic {
 
   @override
   Topic copy({List<String>? paths, String? separator}) {
-    return TopicImpl(type, separator: separator ?? this.separator, paths: paths ?? this.paths);
+    return TopicImpl(type,
+        separator: separator ?? this.separator, paths: paths ?? this.paths);
   }
 
   @override
-  String get topic => paths.isEmpty ? type : '$type$separator${paths.join(separator)}';
+  String get topic =>
+      paths.isEmpty ? type : '$type$separator${paths.join(separator)}';
 
   ///The routing key: implementations use `implements`, so the body in [Topic]
   ///is not inherited and has to be repeated here.

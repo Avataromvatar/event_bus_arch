@@ -79,7 +79,7 @@ class _PendingRequest {
 class _IsolateLink {
   _IsolateLink(this._host);
 
-  final EventBusMixin _host;
+  final EventBusImpl _host;
 
   ///Port to the other side. On the worker side it is known from the start, on the
   ///main side it appears after the handshake.
@@ -151,7 +151,7 @@ class _IsolateLink {
     } else if (message is _IsolateRequest) {
       unawaited(_answer(message));
     } else if (message is _IsolateFire) {
-      _dispatchIncoming(_host, message.dto, request: false);
+      _host._dispatchIncoming(message.dto, request: false);
     }
     // any other message (including late replies) is ignored
   }
@@ -163,7 +163,7 @@ class _IsolateLink {
       return;
     }
     try {
-      var value = await _dispatchIncoming(_host, request.dto);
+      var value = await _host._dispatchIncoming(request.dto);
       if (!_closed) {
         port.send(_IsolateResponse(request.id, value));
       }
@@ -192,31 +192,6 @@ class _IsolateLink {
     }
     _pings.clear();
   }
-}
-
-///Dispatches an event that came from the other isolate: hands it to the local
-///nodes and returns the handler result. A request without a handler throws
-///[NoHandlerException]; a fire event is delivered to listeners and never
-///replies.
-Future? _dispatchIncoming(EventBusMixin bus, EventDTO dto,
-    {bool request = true}) {
-  final completer = request ? Completer() : null;
-  var dtoCopy = EventDTOImpl(dto.topic, dto.data,
-      completer: completer, arguments: dto.arguments);
-  var node = bus._eventsMap[dtoCopy.topic];
-  if (node != null) {
-    if (request && !node.isHaveHandler) {
-      throw NoHandlerException(dtoCopy.topic.topic);
-    }
-    node.send(dtoCopy);
-    bus._addAllEvent(dtoCopy, true);
-    return completer?.future;
-  }
-  bus._addAllEvent(dtoCopy, false);
-  if (request) {
-    throw NoHandlerException(dtoCopy.topic.topic);
-  }
-  return null;
 }
 
 ///Atention The result of calling the event can be received later than the events called in the event handler on the isolate side

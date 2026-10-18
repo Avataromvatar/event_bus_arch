@@ -1,140 +1,94 @@
 part of event_arch;
 
-/// Handler function type for processing events.
-/// The handler receives the event data and the previous data from the same topic
-/// (the value that was stored in [EventNode.currentData] before this event).
-/// If the handler completes but doesn't call EventDTO.completer,
-/// EventNode returns null (EventDTO.completer(null)) to the sender.
-/// If the handler throws, the sender receives the error through the completer.
+///Handler function type for request responders.
+///
+///The handler receives the event and the previous value of the topic. It may
+///complete `dto.completer` or return a value; `request` completes with
+///whichever comes first. An exception becomes the error of the request.
 typedef Handler<T> = Future<dynamic> Function(EventDTO<T> dto, T? lastData);
 
-/// Alias for EventNode type
+///Alias for EventNode type
 typedef Node<T> = EventNode<T>;
 
+///A node that must survive the last listener: a transport keeps an incoming
+///subscription on it.
+abstract class KeepAliveNode {
+  bool get keepAlive;
+}
+
+///A node holds the current value of a topic and the stream of its listeners.
+///Request handlers are registered on the bus, not on the node.
 abstract class EventNode<T> {
   T? currentData;
-  Handler<T>? handler;
   bool get isDisposed;
-  bool get isHaveHandler;
   StreamController<T> get streamControllerValue;
-  void send(EventDTO dto);
+
+  ///Delivers an event to the value stream. Only listeners are notified.
+  void deliver(EventDTO dto);
+
   EventNode<T> copy();
 
-  /// Disposes of the node, closing all stream controllers and cancelling subscriptions.
+  ///Disposes of the node, closing all stream controllers and cancelling subscriptions.
   Future<void> dispose();
 
   factory EventNode.create({
     T? currentData,
-    Handler<T>? handler,
   }) {
-    return EventNodeImp<T>(currentData: currentData, handler: handler);
+    return EventNodeImp<T>(currentData: currentData);
   }
 }
 
-/// EventNode represents a node in the event bus system.
-/// It manages the handler, last data, and stream controllers for a specific topic.
+///A request responder registered for a topic.
+///
+///The closures erase the generic type of the handler, so a request received
+///from another isolate can be dispatched without knowing `T` statically.
+class RequestHandler {
+  RequestHandler({
+    required this.topic,
+    required this.accepts,
+    required this.invoke,
+  });
+
+  final Topic topic;
+
+  ///Whether this handler can process an event with [data].
+  final bool Function(Object? data) accepts;
+
+  ///Invokes the user handler with a typed DTO and the previous value.
+  final Future<dynamic> Function(EventDTO dto, Object? lastData) invoke;
+}
+
+///EventNodeImp stores the current value and fans events out to listeners.
 class EventNodeImp<T> implements EventNode<T> {
   @override
   T? currentData;
   @override
-  Handler<T>? handler;
-  @override
-  bool get isDisposed => _streamController.isClosed;
-  final StreamController<EventDTO<T>> _streamController =
-      StreamController<EventDTO<T>>.broadcast();
+  bool get isDisposed => _streamControllerValue.isClosed;
   final StreamController<T> _streamControllerValue =
       StreamController<T>.broadcast();
-  StreamSubscription? _streamControllerSub;
   @override
   StreamController<T> get streamControllerValue => _streamControllerValue;
 
-  /// Creates an EventNode with optional initial data and handler.
-  /// Sets up the stream listener to process incoming events.
-  EventNodeImp({
-    this.currentData,
-    this.handler,
-  }) {
-    _streamControllerSub = _streamController.stream.listen(_process);
-  }
+  EventNodeImp({this.currentData});
 
-  /// Handles one event: listeners first, then the handler.
-  ///
-  /// The value goes to the value stream before the handler runs, so listeners
-  /// are notified before the sender's `await send(...)` resumes — and they get
-  /// the data even when the handler fails.
-  void _process(EventDTO<T> message) {
-    var event = message;
-    var prev = currentData;
-    currentData = event.data;
-    _streamControllerValue.add(event.data);
-    try {
-      var h = handler;
-      if (h == null) {
-        _completeIfNeeded(event.completer, null);
-        return;
-      }
-      h(event, prev).then(
-        (_) => _completeIfNeeded(event.completer, _),
-        onError: (Object error, StackTrace stackTrace) =>
-            _completeErrorIfNeeded(event.completer, error, stackTrace),
-      );
-    } catch (error, stackTrace) {
-      // a non-async handler threw synchronously
-      _completeErrorIfNeeded(event.completer, error, stackTrace);
-    }
-  }
-
-  static void _completeIfNeeded(Completer? completer, dynamic value) {
-    if (completer != null && !completer.isCompleted) {
-      completer.complete(value);
-    }
-  }
-
-  static void _completeErrorIfNeeded(
-      Completer? completer, Object error, StackTrace stackTrace) {
-    if (completer != null && !completer.isCompleted) {
-      completer.completeError(error, stackTrace);
-    }
-  }
-
+  ///Stores the value and notifies listeners. Request handlers are invoked by
+  ///the bus, not here, so the value is scheduled before a handler can complete
+  ///the request.
   @override
-  bool get isHaveHandler => handler != null;
-
-  /// Sends an event to the node if the data type matches T.
-  /// Updates the currentData and adds the event to the stream.
-  @override
-  void send(EventDTO dto) {
-    if (dto.data is T) {
-      // var previous = currentData;
-      // arguments are rebuilt with the event: they belong to the call, and the
-      // handler reads them from the dto it is given
-      var d = EventDTO<T>(dto.data,
-          topic: dto.topic, completer: dto.completer, arguments: dto.arguments);
-
-      _streamController.add(d);
-    } else {
-      // an event of a foreign type: it must not be dropped silently, otherwise
-      // the sender would never get an answer
-      _completeIfNeeded(dto.completer, null);
-    }
+  void deliver(EventDTO dto) {
+    if (dto.data is! T) return;
+    currentData = dto.data;
+    _streamControllerValue.add(dto.data);
   }
 
-  /// Creates an independent node with the same handler and last data.
-  /// Used to move handlers between buses without sharing state.
+  ///Creates an independent node with the same current data.
   @override
-  EventNode<T> copy() =>
-      EventNodeImp<T>(handler: handler, currentData: currentData);
+  EventNode<T> copy() => EventNodeImp<T>(currentData: currentData);
 
-  /// Disposes of the node, closing all stream controllers and cancelling subscriptions.
   @override
   Future<void> dispose() async {
-    await _streamControllerSub?.cancel();
-    _streamControllerSub = null;
     if (!_streamControllerValue.isClosed) {
       await _streamControllerValue.close();
-    }
-    if (!_streamController.isClosed) {
-      await _streamController.close();
     }
   }
 }
@@ -233,7 +187,7 @@ abstract class EventBusHandlers {
   void removeAllHandlerPresentInOtherBus(EventBus otherBus);
 }
 
-class EventBusImpl with EventBusMixin {
+class EventBusImpl with EventBusMixin, EventBusHandlersMixin {
   final bool _isModelBus;
   @override
   bool get isModelBus => _isModelBus;
@@ -243,7 +197,7 @@ class EventBusImpl with EventBusMixin {
   EventBusImpl(this._isModelBus);
 }
 
-mixin EventBusMixin implements EventBus, EventBusHandlers {
+mixin EventBusMixin implements EventBus {
   @override
   String defaultTopicPathSeparator = '.';
 
@@ -259,9 +213,6 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
 
   bool _disposed = false;
   Future<void>? _disposeFuture;
-
-  @override
-  EventBusHandlers get handlers => this;
 
   /// true once [dispose] has been called
   @override
@@ -285,10 +236,13 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
   EventNode<T> createNode<T>({
     required Topic topic,
     T? currentData,
-    Handler<T>? handler,
   }) {
-    return EventNode<T>.create(handler: handler, currentData: currentData);
+    return EventNode<T>.create(currentData: currentData);
   }
+
+  ///Whether a request handler is registered for [topic]. The delivery mixin
+  ///uses this to keep a node alive after its last listener goes away.
+  bool _hasHandlerFor(Topic topic);
 
   /// Whether [send] should create a node when the topic has none.
   ///
@@ -385,34 +339,9 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
       _addAllEvent(dto, false);
       return false;
     }
-    node.send(dto);
+    node.deliver(dto);
     _addAllEvent(dto, true);
     return true;
-  }
-
-  /// Sends a request and waits for a handler result.
-  @override
-  Future<dynamic> request<T>(T data,
-      {List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      Duration? timeout}) async {
-    _checkNotDisposed();
-    _rejectRequestWildcards(paths);
-    var dto = EventDTO<T>(data,
-        paths: paths,
-        separator: separator ?? defaultTopicPathSeparator,
-        arguments: arguments,
-        completer: Completer());
-    var node = _sendNode<T>(dto.topic);
-    if (node == null || !node.isHaveHandler) {
-      _addAllEvent(dto, false);
-      throw NoHandlerException(dto.topic.topic);
-    }
-    node.send(dto);
-    _addAllEvent(dto, true);
-    final future = dto.completer!.future;
-    return timeout == null ? await future : await future.timeout(timeout);
   }
 
   ///The node an event is sent to, created when the bus allows it.
@@ -427,100 +356,20 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     return null;
   }
 
-  /// Removes a handler from a specific topic.
-  /// Disposes of the EventNode if it exists.
-  @override
-  void removeHandler<T>({List<String>? paths, String? separator}) {
-    _checkNotDisposed();
-    var t = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    var node = _eventsMap.remove(t);
-    if (node != null) {
-      unawaited(node.dispose());
-    }
-  }
-
-  /// Adds all handlers from another EventBus to this one.
-  /// Nodes are copied: buses don't share state, disposing one doesn't affect the other.
-  @override
-  void addAllHandlerFromOtherBus(
-    EventBus fromBus,
-  ) {
-    _checkNotDisposed();
-    if (fromBus is EventBusMixin) {
-      for (var element in fromBus._eventsMap.entries) {
-        var replaced = _eventsMap[element.key];
-        if (replaced != null && !identical(replaced, element.value)) {
-          unawaited(replaced.dispose());
-        }
-        _eventsMap[element.key] = element.value.copy();
-      }
-    }
-  }
-
-  /// Removes all handlers that are present in another EventBus from this one.
-  @override
-  void removeAllHandlerPresentInOtherBus(EventBus otherBus) {
-    _checkNotDisposed();
-    if (otherBus is EventBusMixin) {
-      for (var element in otherBus._eventsMap.entries) {
-        var node = _eventsMap.remove(element.key);
-        if (node != null && !identical(node, element.value)) {
-          unawaited(node.dispose());
-        }
-      }
-    }
-  }
-
-  /// Sets a handler for a specific topic.
-  /// If an EventNode already exists for that topic, it updates the handler.
-  /// Otherwise, it creates a new EventNode with the handler and initial data.
-  @override
-  void setHandler<T>({
-    T? initialData,
-    List<String>? paths,
-    String? separator,
-    required Handler<T> handler,
-  }) {
-    _checkNotDisposed();
-    var data = initialData;
-    var t = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    var node = _eventsMap[t];
-    if (node != null && node is EventNode<T>) {
-      node.handler = handler;
-      if (data != null) {
-        node.currentData = data;
-      }
-    } else {
-      _eventsMap[t] =
-          createNode<T>(topic: t, handler: handler, currentData: data);
-    }
-  }
-
   /// This method is called every time a listener closes the stream.
-  /// The node is removed if it has no listeners, no handler, and this is not a model bus.
+  /// The node is kept when it has listeners, a request handler, a pin from a
+  /// transport, or when this is a model bus.
   bool removeNode(Topic topic, EventNode node) {
+    final pinned = node is KeepAliveNode && (node as KeepAliveNode).keepAlive;
     if (!node.streamControllerValue.hasListener &&
         !isModelBus &&
-        !node.isHaveHandler) {
+        !_hasHandlerFor(topic) &&
+        !pinned) {
       unawaited(node.dispose());
       _eventsMap.remove(topic);
       return true;
     }
     return false;
-  }
-
-  /// Checks if the bus contains a handler for the specified topic.
-  @override
-  bool haveHandler<T>({
-    List<String>? paths,
-    String? separator,
-  }) {
-    var t = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    var node = _eventsMap[t];
-    return node?.isHaveHandler ?? false;
   }
 
   /// Checks if the bus contains a listener for the specified topic.
@@ -546,6 +395,183 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     var nodes = _eventsMap.values.toList(growable: false);
     _eventsMap.clear();
     await Future.wait(nodes.map((e) => e.dispose()));
+  }
+}
+
+///Request handlers: registration, resolution and invocation.
+///
+///A handler is a responder for [EventBus.request]. It is not called by
+///[EventBus.fire]; event processing belongs to listeners.
+mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
+  final Map<Topic, RequestHandler> _requestHandlers = {};
+
+  @override
+  EventBusHandlers get handlers => this;
+
+  @override
+  bool _hasHandlerFor(Topic topic) => _requestHandlers.containsKey(topic);
+
+  @override
+  void setHandler<T>({
+    T? initialData,
+    List<String>? paths,
+    String? separator,
+    required Handler<T> handler,
+  }) {
+    _checkNotDisposed();
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    final node = _nodeFor<T>(topic);
+    if (initialData != null) {
+      node.currentData = initialData;
+    }
+    _requestHandlers[topic] = RequestHandler(
+      topic: topic,
+      accepts: (data) => data is T,
+      invoke: (dto, lastData) {
+        final typed = EventDTO<T>(dto.data as T,
+            topic: dto.topic,
+            arguments: dto.arguments,
+            completer: dto.completer);
+        return handler(typed, lastData as T?);
+      },
+    );
+  }
+
+  @override
+  void removeHandler<T>({List<String>? paths, String? separator}) {
+    _checkNotDisposed();
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    _requestHandlers.remove(topic);
+    final node = _eventsMap[topic];
+    if (node != null) {
+      removeNode(topic, node);
+    }
+  }
+
+  @override
+  bool haveHandler<T>({List<String>? paths, String? separator}) {
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    return _requestHandlers.containsKey(topic);
+  }
+
+  @override
+  Future<dynamic> request<T>(T data,
+      {List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments,
+      Duration? timeout}) async {
+    _checkNotDisposed();
+    _rejectRequestWildcards(paths);
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    final registration = _requestHandlers[topic];
+    if (registration == null || !registration.accepts(data)) {
+      _addAllEvent(
+          EventDTO<T>(data, topic: topic, arguments: arguments), false);
+      throw NoHandlerException(topic.topic);
+    }
+
+    final node = _nodeFor<T>(topic);
+    final previous = node.currentData;
+    final dto = EventDTO<T>(data,
+        topic: topic, arguments: arguments, completer: Completer());
+    node.deliver(dto);
+    _addAllEvent(dto, true);
+    unawaited(_invoke(registration, dto, previous));
+
+    final future = dto.completer!.future;
+    return timeout == null ? await future : await future.timeout(timeout);
+  }
+
+  ///Runs the user handler and completes the request completer with either its
+  ///returned value or the value it completed directly.
+  Future<void> _invoke(
+      RequestHandler registration, EventDTO dto, Object? lastData) async {
+    final completer = dto.completer;
+    try {
+      final value = await registration.invoke(dto, lastData);
+      if (completer != null && !completer.isCompleted) {
+        completer.complete(value);
+      }
+    } catch (error, stackTrace) {
+      if (completer != null && !completer.isCompleted) {
+        completer.completeError(error, stackTrace);
+      }
+    }
+  }
+
+  ///Dispatches an event received from another isolate.
+  ///
+  ///A request needs a registered handler; a fire event is delivered to
+  ///listeners only.
+  Future? _dispatchIncoming(EventDTO dto, {bool request = true}) {
+    final node = _eventsMap[dto.topic];
+    if (!request) {
+      if (node != null) {
+        node.deliver(dto);
+        _addAllEvent(dto, true);
+      } else {
+        _addAllEvent(dto, false);
+      }
+      return null;
+    }
+
+    final registration = _requestHandlers[dto.topic];
+    if (node == null ||
+        registration == null ||
+        !registration.accepts(dto.data)) {
+      _addAllEvent(dto, false);
+      throw NoHandlerException(dto.topic.topic);
+    }
+
+    final previous = node.currentData;
+    final completer = Completer();
+    final localDto = EventDTO<dynamic>(
+      dto.data,
+      topic: dto.topic,
+      arguments: dto.arguments,
+      completer: completer,
+    );
+    node.deliver(localDto);
+    _addAllEvent(localDto, true);
+    unawaited(_invoke(registration, localDto, previous));
+    return completer.future;
+  }
+
+  @override
+  void addAllHandlerFromOtherBus(EventBus fromBus) {
+    _checkNotDisposed();
+    if (fromBus is EventBusHandlersMixin) {
+      for (final entry in fromBus._requestHandlers.entries) {
+        _requestHandlers[entry.key] = entry.value;
+      }
+    }
+    if (fromBus is EventBusMixin) {
+      for (final entry in fromBus._eventsMap.entries) {
+        final replaced = _eventsMap[entry.key];
+        if (replaced != null && !identical(replaced, entry.value)) {
+          unawaited(replaced.dispose());
+        }
+        _eventsMap[entry.key] = entry.value.copy();
+      }
+    }
+  }
+
+  @override
+  void removeAllHandlerPresentInOtherBus(EventBus otherBus) {
+    _checkNotDisposed();
+    if (otherBus is EventBusHandlersMixin) {
+      for (final topic in otherBus._requestHandlers.keys) {
+        _requestHandlers.remove(topic);
+        final node = _eventsMap[topic];
+        if (node != null) {
+          removeNode(topic, node);
+        }
+      }
+    }
   }
 }
 

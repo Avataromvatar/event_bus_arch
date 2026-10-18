@@ -33,7 +33,7 @@ EventBusNats extends EventBusImpl
  ├── NatsConnection           transport seam
  │    └── DartNatsConnection  dart_nats client, reconnect, headers
  └── EventNodeNatsImpl<T>     one per topic
-      ├── EventNodeImp<T>     local value stream, handler, currentData
+      ├── EventNodeImp<T>     local value stream and currentData
       ├── serializer          used by send()
       └── deserializer        used by the NATS subscription
 ```
@@ -105,7 +105,8 @@ topic, a send with no node still returns `null`, exactly like a local bus.
 3. uses the serializer's subject override or maps the topic; an override is
    validated as a full wire subject;
 4. publishes with the origin header and `X-EventBus-Arguments`;
-5. delivers the event to local listeners and the handler.
+5. delivers the event to local listeners. Request handlers are invoked by
+   `request`, not by `fire`.
 
 Publishing before local delivery is deliberate: a failed transport send must
 not look like a successful local one.
@@ -129,10 +130,10 @@ On an incoming message the node:
 Deserialization failures and type mismatches are reported on `bus.errors`; the
 node and its subscription stay alive.
 
-The node is pinned in the bus map by an internal bridge handler. Cancelling the
-last local listener does not remove the node, its subscription or its
-`currentData`; `bus.dispose()` does. As a consequence `haveHandler` is true for
-every NATS node.
+The node is a `KeepAliveNode`: the transport owns an incoming subscription, so
+cancelling the last local listener does not remove the node, its subscription or
+its `currentData`; `bus.dispose()` does. `haveHandler` reflects request handlers
+registered on the bus, not the transport subscription.
 
 ---
 

@@ -15,33 +15,29 @@ typedef NatsNodeErrorHandler =
 
 ///A node of `EventBusNats`.
 ///
-///Local delivery is delegated to [EventNodeImp], so the value stream,
-///`currentData` and handler semantics are exactly those of a local node.
+///Local delivery is delegated to [EventNodeImp], so the value stream and
+///`currentData` are exactly those of a local node. Request handlers are
+///registered on the bus, not here.
 ///
-///When a serializer is configured, [send] publishes to the server before
-///delivering locally. When a deserializer is configured, the node subscribes
-///as soon as it is created and delivers incoming events locally without
-///publishing them again.
+///When a serializer is configured, [EventBus.fire] publishes to the server
+///before delivering locally. When a deserializer is configured, the node
+///subscribes as soon as it is created and delivers incoming events locally
+///without publishing them again.
 ///
-///The node always has an internal handler. That is deliberate: the core
-///removes a node only when it has no listeners and no handler, and a NATS
-///node must survive a cancelled listener so that its subscription, its
-///`currentData` and the ability to publish on a later `send` stay alive.
-///The internal handler forwards to the user handler when one is set.
-class EventNodeNatsImpl<T> implements EventNode<T> {
+///The node is a [KeepAliveNode]: the core must not remove it while it owns a
+///NATS subscription, even after its last listener unsubscribes.
+class EventNodeNatsImpl<T> implements EventNode<T>, KeepAliveNode {
   EventNodeNatsImpl({
     required this.connection,
     required this.subjects,
     required this.originId,
     required this.topic,
     T? currentData,
-    Handler<T>? handler,
     this.serializer,
     this.deserializer,
     this.onError,
   }) {
-    _userHandler = handler;
-    _local = EventNodeImp<T>(currentData: currentData, handler: _bridge);
+    _local = EventNodeImp<T>(currentData: currentData);
     if (deserializer != null) {
       _subscription = connection.subscribe(
         subjects.toSubject(topic, subscription: true),
@@ -71,15 +67,8 @@ class EventNodeNatsImpl<T> implements EventNode<T> {
   ///Receives errors that cannot be returned to a sender.
   final NatsNodeErrorHandler? onError;
 
-  Handler<T>? _userHandler;
   late final EventNodeImp<T> _local;
   NatsSubscription? _subscription;
-
-  ///The handler that pins the node and forwards to the user handler.
-  Future<dynamic> _bridge(EventDTO<T> dto, T? lastData) async {
-    var handler = _userHandler;
-    return handler == null ? null : await handler(dto, lastData);
-  }
 
   @override
   T? get currentData => _local.currentData;
@@ -87,27 +76,23 @@ class EventNodeNatsImpl<T> implements EventNode<T> {
   set currentData(T? value) => _local.currentData = value;
 
   @override
-  Handler<T>? get handler => _userHandler;
-  @override
-  set handler(Handler<T>? value) => _userHandler = value;
-
-  @override
   bool get isDisposed => _local.isDisposed;
 
-  ///Always true: the internal bridge handler keeps the node in the bus map.
+  ///The transport owns an incoming subscription, so the core must keep the
+  ///node even when its last listener unsubscribes.
   @override
-  bool get isHaveHandler => true;
+  bool get keepAlive => true;
 
   @override
   StreamController<T> get streamControllerValue => _local.streamControllerValue;
 
   @override
-  void send(EventDTO dto) {
+  void deliver(EventDTO dto) {
     final serializer = this.serializer;
     if (serializer != null) {
       _publish(dto, serializer);
     }
-    _local.send(dto);
+    _local.deliver(dto);
   }
 
   void _publish(EventDTO dto, EventDTOSerialization serializer) {
@@ -181,7 +166,7 @@ class EventNodeNatsImpl<T> implements EventNode<T> {
     }
 
     // Local delivery only: an incoming event must not be published again.
-    _local.send(dto);
+    _local.deliver(dto);
   }
 
   void _report(Object error, StackTrace? stackTrace) {

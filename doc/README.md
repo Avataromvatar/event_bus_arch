@@ -51,15 +51,16 @@ What you need to know right away:
 3. **`request` is a sync point:** by the time `await bus.request(...)` returns, listeners have
    already received the value, and a handler error arrives as an exception from `await`
    ([07-caveats.md, items 3 and 4](07-caveats.md#3-delivery-to-listeners-is-asynchronous)).
-   `fire` does not wait: it delivers to listeners and returns whether anyone is listening.
-   Wildcard paths are rejected by `request`.
+   `fire` does not wait: it delivers to listeners and returns whether the event
+   was accepted. A request handler is a responder for `request`; `fire` does not
+   invoke it. Wildcard paths are rejected by `request`.
 4. **`Scope.undo()` needs a history of at least two calls** (`maxLenForUndo >= 2`,
    by default 10).
 
 ## Package status
 
 * Version: 3.0.0, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
-* Tests: 116 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO) —
+* Tests: 119 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO) —
   they pass. The NATS transport has its own suite in `packages/event_bus_nats/test`.
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
   (FSM), `example/event_bus_layers_example.dart` (layers),

@@ -165,10 +165,10 @@ bus.errors;               // stream of asynchronous transport/node errors
 - The bus writes `X-EventBus-Origin` on every publish and drops messages with
   its own origin, so a node that both publishes and subscribes does not receive
   its own event twice. Local listeners still receive it from the local fire.
-- A node is pinned in the bus map by an internal handler: cancelling the last
-  local listener does not unsubscribe while the bus is alive. `dispose` of the
-  bus cancels every subscription. Because of the internal handler,
-  `haveHandler` returns true for every NATS node.
+- A node is a `KeepAliveNode`: cancelling the last local listener does not
+  unsubscribe while the bus is alive. `dispose` of the bus cancels every
+  subscription. `haveHandler` reflects request handlers registered on the bus;
+  a transport subscription alone does not make the node a request responder.
 
 ## Errors
 

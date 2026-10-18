@@ -101,8 +101,11 @@ final bus = EventBusImpl(false)..defaultTopicPathSeparator = '/';
 |---|---|---|
 | Creates a node when sending to an unknown topic | no | yes |
 | Keeps `lastData` after the last listener unsubscribes | no | yes |
-| `fire` to a topic nobody handles | returns `false`, event goes to `allEventStream` with flag `false` | returns `true`, node is created |
+| `fire` to a topic with no node | returns `false`, event goes to `allEventStream` with flag `false` | returns `true`, node is created |
 | `request` without a handler | throws `NoHandlerException` | creates a node, then throws `NoHandlerException` |
+
+A handler registered with `setHandler` is a request responder: `request` invokes it, while
+`fire` only notifies listeners.
 
 Use the model bus when the bus is a store of current state, and the common bus when it is a
 message pipe.

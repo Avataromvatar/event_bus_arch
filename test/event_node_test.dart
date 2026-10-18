@@ -175,6 +175,52 @@ void main() {
     });
   });
 
+  group('EventNode: handlers are request-only', () {
+    test('fire does not invoke a request handler', () async {
+      final bus = EventBus();
+      var called = false;
+      bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+        called = true;
+      });
+
+      expect(bus.fire<String>('x'), isTrue);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(called, isFalse);
+      await bus.dispose();
+    });
+
+    test('removeHandler keeps the node listeners', () async {
+      final bus = EventBus();
+      final received = <String>[];
+      final subscription = bus.subscribe<String>(onData: received.add);
+      bus.handlers.setHandler<String>(handler: (dto, lastData) async {});
+      bus.handlers.removeHandler<String>();
+
+      expect(bus.haveHandler<String>(), isFalse);
+      expect(bus.haveListener<String>(), isTrue);
+      expect(bus.fire<String>('x'), isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect(received, ['x']);
+
+      await subscription.cancel();
+      await bus.dispose();
+    });
+
+    test('a registered handler keeps its node alive after listeners cancel',
+        () async {
+      final bus = EventBus();
+      final subscription = bus.subscribe<String>(onData: (_) {});
+      bus.handlers.setHandler<String>(handler: (dto, lastData) async => 'ok');
+
+      await subscription.cancel();
+
+      expect(bus.haveHandler<String>(), isTrue);
+      expect(await bus.request<String>('x'), 'ok');
+      await bus.dispose();
+    });
+  });
+
   group('EventNode: request validation', () {
     test('request rejects wildcard paths', () async {
       final bus = EventBus();

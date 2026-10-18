@@ -122,11 +122,7 @@ class EventBusNats extends EventBusImpl {
       _serializerFor(topic) != null || _deserializerFor(topic) != null;
 
   @override
-  EventNode<T> createNode<T>({
-    required Topic topic,
-    T? currentData,
-    Handler<T>? handler,
-  }) {
+  EventNode<T> createNode<T>({required Topic topic, T? currentData}) {
     final deserializer = _deserializerFor(topic);
     if (deserializer != null) {
       // The node subscribes when it is created; reject an invalid pattern
@@ -140,7 +136,6 @@ class EventBusNats extends EventBusImpl {
       onError: (error, stackTrace) => _reportError(error, stackTrace),
       topic: topic,
       currentData: currentData,
-      handler: handler,
       serializer: _serializerFor(topic),
       deserializer: deserializer,
     );

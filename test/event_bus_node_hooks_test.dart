@@ -13,11 +13,9 @@ class HookedBus extends EventBusImpl {
   EventNode<T> createNode<T>({
     required Topic topic,
     T? currentData,
-    Handler<T>? handler,
   }) {
     createdTopics.add(topic);
-    return super.createNode<T>(
-        topic: topic, currentData: currentData, handler: handler);
+    return super.createNode<T>(topic: topic, currentData: currentData);
   }
 
   @override

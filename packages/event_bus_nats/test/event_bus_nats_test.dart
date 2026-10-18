@@ -215,7 +215,7 @@ void main() {
     expect(connection.subscribedSubjects, ['int.sensor.temp']);
 
     await subscription.cancel();
-    // The node is pinned by its internal handler, so the subscription stays.
+    // The node is pinned by the transport, so the subscription stays.
     expect(connection.subscribedSubjects, ['int.sensor.temp']);
 
     await bus.dispose();

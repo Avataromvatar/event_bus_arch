@@ -83,13 +83,32 @@ class FakeNatsConnection implements NatsConnection {
     return _FakeSubscription(registration);
   }
 
-  ///Delivers [message] to every active subscription with the same subject.
+  ///Delivers [message] to every active subscription whose subject pattern
+  ///matches.
   void deliver(NatsMessage message) {
     for (final registration in List.of(_registrations)) {
-      if (!registration.cancelled && registration.subject == message.subject) {
+      if (!registration.cancelled &&
+          _matches(registration.subject, message.subject)) {
         registration.onMessage(message);
       }
     }
+  }
+
+  static bool _matches(String pattern, String subject) {
+    final patternTokens = pattern.split('.');
+    final subjectTokens = subject.split('.');
+    var index = 0;
+    for (; index < patternTokens.length; index++) {
+      final token = patternTokens[index];
+      if (token == '>') {
+        return index == patternTokens.length - 1 &&
+            index < subjectTokens.length;
+      }
+      if (index >= subjectTokens.length) return false;
+      if (token == '*') continue;
+      if (token != subjectTokens[index]) return false;
+    }
+    return index == subjectTokens.length;
   }
 
   ///The subjects of all subscriptions that have not been cancelled.

@@ -39,3 +39,25 @@ class NatsSubjectException extends EventBusNatsException {
   ///The topic or subject that failed validation, when known.
   final String? subject;
 }
+
+///A serializer failed to encode an outgoing event.
+class NatsSerializationException extends EventBusNatsException {
+  NatsSerializationException(super.message, {this.subject, this.cause});
+
+  ///The topic being serialized, when known.
+  final String? subject;
+
+  ///The error the serializer threw.
+  final Object? cause;
+}
+
+///A payload from the server could not be turned into a local event.
+class NatsDeserializationException extends EventBusNatsException {
+  NatsDeserializationException(super.message, {this.subject, this.cause});
+
+  ///The wire subject being decoded, when known.
+  final String? subject;
+
+  ///The error the deserializer threw, when any.
+  final Object? cause;
+}

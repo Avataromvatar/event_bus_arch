@@ -19,6 +19,8 @@ Future<void> main() async {
     },
   );
 
+  await bus.waitConnected(timeout: const Duration(seconds: 5));
+
   final subscription = bus.subscribe<int>(
     paths: ['sensor', 'temp'],
     onData: print,

@@ -66,6 +66,9 @@ class EventBusNats extends EventBusImpl {
           pingInterval: pingInterval,
           originId: _originId,
         );
+    _connectionErrorsSubscription = _connection.errors.listen(
+      (error) => _reportError(error),
+    );
     unawaited(_connection.start());
   }
 
@@ -78,6 +81,8 @@ class EventBusNats extends EventBusImpl {
   late final NatsRegistryIndex<EventDTODeserialization> _deserializerIndex;
 
   late final NatsConnection _connection;
+  StreamSubscription<Object>? _connectionErrorsSubscription;
+  final _errorController = StreamController<Object>.broadcast();
   Future<void>? _disposeFuture;
 
   ///The topic-to-subject mapper used by this bus.
@@ -95,8 +100,8 @@ class EventBusNats extends EventBusImpl {
   ///Connection state changes.
   Stream<NatsConnectionStatus> get connectionStatus => _connection.statusStream;
 
-  ///Asynchronous transport errors.
-  Stream<Object> get errors => _connection.errors;
+  ///Asynchronous transport and node errors.
+  Stream<Object> get errors => _errorController.stream;
 
   ///The identity this bus writes into the origin header.
   String get originId => _originId;
@@ -129,6 +134,10 @@ class EventBusNats extends EventBusImpl {
       _subjects.validateSubscribe(topic);
     }
     return EventNodeNatsImpl<T>(
+      connection: _connection,
+      subjects: _subjects,
+      originId: _originId,
+      onError: (error, stackTrace) => _reportError(error, stackTrace),
       topic: topic,
       currentData: currentData,
       handler: handler,
@@ -151,7 +160,19 @@ class EventBusNats extends EventBusImpl {
 
   Future<void> _disposeImpl() async {
     await super.dispose();
-    await _connection.close();
+    await _connectionErrorsSubscription?.cancel();
+    _connectionErrorsSubscription = null;
+    try {
+      await _connection.close();
+    } finally {
+      await _errorController.close();
+    }
+  }
+
+  void _reportError(Object error, [StackTrace? stackTrace]) {
+    if (!_errorController.isClosed) {
+      _errorController.add(error);
+    }
   }
 
   static String _newOriginId() {

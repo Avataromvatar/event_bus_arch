@@ -17,6 +17,11 @@ The package is under development; the API is not stable yet.
 
 ## Status
 
-The core hooks, the connection adapter (reconnect with backoff, headers,
-self-echo filtering) and the topic-to-subject mapper with registry resolution
-are in place. The publish/subscribe wiring inside the node is the next step.
+The transport is functional: topics map to NATS subjects (with an optional
+prefix and type tags), serializers publish, deserializers subscribe (wildcards
+included), `arguments` travel in headers, the bus reconnects with backoff and
+filters its own echo. While the server is unavailable, `send` on a transport
+topic throws instead of silently buffering.
+
+Still missing before a stable release: full documentation, remote request/reply
+(the `completer` over NATS) and at-least-once delivery (JetStream).

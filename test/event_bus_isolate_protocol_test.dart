@@ -61,6 +61,18 @@ void pathWorker(EventBus bus, Object? initialData) {
       });
 }
 
+///A request responder registered on a wildcard path.
+void patternHandlerWorker(EventBus bus, Object? initialData) {
+  bus.handlers.setHandler<int>(
+      paths: ['sensor', '*'], handler: (dto, lastData) async => dto.data * 2);
+}
+
+///A pattern listener that echoes events back to main.
+void patternEchoWorker(EventBus bus, Object? initialData) {
+  bus.subscribe<String>(
+      paths: ['*'], onData: (e) => bus.fire<String>('echo: $e'));
+}
+
 Future<void> failingLayerInit(Layer layer, Object? initialData) async {
   throw StateError('layer init failed');
 }
@@ -237,6 +249,30 @@ void main() {
             paths: ['other']).timeout(const Duration(seconds: 5)),
         throwsA(isA<NoHandlerException>()),
       );
+      await iso.dispose();
+    });
+  });
+
+  group('EventBusIsolate: wildcards', () {
+    test('a request is answered by a pattern handler in the worker', () async {
+      final iso = EventBusIsolate(onInit: patternHandlerWorker);
+      await iso.waitInit;
+
+      expect(await iso.request<int>(21, paths: ['sensor', 'temp']), 42);
+      await iso.dispose();
+    });
+
+    test('a fire event reaches a pattern listener in the worker', () async {
+      final iso = EventBusIsolate(onInit: patternEchoWorker);
+      await iso.waitInit;
+      final received = <String>[];
+      final sub = iso.subscribe<String>(onData: received.add);
+
+      iso.fire<String>('hi', paths: ['x']);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      expect(received, ['echo: hi']);
+      await sub.cancel();
       await iso.dispose();
     });
   });

@@ -83,7 +83,9 @@ Registry keys are local topics without the prefix. Resolution is deterministic:
 The most specific pattern has the most literal tokens; ties keep the insertion
 order of the registry. Patterns are used only for deserializers. A topic that
 contains wildcards is resolved by exact/type only, because matching a pattern
-against a pattern is ambiguous.
+against a pattern is ambiguous. Pattern matching and specificity come from the
+core `TopicPattern`; the transport only maps the symbols to the broker's
+grammar.
 
 A topic is published only when a serializer resolves for it, and a node
 subscribes only when a deserializer resolves.

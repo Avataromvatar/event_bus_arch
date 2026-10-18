@@ -118,15 +118,14 @@ Registry keys are local topics. Resolution order:
 
 A node is created lazily by `listen<T>`, `setHandler<T>` or `fire<T>`/`request<T>`. `fire`
 creates a node only for a topic present in one of the registries; for any other
-topic it keeps local bus semantics and returns `null` when no node exists.
+topic it keeps local bus semantics and returns `false` when no node exists.
 
 ### Wildcards
 
-Subscriptions and deserializer keys may use NATS wildcards:
-
-- `*` matches exactly one token: `int.sensor.*.value`;
-- `>` matches one or more trailing tokens and must be the last token:
-  `int.sensor.>`.
+Wildcard semantics are defined by the core `TopicPattern`: `*` matches exactly
+one path token, `>` matches one or more trailing tokens and must be last. NATS
+uses the same symbols. `fire` and `request` calls themselves must address a
+concrete topic; a request may be answered by a handler registered on a pattern.
 
 Wildcards are rejected in publish subjects and serializer keys. The server
 delivers a concrete subject (`int.sensor.humidity`), and the node passes that

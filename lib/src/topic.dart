@@ -114,3 +114,60 @@ class TopicImpl implements Topic {
   @override
   int get hashCode => Object.hashAll([topic]);
 }
+
+///Canonical wildcard rules for local topics.
+///
+///`*` matches exactly one path token. `>` matches one or more trailing path
+///tokens and must be the last token. Wildcards are only allowed as whole path
+///tokens; the type token is always concrete.
+abstract final class TopicPattern {
+  static const String single = '*';
+  static const String tail = '>';
+
+  ///Whether [topic] contains wildcard characters in its paths.
+  static bool isPattern(Topic topic) =>
+      topic.paths.any((path) => path.contains(single) || path.contains(tail));
+
+  ///Validates a pattern topic; a mixed token such as `a*` is rejected.
+  static void validate(Topic topic) {
+    for (var i = 0; i < topic.paths.length; i++) {
+      final token = topic.paths[i];
+      if (token == tail) {
+        if (i != topic.paths.length - 1) {
+          throw EventBusException(
+              'the ">" wildcard must be the last path token');
+        }
+        continue;
+      }
+      if (token == single) continue;
+      if (token.contains(single) || token.contains(tail)) {
+        throw EventBusException(
+            'a wildcard must be a whole path token: "$token"');
+      }
+    }
+  }
+
+  ///Whether [pattern] matches the concrete [topic].
+  static bool matches(Topic pattern, Topic topic) {
+    if (pattern.type != topic.type) return false;
+    if (isPattern(topic)) return false;
+
+    final patternPaths = pattern.paths;
+    final topicPaths = topic.paths;
+    var index = 0;
+    for (; index < patternPaths.length; index++) {
+      final token = patternPaths[index];
+      if (token == tail) {
+        return index == patternPaths.length - 1 && index < topicPaths.length;
+      }
+      if (index >= topicPaths.length) return false;
+      if (token == single) continue;
+      if (token != topicPaths[index]) return false;
+    }
+    return index == topicPaths.length;
+  }
+
+  ///The number of literal tokens in [pattern]; more specific patterns win.
+  static int specificity(Topic pattern) =>
+      pattern.paths.where((token) => token != single && token != tail).length;
+}

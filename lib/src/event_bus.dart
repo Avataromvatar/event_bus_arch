@@ -208,8 +208,11 @@ mixin EventBusMixin implements EventBus {
   @override
   Stream<(EventDTO, bool)> get allEventStream => _allEventStream.stream;
 
-  /// Map storing all event nodes by their topic
+  /// Map storing exact event nodes by their topic
   final Map<Topic, EventNode> _eventsMap = {};
+
+  /// Map storing wildcard pattern nodes ('*', '>') by their topic
+  final Map<Topic, EventNode> _patternMap = {};
 
   bool _disposed = false;
   Future<void>? _disposeFuture;
@@ -265,26 +268,30 @@ mixin EventBusMixin implements EventBus {
   T? currentData<T>({List<String>? paths, String? separator}) {
     var t = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    var node = _eventsMap[t];
-    if (node != null && node is EventNode<T>) {
-      // if (node.currentData is T) {
-      return node.currentData;
-      // } else {
-      //   throw Exception('EventBus storage node($t) with broken data ');
-      // }
+    final pattern = TopicPattern.isPattern(t);
+    if (pattern) {
+      TopicPattern.validate(t);
     }
-
+    var node = pattern ? _patternMap[t] : _eventsMap[t];
+    if (node != null && node is EventNode<T>) {
+      return node.currentData;
+    }
     return null;
   }
 
   /// Returns the node of a topic, creating it when needed.
   EventNode<T> _nodeFor<T>(Topic topic) {
-    var node = _eventsMap[topic];
+    final pattern = TopicPattern.isPattern(topic);
+    if (pattern) {
+      TopicPattern.validate(topic);
+    }
+    final map = pattern ? _patternMap : _eventsMap;
+    var node = map[topic];
     if (node != null && node is EventNode<T>) {
       return node;
     }
     var created = createNode<T>(topic: topic);
-    _eventsMap[topic] = created;
+    map[topic] = created;
     return created;
   }
 
@@ -328,21 +335,59 @@ mixin EventBusMixin implements EventBus {
       String? separator,
       Map<String, String>? arguments}) {
     _checkNotDisposed();
+    _rejectWildcardPaths(paths, 'fire');
     var dto = EventDTO<T>(data,
         paths: paths,
         // the same fallback as setHandler/listen/currentData: otherwise a send
         // would address a node nobody else can address
         separator: separator ?? defaultTopicPathSeparator,
         arguments: arguments);
-    var node = _sendNode<T>(dto.topic);
-    if (node == null) {
-      _addAllEvent(dto, false);
-      return false;
-    }
-    node.deliver(dto);
-    _addAllEvent(dto, true);
-    return true;
+    // A model or transport bus may create the exact node for this topic.
+    _sendNode<T>(dto.topic);
+    final matched = _dispatchToListeners(dto);
+    _addAllEvent(dto, matched);
+    return matched;
   }
+
+  ///Delivers to the exact node and to every matching pattern node.
+  bool _dispatchToListeners(EventDTO dto) {
+    var matched = false;
+    final exact = _eventsMap[dto.topic];
+    if (exact != null) {
+      exact.deliver(dto);
+      matched = true;
+    }
+    for (final entry in _matchingPatternEntries(dto.topic)) {
+      entry.value.deliver(dto);
+      matched = true;
+    }
+    return matched;
+  }
+
+  ///Pattern nodes matching a concrete topic, most specific first.
+  List<MapEntry<Topic, EventNode>> _matchingPatternEntries(Topic topic) {
+    if (TopicPattern.isPattern(topic)) return const [];
+    final insertion = <Topic, int>{};
+    final matches = <MapEntry<Topic, EventNode>>[];
+    var index = 0;
+    for (final entry in _patternMap.entries) {
+      insertion[entry.key] = index++;
+      if (TopicPattern.matches(entry.key, topic)) {
+        matches.add(entry);
+      }
+    }
+    matches.sort((a, b) {
+      final byScore = TopicPattern.specificity(b.key)
+          .compareTo(TopicPattern.specificity(a.key));
+      if (byScore != 0) return byScore;
+      return insertion[a.key]!.compareTo(insertion[b.key]!);
+    });
+    return matches;
+  }
+
+  ///The node stored for a concrete or pattern topic, without creating one.
+  EventNode? _nodeByTopic(Topic topic) =>
+      TopicPattern.isPattern(topic) ? _patternMap[topic] : _eventsMap[topic];
 
   ///The node an event is sent to, created when the bus allows it.
   EventNode<T>? _sendNode<T>(Topic topic) {
@@ -367,12 +412,15 @@ mixin EventBusMixin implements EventBus {
         !pinned) {
       unawaited(node.dispose());
       _eventsMap.remove(topic);
+      _patternMap.remove(topic);
       return true;
     }
     return false;
   }
 
   /// Checks if the bus contains a listener for the specified topic.
+  ///
+  ///For a concrete topic a matching pattern listener also counts.
   @override
   bool haveListener<T>({
     List<String>? paths,
@@ -380,8 +428,14 @@ mixin EventBusMixin implements EventBus {
   }) {
     var t = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    var node = _eventsMap[t];
-    return node?.streamControllerValue.hasListener ?? false;
+    if (TopicPattern.isPattern(t)) {
+      TopicPattern.validate(t);
+      return _patternMap[t]?.streamControllerValue.hasListener ?? false;
+    }
+    final exact = _eventsMap[t];
+    if (exact?.streamControllerValue.hasListener ?? false) return true;
+    return _matchingPatternEntries(t)
+        .any((entry) => entry.value.streamControllerValue.hasListener);
   }
 
   /// Closes the all-events stream and every node of the bus.
@@ -392,8 +446,9 @@ mixin EventBusMixin implements EventBus {
   Future<void> _disposeImpl() async {
     _disposed = true;
     await _allEventStream.close();
-    var nodes = _eventsMap.values.toList(growable: false);
+    var nodes = [..._eventsMap.values, ..._patternMap.values];
     _eventsMap.clear();
+    _patternMap.clear();
     await Future.wait(nodes.map((e) => e.dispose()));
   }
 }
@@ -442,7 +497,7 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
     final topic = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
     _requestHandlers.remove(topic);
-    final node = _eventsMap[topic];
+    final node = _nodeByTopic(topic);
     if (node != null) {
       removeNode(topic, node);
     }
@@ -452,7 +507,33 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
   bool haveHandler<T>({List<String>? paths, String? separator}) {
     final topic = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    return _requestHandlers.containsKey(topic);
+    if (TopicPattern.isPattern(topic)) {
+      TopicPattern.validate(topic);
+      return _requestHandlers.containsKey(topic);
+    }
+    return _resolveHandler(topic) != null;
+  }
+
+  ///The exact handler for [topic], or the most specific pattern handler that
+  ///matches it. A pattern topic is resolved by the exact key only.
+  RequestHandler? _resolveHandler(Topic topic) {
+    final exact = _requestHandlers[topic];
+    if (exact != null) return exact;
+    if (TopicPattern.isPattern(topic)) return null;
+
+    RequestHandler? best;
+    var bestScore = -1;
+    for (final entry in _requestHandlers.entries) {
+      final pattern = entry.key;
+      if (!TopicPattern.isPattern(pattern)) continue;
+      if (!TopicPattern.matches(pattern, topic)) continue;
+      final score = TopicPattern.specificity(pattern);
+      if (score > bestScore) {
+        best = entry.value;
+        bestScore = score;
+      }
+    }
+    return best;
   }
 
   @override
@@ -462,21 +543,21 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
       Map<String, String>? arguments,
       Duration? timeout}) async {
     _checkNotDisposed();
-    _rejectRequestWildcards(paths);
+    _rejectWildcardPaths(paths, 'request');
     final topic = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    final registration = _requestHandlers[topic];
+    final registration = _resolveHandler(topic);
     if (registration == null || !registration.accepts(data)) {
       _addAllEvent(
           EventDTO<T>(data, topic: topic, arguments: arguments), false);
       throw NoHandlerException(topic.topic);
     }
 
-    final node = _nodeFor<T>(topic);
-    final previous = node.currentData;
+    final handlerNode = _nodeByTopic(registration.topic);
+    final previous = handlerNode?.currentData;
     final dto = EventDTO<T>(data, topic: topic, arguments: arguments);
-    node.deliver(dto);
-    _addAllEvent(dto, true);
+    final matched = _dispatchToListeners(dto);
+    _addAllEvent(dto, matched);
 
     final future = _invoke(registration, dto, previous);
     return timeout == null ? await future : await future.timeout(timeout);
@@ -494,28 +575,22 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
   ///A request needs a registered handler; a fire event is delivered to
   ///listeners only.
   Future? _dispatchIncoming(EventDTO dto, {bool request = true}) {
-    final node = _eventsMap[dto.topic];
     if (!request) {
-      if (node != null) {
-        node.deliver(dto);
-        _addAllEvent(dto, true);
-      } else {
-        _addAllEvent(dto, false);
-      }
+      final matched = _dispatchToListeners(dto);
+      _addAllEvent(dto, matched);
       return null;
     }
 
-    final registration = _requestHandlers[dto.topic];
-    if (node == null ||
-        registration == null ||
-        !registration.accepts(dto.data)) {
+    final registration = _resolveHandler(dto.topic);
+    if (registration == null || !registration.accepts(dto.data)) {
       _addAllEvent(dto, false);
       throw NoHandlerException(dto.topic.topic);
     }
 
-    final previous = node.currentData;
-    node.deliver(dto);
-    _addAllEvent(dto, true);
+    final handlerNode = _nodeByTopic(registration.topic);
+    final previous = handlerNode?.currentData;
+    final matched = _dispatchToListeners(dto);
+    _addAllEvent(dto, matched);
     return _invoke(registration, dto, previous);
   }
 
@@ -528,13 +603,18 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
       }
     }
     if (fromBus is EventBusMixin) {
-      for (final entry in fromBus._eventsMap.entries) {
-        final replaced = _eventsMap[entry.key];
-        if (replaced != null && !identical(replaced, entry.value)) {
-          unawaited(replaced.dispose());
+      void copyInto(Map<Topic, EventNode> from, Map<Topic, EventNode> to) {
+        for (final entry in from.entries) {
+          final replaced = to[entry.key];
+          if (replaced != null && !identical(replaced, entry.value)) {
+            unawaited(replaced.dispose());
+          }
+          to[entry.key] = entry.value.copy();
         }
-        _eventsMap[entry.key] = entry.value.copy();
       }
+
+      copyInto(fromBus._eventsMap, _eventsMap);
+      copyInto(fromBus._patternMap, _patternMap);
     }
   }
 
@@ -544,7 +624,7 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
     if (otherBus is EventBusHandlersMixin) {
       for (final topic in otherBus._requestHandlers.keys) {
         _requestHandlers.remove(topic);
-        final node = _eventsMap[topic];
+        final node = _nodeByTopic(topic);
         if (node != null) {
           removeNode(topic, node);
         }
@@ -553,13 +633,14 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
   }
 }
 
-///A request must address one concrete topic: wildcards are not allowed.
-void _rejectRequestWildcards(List<String>? paths) {
+///A fire or request must address one concrete topic: wildcards are not
+///allowed in the call itself.
+void _rejectWildcardPaths(List<String>? paths, String operation) {
   if (paths == null) return;
   for (final path in paths) {
     if (path.contains('*') || path.contains('>')) {
       throw EventBusException(
-          'request does not support wildcard paths ("$path")');
+          '$operation does not support wildcard paths ("$path")');
     }
   }
 }

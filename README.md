@@ -95,6 +95,29 @@ or change the fallback for a whole bus:
 final bus = EventBusImpl(false)..defaultTopicPathSeparator = '/';
 ```
 
+### Wildcards
+
+`listen`, `subscribe` and `setHandler` accept wildcard path tokens:
+
+- `*` matches exactly one path token: `int.sensor.*`;
+- `>` matches one or more trailing tokens and must be the last token:
+  `int.sensor.>`.
+
+```dart
+bus.subscribe<int>(paths: ['sensor', '*'], onData: (value) => print(value));
+bus.fire<int>(21, paths: ['sensor', 'temp']);     // delivered to the pattern
+
+bus.handlers.setHandler<int>(paths: ['sensor', '*'],
+    handler: (dto, lastData) async => dto.data * 2);
+await bus.request<int>(21, paths: ['sensor', 'temp']);   // 42
+```
+
+A `fire` or `request` call itself must name a concrete topic: wildcard paths
+throw. A request may be answered by a handler registered on a pattern (exact
+handler first, then the most specific pattern). `fire` delivers to the exact
+node and to every matching pattern node. `currentData(pattern)` returns the
+last matching value; `currentData(concrete)` reads only the exact node.
+
 ### Model bus vs common bus
 
 | | `EventBus()` | `EventBus(isModelBus: true)` |

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_nats/event_bus_nats.dart';
 
 ///One publish captured by [FakeNatsConnection].
@@ -86,29 +87,14 @@ class FakeNatsConnection implements NatsConnection {
   ///Delivers [message] to every active subscription whose subject pattern
   ///matches.
   void deliver(NatsMessage message) {
+    final topic = Topic.fromString(message.subject);
     for (final registration in List.of(_registrations)) {
-      if (!registration.cancelled &&
-          _matches(registration.subject, message.subject)) {
+      if (registration.cancelled) continue;
+      final pattern = Topic.fromString(registration.subject);
+      if (TopicPattern.matches(pattern, topic)) {
         registration.onMessage(message);
       }
     }
-  }
-
-  static bool _matches(String pattern, String subject) {
-    final patternTokens = pattern.split('.');
-    final subjectTokens = subject.split('.');
-    var index = 0;
-    for (; index < patternTokens.length; index++) {
-      final token = patternTokens[index];
-      if (token == '>') {
-        return index == patternTokens.length - 1 &&
-            index < subjectTokens.length;
-      }
-      if (index >= subjectTokens.length) return false;
-      if (token == '*') continue;
-      if (token != subjectTokens[index]) return false;
-    }
-    return index == subjectTokens.length;
   }
 
   ///The subjects of all subscriptions that have not been cancelled.

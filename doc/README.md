@@ -56,12 +56,14 @@ What you need to know right away:
    invoke it. Wildcard paths are rejected by `request`.
 4. **`Scope.undo()` needs a history of at least two calls** (`maxLenForUndo >= 2`,
    by default 10).
+5. **Wildcards are local.** `*` matches one path token, `>` one or more trailing tokens.
+   `fire`/`request` calls must be concrete; a pattern handler can answer a concrete request.
 
 ## Package status
 
 * Version: 3.0.0, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
-* Tests: 117 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO) —
-  they pass. The NATS transport has its own suite in `packages/event_bus_nats/test`.
+* Tests: 131 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO,
+  wildcards) — they pass. The NATS transport has its own suite in `packages/event_bus_nats/test`.
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
   (FSM), `example/event_bus_layers_example.dart` (layers),
   `packages/event_bus_nats/example/event_bus_nats_example.dart` (NATS).

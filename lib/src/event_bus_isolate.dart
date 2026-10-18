@@ -245,6 +245,7 @@ class EventBusIsolate extends EventBusImpl {
       throw StateError(
           'EventBusIsolate is not initialized: await waitInit before fire');
     }
+    _rejectWildcardPaths(paths, 'fire');
     var dto = EventDTO<T>(data,
         paths: paths, arguments: arguments, separator: separator);
     return _link.fire(dto);
@@ -263,7 +264,7 @@ class EventBusIsolate extends EventBusImpl {
       throw StateError(
           'EventBusIsolate is not initialized: await waitInit before request');
     }
-    _rejectRequestWildcards(paths);
+    _rejectWildcardPaths(paths, 'request');
     var dto = EventDTO<T>(data,
         paths: paths, arguments: arguments, separator: separator);
     final future = _link.request(dto);
@@ -394,6 +395,7 @@ class _EventBusForIsolate extends EventBusImpl {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
+    _rejectWildcardPaths(paths, 'fire');
     var dto = EventDTO<T>(data,
         paths: paths, arguments: arguments, separator: separator);
     return _link.fire(dto);
@@ -408,7 +410,7 @@ class _EventBusForIsolate extends EventBusImpl {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
-    _rejectRequestWildcards(paths);
+    _rejectWildcardPaths(paths, 'request');
     var dto = EventDTO<T>(data,
         paths: paths, arguments: arguments, separator: separator);
     final future = _link.request(dto);

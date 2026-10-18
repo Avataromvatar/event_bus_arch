@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:math';
 
-import 'package:dart_nats/dart_nats.dart' as nats;
 import 'package:event_bus_arch/event_bus_arch.dart';
 
+import 'dart_nats_connection.dart';
 import 'event_node_nats.dart';
+import 'nats_connection.dart';
+import 'nats_reconnect_policy.dart';
 import 'nats_serialization.dart';
 
 ///A bus that mirrors its topics to a NATS server.
@@ -19,42 +22,73 @@ import 'nats_serialization.dart';
 ///typed node from a registry key alone, so a topic becomes active when the
 ///application uses it.
 class EventBusNats extends EventBusImpl {
+  ///[connection] replaces the default [DartNatsConnection]; when it is given,
+  ///[server], [options], [reconnect] and [pingInterval] are ignored. The
+  ///injected connection must use the same origin id as [originId] to filter
+  ///the bus's own echo.
   EventBusNats(
     Uri server, {
     Map<String, EventDTOSerialization>? serializers,
     Map<String, EventDTODeserialization>? deserializers,
-    nats.ConnectOption? connectOption,
+    NatsConnectionOptions options = const NatsConnectionOptions(),
+    NatsReconnectPolicy reconnect = const NatsReconnectPolicy(),
     Duration pingInterval = const Duration(seconds: 5),
+    String? originId,
+    NatsConnection? connection,
   }) : _serializers = Map<String, EventDTOSerialization>.unmodifiable(
          serializers ?? {},
        ),
        _deserializers = Map<String, EventDTODeserialization>.unmodifiable(
          deserializers ?? {},
        ),
+       _originId = originId ?? _newOriginId(),
        super(false) {
-    _client = nats.Client();
-    _statusSubscription = _client.statusStream.listen(_updateClientStatus);
-    // The constructor cannot await. A failed attempt must not escape as an
-    // unhandled error: callers observe [isConnected] and `send` reports the
-    // unavailable server. The reconnect supervisor is added later.
-    unawaited(
-      _connect(
-        server,
-        connectOption: connectOption,
-        pingInterval: pingInterval,
-      ),
-    );
+    _connection =
+        connection ??
+        DartNatsConnection(
+          server,
+          options: options,
+          reconnect: reconnect,
+          pingInterval: pingInterval,
+          originId: _originId,
+        );
+    unawaited(_connection.start());
   }
 
   final Map<String, EventDTOSerialization> _serializers;
   final Map<String, EventDTODeserialization> _deserializers;
+  final String _originId;
 
-  late final nats.Client _client;
-  late final StreamSubscription<nats.Status> _statusSubscription;
+  late final NatsConnection _connection;
   Future<void>? _disposeFuture;
 
+  ///The low-level connection. Exposed for the node and for tests.
+  NatsConnection get connection => _connection;
+
   ///True while the client has a fully established connection.
-  bool get isConnected => _client.status == nats.Status.connected;
+  bool get isConnected => _connection.isConnected;
+
+  ///The current connection state.
+  NatsConnectionStatus get status => _connection.status;
+
+  ///Connection state changes.
+  Stream<NatsConnectionStatus> get connectionStatus => _connection.statusStream;
+
+  ///Asynchronous transport errors.
+  Stream<Object> get errors => _connection.errors;
+
+  ///The identity this bus writes into the origin header.
+  String get originId => _originId;
+
+  ///Completes when the connection is established. With [timeout], completes
+  ///with a [TimeoutException] when that does not happen in time.
+  Future<void> waitConnected({Duration? timeout}) {
+    if (isConnected) return Future.value();
+    final future = _connection.statusStream
+        .firstWhere((status) => status == NatsConnectionStatus.connected)
+        .then<void>((_) {});
+    return timeout == null ? future : future.timeout(timeout);
+  }
 
   ///Creates a node for a topic that is known to either registry.
   @override
@@ -84,34 +118,17 @@ class EventBusNats extends EventBusImpl {
   EventDTODeserialization? _deserializerFor(Topic topic) =>
       _deserializers[topic.topic] ?? _deserializers[topic.type];
 
-  Future<void> _connect(
-    Uri server, {
-    nats.ConnectOption? connectOption,
-    required Duration pingInterval,
-  }) async {
-    try {
-      await _client.connect(
-        server,
-        connectOption: connectOption,
-        pingInterval: pingInterval,
-        retry: false,
-      );
-    } catch (_) {
-      // Reported through [isConnected]; send() tells the caller.
-    }
-  }
-
-  void _updateClientStatus(nats.Status _) {
-    // Connection state is read through [isConnected]. Reconnect handling
-    // will be added with the connection adapter.
-  }
-
   @override
   Future<void> dispose() => _disposeFuture ??= _disposeImpl();
 
   Future<void> _disposeImpl() async {
     await super.dispose();
-    await _statusSubscription.cancel();
-    await _client.forceClose();
+    await _connection.close();
+  }
+
+  static String _newOriginId() {
+    final time = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+    final salt = Random.secure().nextInt(0x7fffffff).toRadixString(16);
+    return '$time-$salt';
   }
 }

@@ -11,7 +11,7 @@ void main() {
         dto.completer?.complete('ok');
       });
       expect(bus.haveHandler<String>(), true);
-      expect(await bus.send<String>('x'), 'ok');
+      expect(await bus.request<String>('x'), 'ok');
 
       bus.handlers.removeHandler<String>();
       expect(bus.haveHandler<String>(), false);
@@ -39,7 +39,8 @@ void main() {
       final bus = EventBus();
       await bus.dispose();
 
-      await expectLater(bus.send<String>('x'), throwsStateError);
+      expect(() => bus.fire<String>('x'), throwsStateError);
+      await expectLater(bus.request<String>('x'), throwsStateError);
     });
 
     test('listen and setHandler after dispose throw StateError', () async {
@@ -47,7 +48,9 @@ void main() {
       await bus.dispose();
 
       expect(() => bus.listen<String>(), throwsStateError);
-      expect(() => bus.handlers.setHandler<String>(handler: (dto, lastData) async {}),
+      expect(
+          () => bus.handlers
+              .setHandler<String>(handler: (dto, lastData) async {}),
           throwsStateError);
     });
 
@@ -64,25 +67,30 @@ void main() {
   });
 
   group('EventBus: transferring handlers', () {
-    test('nodes are copied: disposing one bus does not break the other', () async {
+    test('nodes are copied: disposing one bus does not break the other',
+        () async {
       final busA = EventBus();
       final busB = EventBus();
-      busB.handlers.setHandler<int>(initialData: 1, handler: (dto, lastData) async {
-        dto.completer?.complete('from B: ${dto.data}');
-      });
+      busB.handlers.setHandler<int>(
+          initialData: 1,
+          handler: (dto, lastData) async {
+            dto.completer?.complete('from B: ${dto.data}');
+          });
 
       busA.handlers.addAllHandlerFromOtherBus(busB);
       expect(busA.haveHandler<int>(), true);
-      expect(await busA.send<int>(2), 'from B: 2');
+      expect(await busA.request<int>(2), 'from B: 2');
 
       await busA.dispose();
 
-      expect(await busB.send<int>(3), 'from B: 3');
+      expect(await busB.request<int>(3), 'from B: 3');
       expect(busB.currentData<int>(), 3);
       await busB.dispose();
     });
 
-    test('removeAllHandlerPresentInOtherBus removes only topics of the other bus', () async {
+    test(
+        'removeAllHandlerPresentInOtherBus removes only topics of the other bus',
+        () async {
       final busA = EventBus();
       final busB = EventBus();
       busB.handlers.setHandler<int>(handler: (dto, lastData) async {});
@@ -99,13 +107,16 @@ void main() {
   });
 
   group('EventBus: handler initial data', () {
-    test('initialData is applied to an already existing node as well', () async {
+    test('initialData is applied to an already existing node as well',
+        () async {
       final bus = EventBus(isModelBus: true);
-      bus.handlers.setHandler<int>(initialData: 1, handler: (dto, lastData) async {});
-      await bus.send<int>(2);
+      bus.handlers
+          .setHandler<int>(initialData: 1, handler: (dto, lastData) async {});
+      await bus.request<int>(2);
       expect(bus.currentData<int>(), 2);
 
-      bus.handlers.setHandler<int>(initialData: 10, handler: (dto, lastData) async {});
+      bus.handlers
+          .setHandler<int>(initialData: 10, handler: (dto, lastData) async {});
 
       expect(bus.currentData<int>(), 10);
       await bus.dispose();
@@ -114,7 +125,9 @@ void main() {
     test('initialData is applied to a topic with paths', () async {
       final bus = EventBus(isModelBus: true);
 
-      bus.handlers.setHandler<int>(initialData: 5, paths: ['counter'],
+      bus.handlers.setHandler<int>(
+          initialData: 5,
+          paths: ['counter'],
           handler: (dto, lastData) async {});
 
       expect(bus.currentData<int>(paths: ['counter']), 5);

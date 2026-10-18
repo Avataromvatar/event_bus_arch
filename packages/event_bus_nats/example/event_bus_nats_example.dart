@@ -41,7 +41,7 @@ Future<void> main() async {
     },
   );
 
-  await publisher.send<int>(21, paths: ['sensor', 'temp']);
+  publisher.fire<int>(21, paths: ['sensor', 'temp']);
 
   await received.future.timeout(const Duration(seconds: 5));
 

@@ -44,24 +44,22 @@ void main() {
       expect(bus.createdTopics.single.topic, 'int.x');
     });
 
-    test('send creates a node when shouldCreateNodeOnSend allows it', () async {
+    test('fire creates a node when shouldCreateNodeOnSend allows it', () async {
       final bus = HookedBus(createOnSend: true);
       addTearDown(bus.dispose);
 
-      var result = await bus.send<String>('v', paths: ['x']);
+      expect(bus.fire<String>('v', paths: ['x']), isTrue);
+      await Future<void>.delayed(Duration.zero);
 
-      expect(result, isNull);
       expect(bus.createdTopics.single.topic, 'String.x');
       expect(bus.currentData<String>(paths: ['x']), 'v');
     });
 
-    test('send does not create a node by default', () async {
+    test('fire does not create a node by default', () {
       final bus = HookedBus();
       addTearDown(bus.dispose);
 
-      var result = await bus.send<String>('v', paths: ['x']);
-
-      expect(result, isNull);
+      expect(bus.fire<String>('v', paths: ['x']), isFalse);
       expect(bus.createdTopics, isEmpty);
       expect(bus.currentData<String>(paths: ['x']), isNull);
     });

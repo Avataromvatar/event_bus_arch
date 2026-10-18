@@ -162,15 +162,31 @@ abstract class EventBus {
   /// Returns true if the bus contains a handler for the specified topic
   bool haveHandler<T>({List<String>? paths, String? separator});
 
-  /// Sends an event to the bus.
-  /// Send can used for request-reply if set handler what call Comliter in EventDTO, when await send() return value in completer
-  /// If a handler exists for the topic, it will be called.
-  /// Returns a Future that completes with the result if EventDTO.completer was called by the handler.
-  Future<dynamic>? send<T>(
+  /// Publishes an event to local listeners and forgets about it.
+  ///
+  /// Handlers registered with [EventBusHandlers.setHandler] are not awaited;
+  /// their result is ignored. Returns true when the event was accepted: there
+  /// is a local node (or the bus created one) or a transport accepted it.
+  /// A false result means nobody is listening and no transport knows the
+  /// topic.
+  bool fire<T>(
     T data, {
     List<String>? paths,
     String? separator,
     Map<String, String>? arguments,
+  });
+
+  /// Sends a request and waits for the result of a handler.
+  ///
+  /// Wildcard paths are not supported: `*` and `>` throw [EventBusException].
+  /// When no handler is registered the returned future fails with
+  /// [NoHandlerException]. Use [fire] when no answer is expected.
+  Future<dynamic> request<T>(
+    T data, {
+    List<String>? paths,
+    String? separator,
+    Map<String, String>? arguments,
+    Duration? timeout,
   });
 
   /// Listens to events on a specific topic.
@@ -351,37 +367,63 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
             cancelOnError: cancelOnError, onDone: onDone, onError: onError);
   }
 
-  /// Sends an event to the bus.
-  /// If a handler exists for the topic, it will be called.
-  /// Returns a Future that completes with the result if EventDTO.completer was called by the handler.
-  /// If no handler exists, returns null.
+  /// Publishes an event to local listeners without waiting for a handler.
   @override
-  Future<dynamic>? send<T>(T data,
+  bool fire<T>(T data,
       {List<String>? paths,
       String? separator,
-      Map<String, String>? arguments}) async {
+      Map<String, String>? arguments}) {
     _checkNotDisposed();
     var dto = EventDTO<T>(data,
         paths: paths,
         // the same fallback as setHandler/listen/currentData: otherwise a send
         // would address a node nobody else can address
         separator: separator ?? defaultTopicPathSeparator,
+        arguments: arguments);
+    var node = _sendNode<T>(dto.topic);
+    if (node == null) {
+      _addAllEvent(dto, false);
+      return false;
+    }
+    node.send(dto);
+    _addAllEvent(dto, true);
+    return true;
+  }
+
+  /// Sends a request and waits for a handler result.
+  @override
+  Future<dynamic> request<T>(T data,
+      {List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments,
+      Duration? timeout}) async {
+    _checkNotDisposed();
+    _rejectRequestWildcards(paths);
+    var dto = EventDTO<T>(data,
+        paths: paths,
+        separator: separator ?? defaultTopicPathSeparator,
         arguments: arguments,
         completer: Completer());
-    var node = _eventsMap[dto.topic];
-    if (node != null && node is EventNode<T>) {
-      node.send(dto);
-      _addAllEvent(dto, true);
-      return dto.completer?.future;
-    } else if (shouldCreateNodeOnSend(dto.topic)) {
-      var created = createNode<T>(topic: dto.topic);
-      _eventsMap[dto.topic] = created;
-      created.send(dto);
-      _addAllEvent(dto, true);
-      return dto.completer?.future;
+    var node = _sendNode<T>(dto.topic);
+    if (node == null || !node.isHaveHandler) {
+      _addAllEvent(dto, false);
+      throw NoHandlerException(dto.topic.topic);
     }
+    node.send(dto);
+    _addAllEvent(dto, true);
+    final future = dto.completer!.future;
+    return timeout == null ? await future : await future.timeout(timeout);
+  }
 
-    _addAllEvent(dto, false);
+  ///The node an event is sent to, created when the bus allows it.
+  EventNode<T>? _sendNode<T>(Topic topic) {
+    var node = _eventsMap[topic];
+    if (node is EventNode<T>) return node;
+    if (shouldCreateNodeOnSend(topic)) {
+      var created = createNode<T>(topic: topic);
+      _eventsMap[topic] = created;
+      return created;
+    }
     return null;
   }
 
@@ -504,5 +546,16 @@ mixin EventBusMixin implements EventBus, EventBusHandlers {
     var nodes = _eventsMap.values.toList(growable: false);
     _eventsMap.clear();
     await Future.wait(nodes.map((e) => e.dispose()));
+  }
+}
+
+///A request must address one concrete topic: wildcards are not allowed.
+void _rejectRequestWildcards(List<String>? paths) {
+  if (paths == null) return;
+  for (final path in paths) {
+    if (path.contains('*') || path.contains('>')) {
+      throw EventBusException(
+          'request does not support wildcard paths ("$path")');
+    }
   }
 }

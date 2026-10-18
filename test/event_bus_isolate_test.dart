@@ -9,10 +9,10 @@ void main() {
           // Empty initialization for testing
         },
       );
-      
+
       expect(isolateBus, isNotNull);
       expect(isolateBus.isInit, isFalse);
-      
+
       // Wait for initialization
       await isolateBus.waitInit;
       expect(isolateBus.isInit, isTrue);
@@ -23,17 +23,16 @@ void main() {
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
           (bus as EventBusHandlers).setHandler<String>(
-            handler: (dto, lastData) async {
-              dto.completer?.complete('Processed: ${dto.data}');
-            }
-          );
+              handler: (dto, lastData) async {
+            dto.completer?.complete('Processed: ${dto.data}');
+          });
         },
       );
-      
+
       await isolateBus.waitInit;
-      
+
       // Send an event and expect a response
-      final result = await isolateBus.send<String>('test message');
+      final result = await isolateBus.request<String>('test message');
       expect(result, 'Processed: test message');
     });
 
@@ -43,12 +42,12 @@ void main() {
           // Empty initialization for testing
         },
       );
-      
+
       await isolateBus.waitInit;
 
       // Dispose the bus
       await isolateBus.dispose();
-      
+
       // The isolate should be disposed
       // Note: We can't directly test the isolate state, but we can ensure no errors occur
       expect(true, isTrue); // Placeholder test
@@ -59,22 +58,21 @@ void main() {
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
           (bus as EventBusHandlers).setHandler<int>(
-            handler: (dto, lastData) async {
-              dto.completer?.complete(dto.data * 2);
-            }
-          );
+              handler: (dto, lastData) async {
+            dto.completer?.complete(dto.data * 2);
+          });
         },
       );
-      
+
       await isolateBus.waitInit;
-      
+
       // Send multiple events
       final results = await Future.wait<dynamic>([
-        isolateBus.send<int>(1),
-        isolateBus.send<int>(2),
-        isolateBus.send<int>(3),
+        isolateBus.request<int>(1),
+        isolateBus.request<int>(2),
+        isolateBus.request<int>(3),
       ]);
-      
+
       expect(results, [2, 4, 6]);
     });
   });

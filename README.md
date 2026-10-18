@@ -13,7 +13,7 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 
 ## Features
 
-- Send and receive events between components (`send` / `listen` / `subscribe`)
+- Send and receive events between components (`fire` / `request` / `listen` / `subscribe`)
 - Handlers that can return a result to the sender (`EventDTO.completer`)
 - Two bus flavours: **common** (`EventBus()`) and **model** (`EventBus(isModelBus: true)`) —
   the model bus keeps the last value per topic even when nobody is listening
@@ -56,10 +56,10 @@ Future<void> main() async {
     dto.completer?.complete('processed: ${dto.data}');
   });
 
-  final result = await bus.send<String>('hello');
+  final result = await bus.request<String>('hello');
   print(result);                 // processed: hello
 
-  // by now the listener has already received the value: send() is a sync point
+  // by now the listener has already received the value: request() is a sync point
   await sub.cancel();
   await bus.dispose();
 }
@@ -77,13 +77,13 @@ OrderPlaced.warehouse.in
 ```
 
 ```dart
-await bus.send<Order>(order, paths: ['warehouse', 'in'], arguments: {'priority': '1'});
+bus.fire<Order>(order, paths: ['warehouse', 'in'], arguments: {'priority': '1'});
 
 bus.subscribe<Order>(paths: ['warehouse', 'in'], onData: (order) => print(order));
 ```
 
 `paths` selects the topic; `arguments` are delivered to the handler as `dto.arguments` but do not
-affect routing. Because the type is part of the address, `send<int>` and a handler
+affect routing. Because the type is part of the address, `request<int>` and a handler
 registered with `setHandler<num>` are **different topics** — always be explicit with type
 arguments.
 
@@ -101,7 +101,8 @@ final bus = EventBusImpl(false)..defaultTopicPathSeparator = '/';
 |---|---|---|
 | Creates a node when sending to an unknown topic | no | yes |
 | Keeps `lastData` after the last listener unsubscribes | no | yes |
-| `send` to a topic nobody handles | resolves with `null`, event goes to `allEventStream` with flag `false` | resolves with `null`, node is created |
+| `fire` to a topic nobody handles | returns `false`, event goes to `allEventStream` with flag `false` | returns `true`, node is created |
+| `request` without a handler | throws `NoHandlerException` | creates a node, then throws `NoHandlerException` |
 
 Use the model bus when the bus is a store of current state, and the common bus when it is a
 message pipe.
@@ -117,7 +118,7 @@ Future<void> main() async {
   await iso.waitInit;                                  // true when onInit has completed
 
   iso.subscribe<String>(onData: (e) => print('from worker: $e'));
-  final doubled = await iso.send<int>(21, arguments: {'multiplier': '2'});
+  final doubled = await iso.request<int>(21, arguments: {'multiplier': '2'});
   print(doubled);                                      // 42
 
   await iso.dispose();
@@ -134,7 +135,7 @@ Future<void> _worker(EventBus bus, Object? initialData) async {
 ```
 
 `EventBusIsolate` behaves like a normal bus on both sides: events sent from the worker reach
-main-isolate listeners, and `send` from main returns the worker's handler result. Paths, separator
+main-isolate listeners, and `request` from main returns the worker's handler result. Paths, separator
 and `arguments` cross the boundary with the event.
 
 Good to know:
@@ -144,8 +145,8 @@ Good to know:
    after it are never lost. Errors from `onInit` surface as an `EventBusException` from
    `waitInit`.
 3. Every request is answered exactly once and correlated by request id, so concurrent requests of
-   the same type each get their own result. A topic the worker knows nothing about resolves to
-   `null`; a handler error is rethrown at the sender; an in-flight request fails with
+   the same type each get their own result. A topic the worker has no handler for fails with
+   `NoHandlerException`; a handler error is rethrown at the sender; an in-flight request fails with
    `EventBusException` if the isolate is disposed.
 4. `ping()` only checks liveness ("is the worker alive"), not readiness.
 
@@ -161,7 +162,7 @@ final layer = await Layers.createLayers([
 // createLayers completes only when every layer in the chain is initialized,
 // so events can be sent right away
 layer.bottom!.subscribe<Ping>(onData: (e) => print(e.count));
-layer.bottom!.send(Ping(0));
+layer.bottom!.fire(Ping(0));
 await layer.close();
 ```
 
@@ -189,7 +190,7 @@ class Loader with FSM<State> {
   }
 }
 
-await bus.send(Start('/api/items'), paths: ['api', 'items']);   // State.idle -> State.loading
+bus.fire(Start('/api/items'), paths: ['api', 'items']);   // State.idle -> State.loading
 ```
 
 Events arriving while a transition handler is running are collected into the `ignoredEvents`
@@ -260,7 +261,7 @@ The full migration table is in [doc/07-caveats.md](doc/07-caveats.md#migration-t
 
 - `EventBus` now exposes `handlers` (no more `bus as EventBusHandlers`) and an idempotent `dispose()`
 - Handler failures reach the sender instead of hanging it; listeners receive values before
-  `await send(...)` returns
+  `await request(...)` returns
 - `EventBusIsolate` correlates responses by request id, `waitInit` means "onInit completed",
   and `ping()` checks liveness; in-flight requests fail instead of hanging on dispose
 - `Layers.createLayers` completes only when the whole chain is initialized; `Layer.close()` works

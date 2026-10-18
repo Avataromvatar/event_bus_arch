@@ -3,7 +3,7 @@
 NATS transport for [`event_bus_arch`](https://pub.dev/packages/event_bus_arch).
 
 `EventBusNats` is an `EventBus` whose nodes publish to and subscribe from a
-NATS server. Application code keeps using `send`, `listen`, `subscribe` and
+NATS server. Application code keeps using `fire`, `request`, `listen`, `subscribe` and
 `setHandler`; the transport is configured with serializers and deserializers.
 
 ## Requirements
@@ -59,7 +59,7 @@ Future<void> main() async {
     },
   );
 
-  await publisher.send<int>(21, paths: ['sensor', 'temp']);
+  publisher.fire<int>(21, paths: ['sensor', 'temp']);
 
   await received.future.timeout(const Duration(seconds: 5));
 
@@ -116,7 +116,7 @@ Registry keys are local topics. Resolution order:
 - A topic that itself contains wildcards is resolved by exact/type only:
   matching a pattern against a pattern is ambiguous.
 
-A node is created lazily by `listen<T>`, `setHandler<T>` or `send<T>`. `send`
+A node is created lazily by `listen<T>`, `setHandler<T>` or `fire<T>`/`request<T>`. `fire`
 creates a node only for a topic present in one of the registries; for any other
 topic it keeps local bus semantics and returns `null` when no node exists.
 
@@ -140,7 +140,7 @@ if one is configured. It must be a concrete publish subject.
 
 ## Arguments
 
-`send(arguments: {...})` puts the map into the `X-EventBus-Arguments` header as
+`fire(arguments: {...})` puts the map into the `X-EventBus-Arguments` header as
 JSON. The deserializer receives it as the named `arguments` parameter and
 decides whether to put it into the `EventDTO`. This requires NATS headers.
 
@@ -154,7 +154,7 @@ await bus.waitConnected(timeout: Duration(seconds: 5));
 bus.errors;               // stream of asynchronous transport/node errors
 ```
 
-- The constructor starts connecting in the background. `send` on a transport
+- The constructor starts connecting in the background. `fire` on a transport
   topic while the connection is down throws
   `NatsServerUnavailableException` before local delivery; the event is not
   silently buffered.
@@ -164,7 +164,7 @@ bus.errors;               // stream of asynchronous transport/node errors
   exactly once.
 - The bus writes `X-EventBus-Origin` on every publish and drops messages with
   its own origin, so a node that both publishes and subscribes does not receive
-  its own event twice. Local listeners still receive it from the local send.
+  its own event twice. Local listeners still receive it from the local fire.
 - A node is pinned in the bus map by an internal handler: cancelling the last
   local listener does not unsubscribe while the bus is alive. `dispose` of the
   bus cancels every subscription. Because of the internal handler,
@@ -172,12 +172,12 @@ bus.errors;               // stream of asynchronous transport/node errors
 
 ## Errors
 
-- `NatsServerUnavailableException` — `send` while disconnected.
-- `NatsSerializationException` — the serializer threw; the sender receives it.
+- `NatsServerUnavailableException` — `fire` while disconnected.
+- `NatsSerializationException` — the serializer threw; the caller receives it.
 - `NatsDeserializationException` — an incoming payload could not be decoded or
   its data type does not match `T`; it is reported on `bus.errors` and the node
   keeps running.
-- Transport failures that happen after `send` returned (a race on the socket)
+- Transport failures that happen after `fire` returned (a race on the socket)
   are reported on `bus.errors`.
 
 ## Guarantees and limitations

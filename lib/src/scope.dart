@@ -22,13 +22,11 @@ mixin class Scope<T> {
   ///nothing to roll back to).
   Future<void> initScope(EventBus bus,
       {T? initialData,
-      
       bool initialDataNeedExecute = true,
-      
       List<String>? paths,
       int maxLenForUndo = 10,
       void Function(T newData)? onUpdate}) async {
-    var data = initialData ;
+    var data = initialData;
     var needExecute = initialDataNeedExecute;
 
     if (_scopeCommand != null) {

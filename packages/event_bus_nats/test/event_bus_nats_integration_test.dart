@@ -66,7 +66,7 @@ void main() {
           .listen<int>(paths: ['sensor', 'temp'])
           .listen((value) => received.complete(value));
 
-      await busA.send<int>(42, paths: ['sensor', 'temp']);
+      busA.fire<int>(42, paths: ['sensor', 'temp']);
 
       expect(await received.future.timeout(const Duration(seconds: 5)), 42);
     });
@@ -75,7 +75,7 @@ void main() {
       final received = <int>[];
       busA.listen<int>(paths: ['sensor', 'temp']).listen(received.add);
 
-      await busA.send<int>(1, paths: ['sensor', 'temp']);
+      busA.fire<int>(1, paths: ['sensor', 'temp']);
       await Future<void>.delayed(const Duration(milliseconds: 500));
 
       expect(received, [1]);
@@ -87,7 +87,7 @@ void main() {
         received.complete(value);
       });
 
-      await busA.send<int>(7, paths: ['sensor', 'humidity']);
+      busA.fire<int>(7, paths: ['sensor', 'humidity']);
 
       expect(await received.future.timeout(const Duration(seconds: 5)), 7);
     });
@@ -107,7 +107,7 @@ void main() {
       await busC.waitConnected(timeout: const Duration(seconds: 5));
       busC.listen<int>(paths: ['args']).listen((_) {});
 
-      await busA.send<int>(1, paths: ['args'], arguments: {'tenant': 'acme'});
+      busA.fire<int>(1, paths: ['args'], arguments: {'tenant': 'acme'});
 
       expect(await received.future.timeout(const Duration(seconds: 5)), {
         'tenant': 'acme',

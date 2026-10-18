@@ -8,6 +8,7 @@ abstract class Command<T> {
   Future<dynamic> undo();
 
   EventBus get bindedBus;
+
   ///Call history length
   int get queueLength;
 
@@ -34,7 +35,7 @@ class CommandImpl<T> implements Command<T> {
   ///data, arguments
   final Queue<(T, Map<String, String>?)> _queue = Queue();
   @override
-  (T data,  Map<String, String>? arguments)? get lastCall => getLastCall();
+  (T data, Map<String, String>? arguments)? get lastCall => getLastCall();
 
   CommandImpl(this._bus, {List<String>? paths, int maxLen = 10})
       : _paths = paths,
@@ -43,12 +44,16 @@ class CommandImpl<T> implements Command<T> {
         maxLen = maxLen < 1 ? 1 : maxLen;
 
   @override
-  Future<dynamic> execute(T data, {String? fragment, Map<String, String>? arguments}) async {
+  Future<dynamic> execute(T data,
+      {String? fragment, Map<String, String>? arguments}) async {
     if (_queue.length >= maxLen) {
       _queue.removeFirst();
     }
-    _queue.add((data, arguments,));
-    return _bus.send<T>(data, paths: _paths, arguments: arguments,);
+    _queue.add((
+      data,
+      arguments,
+    ));
+    return _call(data, arguments);
   }
 
   @override
@@ -58,7 +63,18 @@ class CommandImpl<T> implements Command<T> {
     }
     _queue.removeLast();
     var previous = _queue.last;
-    return _bus.send<T>(previous.$1, paths: _paths, arguments: previous.$2, );
+    return _call(previous.$1, previous.$2);
+  }
+
+  ///A command is a request when a handler answers it. Without a handler the
+  ///value still goes through the bus (a model bus stores it), and the result
+  ///is null.
+  Future<dynamic> _call(T data, Map<String, String>? arguments) {
+    if (_bus.haveHandler<T>(paths: _paths)) {
+      return _bus.request<T>(data, paths: _paths, arguments: arguments);
+    }
+    _bus.fire<T>(data, paths: _paths, arguments: arguments);
+    return Future.value(null);
   }
 
   (T data, Map<String, String>? arguments)? getLastCall() {

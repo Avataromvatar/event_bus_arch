@@ -20,9 +20,9 @@ class TestMachine with FSM<TestState> {
     addFSMTransition<EventB>(TestState.b, TestState.c,
         filter: (current, last, event) => true,
         handler: (current, last, event, ignored) async {
-      log.add('$last->$current');
-      return null;
-    });
+          log.add('$last->$current');
+          return null;
+        });
   }
 }
 
@@ -32,7 +32,7 @@ void main() {
       final bus = EventBus();
       final machine = TestMachine(bus);
 
-      await bus.send(EventA());
+      bus.fire(EventA());
       await pumpEventQueue();
 
       expect(machine.state, TestState.b);
@@ -44,13 +44,13 @@ void main() {
     test('dispose unsubscribes the machine from the bus', () async {
       final bus = EventBus();
       final machine = TestMachine(bus);
-      await bus.send(EventA());
+      bus.fire(EventA());
       await pumpEventQueue();
       expect(machine.state, TestState.b);
 
       machine.dispose();
       machine.changeState(TestState.a);
-      await bus.send(EventA());
+      bus.fire(EventA());
       await pumpEventQueue();
 
       expect(machine.state, TestState.a);
@@ -63,7 +63,7 @@ void main() {
       final machine = TestMachine(bus);
       machine.initFSM(bus, TestState.a);
 
-      await bus.send(EventA());
+      bus.fire(EventA());
       await pumpEventQueue();
 
       expect(machine.log.length, 1);
@@ -83,10 +83,10 @@ void main() {
       machine.initFSM(bus, TestState.a);
 
       machine.changeState(TestState.a);
-      bus.send(EventB());
+      bus.fire(EventB());
       await Future<void>.delayed(const Duration(milliseconds: 5));
-      bus.send(EventB());
-      bus.send(EventB());
+      bus.fire(EventB());
+      bus.fire(EventB());
       // the transition handler waits 30 ms of real time
       await Future<void>.delayed(const Duration(milliseconds: 100));
 

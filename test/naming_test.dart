@@ -21,7 +21,7 @@ void main() {
       final iso = EventBusIsolate(onInit: _worker, initialData: 'prefix');
       await iso.waitInit;
 
-      expect(await iso.send<String>('x'), 'prefix: x');
+      expect(await iso.request<String>('x'), 'prefix: x');
       await iso.dispose();
     });
   });
@@ -39,8 +39,8 @@ void main() {
         },
       );
 
-      final result =
-          await bus.send<int>(1, paths: ['a', 'b'], separator: '/', arguments: {'k': 'v'});
+      final result = await bus.request<int>(1,
+          paths: ['a', 'b'], separator: '/', arguments: {'k': 'v'});
 
       expect(result, 1);
       expect(seen, {'k': 'v'});
@@ -49,7 +49,8 @@ void main() {
 
     test('the reading methods take paths and separator', () async {
       final bus = EventBus(isModelBus: true);
-      bus.handlers.setHandler<int>(paths: ['c'], handler: (dto, lastData) async {});
+      bus.handlers
+          .setHandler<int>(paths: ['c'], handler: (dto, lastData) async {});
 
       expect(bus.haveHandler<int>(paths: ['c'], separator: '.'), true);
       expect(bus.haveListener<int>(paths: ['c'], separator: '.'), false);
@@ -75,7 +76,8 @@ void main() {
 
     test('setHandler takes initialData', () async {
       final bus = EventBus(isModelBus: true);
-      bus.handlers.setHandler<int>(initialData: 3, handler: (dto, lastData) async {});
+      bus.handlers
+          .setHandler<int>(initialData: 3, handler: (dto, lastData) async {});
 
       expect(bus.currentData<int>(), 3);
       await bus.dispose();
@@ -90,15 +92,19 @@ void main() {
       expect(Topic.parse('String/a', separator: '/').paths, ['a']);
 
       final dto = EventDTO<int>(1,
-          topic: topic.copy(), paths: ['p'], separator: '/', arguments: {'a': '1'}, completer: null);
+          topic: topic.copy(),
+          paths: ['p'],
+          separator: '/',
+          arguments: {'a': '1'},
+          completer: null);
       expect(dto.topic, isA<Topic>());
 
       final created = EventDTO.create<int>(1,
           paths: ['p'], separator: '/', arguments: {'a': '1'}, completer: null);
       expect(created.topic.topic, 'int/p');
 
-      final restored =
-          EventDTOImpl.fromJson<int>({'topic': 'int', 'data': 1}, dataConverter: (t, d) => d as int);
+      final restored = EventDTOImpl.fromJson<int>({'topic': 'int', 'data': 1},
+          dataConverter: (t, d) => d as int);
       expect(restored.data, 1);
     });
   });
@@ -115,7 +121,8 @@ void main() {
       await bus.dispose();
     });
 
-    test('initScope takes initialData, initialDataNeedExecute, paths, maxLenForUndo and onUpdate',
+    test(
+        'initScope takes initialData, initialDataNeedExecute, paths, maxLenForUndo and onUpdate',
         () async {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
@@ -139,18 +146,19 @@ void main() {
       final machine = _NameMachine(bus);
 
       // the transition is registered for NameEvent.go: another path is another topic
-      await bus.send<NameEvent>(NameEvent(), paths: ['other']);
+      bus.fire<NameEvent>(NameEvent(), paths: ['other']);
       await pumpEventQueue();
       expect(machine.state, NameState.a);
 
-      await bus.send<NameEvent>(NameEvent(), paths: ['go']);
+      bus.fire<NameEvent>(NameEvent(), paths: ['go']);
       await pumpEventQueue();
 
       expect(machine.state, NameState.b);
       await bus.dispose();
     });
 
-    test('createLayers takes init tuples, currentIsModelBus and timeout', () async {
+    test('createLayers takes init tuples, currentIsModelBus and timeout',
+        () async {
       final layer = await Layers.createLayers(
         [(_initNameLayer, null, true)],
         currentIsModelBus: true,

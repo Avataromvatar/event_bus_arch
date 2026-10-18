@@ -13,26 +13,26 @@ void main() {
     test('Should send and receive events', () async {
       final bus = EventBus();
       final Completer<String> completer = Completer<String>();
-      
+
       // Set up handler
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
           dto.completer?.complete('handled');
         },
       );
-      
+
       // Listen to events
       final stream = bus.listen<String>();
       final subscription = stream.listen((data) {
         completer.complete(data);
       });
-      
+
       // Send event
-      final result = await bus.send('test data');
-      
+      final result = await bus.request('test data');
+
       // Verify result
       expect(result, isNotNull);
-      
+
       // Clean up
       await subscription.cancel();
     });
@@ -40,50 +40,50 @@ void main() {
     test('Should handle multiple listeners', () async {
       final bus = EventBus();
       final results = <String>[];
-      
+
       // Set up handler
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
           dto.completer?.complete('handled');
         },
       );
-      
+
       // Create multiple listeners
       final stream1 = bus.listen<String>();
       final stream2 = bus.listen<String>();
-      
+
       final subscription1 = stream1.listen((data) {
         results.add('listener1: $data');
       });
-      
+
       final subscription2 = stream2.listen((data) {
         results.add('listener2: $data');
       });
-      
+
       // Send event
-      await bus.send('test data');
+      await bus.request('test data');
       await Future.delayed(Duration(milliseconds: 10));
       // Verify both listeners received the event
       expect(results.length, 2);
-      
+
       // Clean up
       await subscription1.cancel();
       await subscription2.cancel();
     });
 
-    test('Should get last data', () async{
+    test('Should get last data', () async {
       final bus = EventBus();
-      
+
       // Set initial data
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
           dto.completer?.complete('handled');
         },
       );
-      
+
       // Send event
-      await bus.send('test data');
-      
+      await bus.request('test data');
+
       // Get last data
       final last = bus.currentData<String>();
       expect(last, 'test data');
@@ -91,71 +91,71 @@ void main() {
 
     test('Should have handler', () {
       final bus = EventBus();
-      
+
       // Initially should not have handler
       expect(bus.haveHandler<String>(), false);
-      
+
       // Set handler
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
           dto.completer?.complete('handled');
         },
       );
-      
+
       // Should now have handler
       expect(bus.haveHandler<String>(), true);
     });
 
     test('Should have listener', () {
       final bus = EventBus();
-      
+
       // Initially should not have listener
       expect(bus.haveListener<String>(), false);
-      
+
       // Create listener
       final stream = bus.listen<String>();
       final subscription = stream.listen((data) {});
-      
+
       // Should now have listener
       expect(bus.haveListener<String>(), true);
-      
+
       // Clean up
       subscription.cancel();
     });
 
     test('Should remove handler', () {
       final bus = EventBus();
-      
+
       // Set handler
       (bus as EventBusHandlers).setHandler<String>(
         handler: (dto, lastData) async {
           dto.completer?.complete('handled');
         },
       );
-      
+
       // Should have handler
       expect(bus.haveHandler<String>(), true);
-      
+
       // Remove handler
       (bus as EventBusHandlers).removeHandler<String>();
-      
+
       // Should not have handler anymore
       expect(bus.haveHandler<String>(), false);
     });
 
     test('Should send event with completer result', () async {
       final bus = EventBus();
-      
+
       // Set up handler that returns a result
       (bus as EventBusHandlers).setHandler<int>(
         handler: (dto, lastData) async {
           dto.completer?.complete(42);
         },
       );
-      
+
       // Send event and get result
-      final result = await bus.send(10);
-      
+      final result = await bus.request(10);
+
       // Verify result
       expect(result, 42);
     });
@@ -165,14 +165,11 @@ void main() {
       expect(bus.isModelBus, true);
     });
 
-    test('Should send event without handler', () async {
+    test('Should fire an event without handler', () {
       final bus = EventBus();
-      
-      // Send event without handler
-      final result = await bus.send('test data');
-      
-      // Should return null when no handler
-      expect(result, null);
+
+      // Nobody listens and no transport knows the topic.
+      expect(bus.fire('test data'), isFalse);
     });
 
     test('Should send event with different topic paths', () async {
@@ -187,7 +184,7 @@ void main() {
       );
 
       // Send event to specific path
-      final result = await bus.send('test data', paths: ['test']);
+      final result = await bus.request('test data', paths: ['test']);
 
       // Should return a future
       expect(result, isNotNull);
@@ -206,7 +203,8 @@ void main() {
       );
 
       // Send event with arguments
-      final result = await bus.send('test data', arguments: {'key': 'value'});
+      final result =
+          await bus.request('test data', arguments: {'key': 'value'});
 
       // Should return a future
       expect(result, isNotNull);
@@ -225,11 +223,11 @@ void main() {
         },
       );
 
-      // Send event to a different path: a different node, no handler
-      final result = await bus.send('test data', paths: ['specific']);
-
-      // Should return a future
-      expect(result, isNull);
+      // Send event to a different path: a different node, no handler.
+      await expectLater(
+        bus.request('test data', paths: ['specific']),
+        throwsA(isA<NoHandlerException>()),
+      );
     });
 
     test('Should keep paths of the same type apart', () async {
@@ -249,8 +247,8 @@ void main() {
         },
       );
 
-      await bus.send('to a', paths: ['a']);
-      await bus.send('to b', paths: ['b']);
+      await bus.request('to a', paths: ['a']);
+      await bus.request('to b', paths: ['b']);
 
       expect(received, ['a: to a', 'b: to b']);
     });
@@ -269,14 +267,17 @@ void main() {
       );
 
       // the default separator builds a different address, so nothing is found
-      expect(await bus.send('x', paths: ['a', 'b']), isNull);
+      await expectLater(bus.request('x', paths: ['a', 'b']),
+          throwsA(isA<NoHandlerException>()));
       expect(called, false);
 
-      expect(await bus.send('x', paths: ['a', 'b'], separator: '/'), 'slash');
+      expect(
+          await bus.request('x', paths: ['a', 'b'], separator: '/'), 'slash');
       expect(called, true);
     });
 
-    test('Should use defaultTopicPathSeparator for calls without one', () async {
+    test('Should use defaultTopicPathSeparator for calls without one',
+        () async {
       final bus = EventBus();
       (bus as EventBusImpl).defaultTopicPathSeparator = '/';
       var called = false;
@@ -288,7 +289,7 @@ void main() {
         },
       );
 
-      await bus.send('x', paths: ['a', 'b']);
+      await bus.request('x', paths: ['a', 'b']);
 
       expect(called, true);
       expect(bus.haveHandler<String>(paths: ['a', 'b']), true);

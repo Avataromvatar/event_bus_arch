@@ -60,7 +60,8 @@ class Layers {
   static Future<Layer> createLayers(List<(fnInitLayer, Object?, bool)> layers,
       {bool currentIsModelBus = true, Duration? timeout}) async {
     if (layers.isEmpty) {
-      throw EventBusException('Layers.createLayers: layers list must not be empty');
+      throw EventBusException(
+          'Layers.createLayers: layers list must not be empty');
     }
 
     _LayerInitDto storage = _LayerInitDto(data: layers, index: 0);
@@ -71,7 +72,8 @@ class Layers {
     var waitInit = (l.bottom as EventBusIsolate).waitInit;
     if (timeout != null) {
       await waitInit.timeout(timeout, onTimeout: () {
-        throw EventBusException('Layers.createLayers: initialization timeout ($timeout)');
+        throw EventBusException(
+            'Layers.createLayers: initialization timeout ($timeout)');
       });
     } else {
       await waitInit;
@@ -93,7 +95,9 @@ Future<void> _initLayer(EventBus bus, Object? initData) async {
   Layer l = Layer(
       current: EventBus(isModelBus: dto.data[index].$3),
       top: bus,
-      bottom: dto.index < dto.data.length ? EventBusIsolate(onInit: _initLayer, initialData: dto) : null);
+      bottom: dto.index < dto.data.length
+          ? EventBusIsolate(onInit: _initLayer, initialData: dto)
+          : null);
   if (l.bottom != null) {
     // wait not only for the next isolate to start, but for it to be initialized
     await (l.bottom as EventBusIsolate).waitInit;

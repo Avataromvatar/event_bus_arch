@@ -43,7 +43,7 @@ void main() {
     expect(connection.closed, isTrue);
   });
 
-  test('send creates a node for a registered topic and publishes it', () async {
+  test('fire creates a node for a registered topic and publishes it', () async {
     final connection = FakeNatsConnection();
     final bus = EventBusNats(
       Uri.parse('nats://localhost:4222'),
@@ -55,13 +55,12 @@ void main() {
     );
     addTearDown(bus.dispose);
 
-    final result = await bus.send<int>(
-      21,
-      paths: ['sensor'],
-      arguments: {'tenant': 'acme'},
+    expect(
+      bus.fire<int>(21, paths: ['sensor'], arguments: {'tenant': 'acme'}),
+      isTrue,
     );
+    await Future<void>.delayed(Duration.zero);
 
-    expect(result, isNull);
     expect(connection.publishes, hasLength(1));
     final published = connection.publishes.single;
     expect(published.subject, 'int.sensor');
@@ -71,7 +70,7 @@ void main() {
     expect(bus.currentData<int>(paths: ['sensor']), 21);
   });
 
-  test('send throws when the connection is down', () async {
+  test('fire throws when the connection is down', () async {
     final connection = FakeNatsConnection();
     final bus = EventBusNats(
       Uri.parse('nats://localhost:4222'),
@@ -81,8 +80,8 @@ void main() {
     addTearDown(bus.dispose);
     connection.setStatus(NatsConnectionStatus.disconnected);
 
-    await expectLater(
-      bus.send<int>(21, paths: ['sensor']),
+    expect(
+      () => bus.fire<int>(21, paths: ['sensor']),
       throwsA(isA<NatsServerUnavailableException>()),
     );
 
@@ -90,7 +89,7 @@ void main() {
     expect(bus.currentData<int>(paths: ['sensor']), isNull);
   });
 
-  test('send without a registration keeps the local semantics', () async {
+  test('fire without a registration keeps the local semantics', () async {
     final connection = FakeNatsConnection();
     final bus = EventBusNats(
       Uri.parse('nats://localhost:4222'),
@@ -98,9 +97,7 @@ void main() {
     );
     addTearDown(bus.dispose);
 
-    final result = await bus.send<String>('v', paths: ['x']);
-
-    expect(result, isNull);
+    expect(bus.fire<String>('v', paths: ['x']), isFalse);
     expect(bus.currentData<String>(paths: ['x']), isNull);
   });
 
@@ -197,7 +194,7 @@ void main() {
     );
     addTearDown(bus.dispose);
 
-    await bus.send<int>(1, paths: ['sensor']);
+    expect(bus.fire<int>(1, paths: ['sensor']), isTrue);
 
     expect(connection.publishes.single.subject, 'custom.subject');
   });
@@ -235,8 +232,8 @@ void main() {
     );
     addTearDown(bus.dispose);
 
-    await expectLater(
-      bus.send<int>(1, paths: ['sensor']),
+    expect(
+      () => bus.fire<int>(1, paths: ['sensor']),
       throwsA(isA<NatsSerializationException>()),
     );
   });

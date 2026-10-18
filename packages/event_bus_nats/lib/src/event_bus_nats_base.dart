@@ -7,7 +7,9 @@ import 'dart_nats_connection.dart';
 import 'event_node_nats.dart';
 import 'nats_connection.dart';
 import 'nats_reconnect_policy.dart';
+import 'nats_registry.dart';
 import 'nats_serialization.dart';
+import 'nats_subject.dart';
 
 ///A bus that mirrors its topics to a NATS server.
 ///
@@ -33,6 +35,8 @@ class EventBusNats extends EventBusImpl {
     NatsConnectionOptions options = const NatsConnectionOptions(),
     NatsReconnectPolicy reconnect = const NatsReconnectPolicy(),
     Duration pingInterval = const Duration(seconds: 5),
+    String? subjectPrefix,
+    Map<String, String>? typeTags,
     String? originId,
     NatsConnection? connection,
   }) : _serializers = Map<String, EventDTOSerialization>.unmodifiable(
@@ -43,6 +47,16 @@ class EventBusNats extends EventBusImpl {
        ),
        _originId = originId ?? _newOriginId(),
        super(false) {
+    _subjects = NatsSubjectMapper(prefix: subjectPrefix, typeTags: typeTags);
+    for (final key in _serializers.keys) {
+      _subjects.validatePublishKey(key);
+    }
+    for (final key in _deserializers.keys) {
+      _subjects.validateSubscribeKey(key);
+    }
+    _serializerIndex = NatsRegistryIndex(_serializers, allowPatterns: false);
+    _deserializerIndex = NatsRegistryIndex(_deserializers, allowPatterns: true);
+
     _connection =
         connection ??
         DartNatsConnection(
@@ -59,8 +73,15 @@ class EventBusNats extends EventBusImpl {
   final Map<String, EventDTODeserialization> _deserializers;
   final String _originId;
 
+  late final NatsSubjectMapper _subjects;
+  late final NatsRegistryIndex<EventDTOSerialization> _serializerIndex;
+  late final NatsRegistryIndex<EventDTODeserialization> _deserializerIndex;
+
   late final NatsConnection _connection;
   Future<void>? _disposeFuture;
+
+  ///The topic-to-subject mapper used by this bus.
+  NatsSubjectMapper get subjects => _subjects;
 
   ///The low-level connection. Exposed for the node and for tests.
   NatsConnection get connection => _connection;
@@ -101,22 +122,29 @@ class EventBusNats extends EventBusImpl {
     T? currentData,
     Handler<T>? handler,
   }) {
+    final deserializer = _deserializerFor(topic);
+    if (deserializer != null) {
+      // The node subscribes when it is created; reject an invalid pattern
+      // before a server subscription is attempted.
+      _subjects.validateSubscribe(topic);
+    }
     return EventNodeNatsImpl<T>(
       topic: topic,
       currentData: currentData,
       handler: handler,
       serializer: _serializerFor(topic),
-      deserializer: _deserializerFor(topic),
+      deserializer: deserializer,
     );
   }
 
   ///The serializer for a concrete topic, falling back to its type token.
   EventDTOSerialization? _serializerFor(Topic topic) =>
-      _serializers[topic.topic] ?? _serializers[topic.type];
+      _serializerIndex.resolve(topic);
 
-  ///The deserializer for a concrete topic, falling back to its type token.
+  ///The deserializer for a concrete topic, falling back to its type token and
+  ///then to the most specific wildcard pattern.
   EventDTODeserialization? _deserializerFor(Topic topic) =>
-      _deserializers[topic.topic] ?? _deserializers[topic.type];
+      _deserializerIndex.resolve(topic);
 
   @override
   Future<void> dispose() => _disposeFuture ??= _disposeImpl();

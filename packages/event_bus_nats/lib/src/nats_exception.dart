@@ -30,3 +30,12 @@ class NatsPublishException extends EventBusNatsException {
 class NatsConnectionException extends EventBusNatsException {
   NatsConnectionException([super.message]);
 }
+
+///A topic cannot be represented as a NATS subject (or a pattern cannot be
+///used as a subscription subject).
+class NatsSubjectException extends EventBusNatsException {
+  NatsSubjectException(super.message, {this.subject});
+
+  ///The topic or subject that failed validation, when known.
+  final String? subject;
+}

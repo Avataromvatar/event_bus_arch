@@ -17,6 +17,6 @@ The package is under development; the API is not stable yet.
 
 ## Status
 
-The core hooks (`createNode` receives the topic, the type token is normalised
-to a broker-safe token) are in place. The connection adapter and the NATS
-direction of the node are the next steps.
+The core hooks, the connection adapter (reconnect with backoff, headers,
+self-echo filtering) and the topic-to-subject mapper with registry resolution
+are in place. The publish/subscribe wiring inside the node is the next step.

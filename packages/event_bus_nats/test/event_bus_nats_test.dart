@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_nats/event_bus_nats.dart';
 import 'package:test/test.dart';
 
@@ -67,5 +68,47 @@ void main() {
 
     expect(result, isNull);
     expect(bus.currentData<String>(paths: ['x']), isNull);
+  });
+
+  test(
+    'resolves a deserializer by pattern and maps prefixed subjects',
+    () async {
+      final connection = FakeNatsConnection();
+      final bus = EventBusNats(
+        Uri.parse('nats://localhost:4222'),
+        subjectPrefix: 'acme',
+        deserializers: {
+          'int.sensor.*': (data, topic, {arguments}) =>
+              EventDTO<int>(0, topic: Topic.parse(topic)),
+        },
+        connection: connection,
+      );
+      addTearDown(bus.dispose);
+
+      expect(
+        bus.subjects.toSubject(
+          Topic.create<int>(paths: ['sensor', 'temp']),
+          subscription: true,
+        ),
+        'acme.int.sensor.temp',
+      );
+      expect(
+        bus.shouldCreateNodeOnSend(
+          Topic.create<int>(paths: ['sensor', 'temp']),
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test('rejects an invalid registry key at construction', () {
+    expect(
+      () => EventBusNats(
+        Uri.parse('nats://localhost:4222'),
+        serializers: {'int.*': (dto) => (null, Uint8List(0))},
+        connection: FakeNatsConnection(),
+      ),
+      throwsA(isA<NatsSubjectException>()),
+    );
   });
 }

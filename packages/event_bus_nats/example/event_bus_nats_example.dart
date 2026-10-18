@@ -12,7 +12,7 @@ Future<void> main() async {
           (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
     },
     deserializers: {
-      'int.sensor.temp': (data, topic) => EventDTO<int>(
+      'int.sensor.temp': (data, topic, {arguments}) => EventDTO<int>(
         int.parse(utf8.decode(data)),
         topic: Topic.parse(topic),
       ),

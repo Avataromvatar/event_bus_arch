@@ -36,7 +36,7 @@ dependencies:
 dart pub get      # or: flutter pub get
 ```
 
-Dart SDK `>=3.0.0 <4.0.0`. The package re-exports `rxdart`, so `BehaviorSubject`,
+Dart SDK `>=3.6.0 <4.0.0`. The package re-exports `rxdart`, so `BehaviorSubject`,
 `debounceTime`, `doOnCancel` and friends are available without an extra import.
 
 ## Quick start
@@ -122,10 +122,10 @@ last matching value; `currentData(concrete)` reads only the exact node.
 
 | | `EventBus()` | `EventBus(isModelBus: true)` |
 |---|---|---|
-| Creates a node when sending to an unknown topic | no | yes |
-| Keeps `lastData` after the last listener unsubscribes | no | yes |
+| Creates a node on `fire` to an unknown topic | no | yes |
+| Keeps `currentData` after the last listener unsubscribes | no | yes |
 | `fire` to a topic with no node | returns `false`, event goes to `allEventStream` with flag `false` | returns `true`, node is created |
-| `request` without a handler | throws `NoHandlerException` | creates a node, then throws `NoHandlerException` |
+| `request` without a handler | throws `NoHandlerException` | throws `NoHandlerException` |
 
 A handler registered with `setHandler` is a request responder: `request` invokes it, while
 `fire` only notifies listeners.
@@ -269,7 +269,15 @@ The address model changed; this is a breaking release.
   (`.` by default, `EventBus.defaultTopicPathSeparator`)
 - **`arguments` moved from `Topic` to `EventDTO`**: `dto.topic.arguments` is now `dto.arguments`,
   both locally and across an isolate
-- The type in the address is `'$T'` as written — no lowercasing, no percent-encoding
+- **`send` is split into `fire` and `request`**: `fire` is one-way and returns `bool`; `request`
+  invokes a handler and waits for its result (or `NoHandlerException`)
+- **Handlers return their response**; `EventDTO.completer` was removed, and `fire` no longer
+  invokes handlers
+- **`lastData` was renamed `currentData`** (`bus.currentData<T>()`, `EventNode.currentData`)
+- **Local wildcards**: `*` matches one path token, `>` one or more trailing tokens;
+  `listen`/`subscribe`/`setHandler` accept patterns, `fire`/`request` require concrete topics
+- The type in the address is `'$T'` normalised to a subject-safe token —
+  no lowercasing, no percent-encoding (`List<int>` → `List(int)`)
 - `topic.topic` is the single routing key (`fullTopic`/`topicWithFragment` are gone)
 - **`packages/event_bus_nats`** adds a NATS transport as a separate package; the core stays
   broker-free (see [doc/09-event-bus-nats.md](doc/09-event-bus-nats.md))
@@ -286,7 +294,8 @@ The full migration table is in [doc/07-caveats.md](doc/07-caveats.md#migration-t
 - `EventBusIsolate`, `Layers`, `FSM`, `Scope`/`Command`, `subscribe`, `dispose` were added
 - Reduced API surface; the bus always returns a result or `null` (the old `call` method is gone)
 - `EventBusMaster` was removed — buses no longer need names
-- Handlers return values through `EventDTO.completer`
+- Handlers return values through `EventDTO.completer` (removed in 3.0.0 — handlers return the
+  value directly)
 
 ## Version 2.3.0 changes
 

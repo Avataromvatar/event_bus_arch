@@ -4,7 +4,8 @@
 
 `FSM<T>` is a mixin that turns the bus's event stream into transitions between states. The state
 machine does not require anyone to subscribe to an event: it listens to `allEventStream` and reacts
-to events **by topic**, that is, by event type and `paths`.
+to events **by topic**, that is, by event type and `paths`. Both `fire` and `request` produce
+entries there, so either call can drive a transition.
 
 ## Setup
 
@@ -35,8 +36,8 @@ class Loader with FSM<State> {
 final bus = EventBus();
 final loader = Loader(bus);
 
-await bus.send(Start('/api/items'));   // idle -> loading, handler was called
-await bus.send(Done());                // loading -> ready
+bus.fire(Start('/api/items'));   // idle -> loading, handler was called
+bus.fire(Done());                // loading -> ready
 ```
 
 ## API
@@ -58,6 +59,8 @@ mixin class FSM<T> {
 
   void changeState(T newState);         // change the state manually
   void changeStateByEvent(T newState);  // an alias for changeState
+
+  void dispose();                       // unsubscribe from the bus
 }
 
 typedef FSMFilter<T, E> = bool Function(T currentState, T lastState, E event);
@@ -75,8 +78,7 @@ typedef FSMHandler<T, E> =
    and the state does not change.
 4. If the filter lets it through: the state changes to `toState`, and `handler` is called with
    `(currentState, lastState, event, ignoredEvents)`, where `currentState` is the **new** state and
-   `lastState` is the previous one (the order is confirmed by the package example: it prints
-   `state0 -> state1`).
+   `lastState` is the previous one.
 5. While the handler is running, all incoming events are collected into the `ignoredEvents` list and
    passed to the handler. **They are not replayed after the handler finishes** — the events are lost
    and the list is cleared.
@@ -99,16 +101,20 @@ typedef FSMHandler<T, E> =
 ## Important details
 
 * **A transition is registered by the static event type.** `addFSMTransition<int>(...)` fires on
-  `bus.send<int>(...)` but not on `bus.send<num>(...)`: for the bus these are different topics.
+  `bus.fire<int>(...)`/`bus.request<int>(...)` but not on `bus.fire<num>(...)`: for the bus these
+  are different topics.
 * **`eventPaths` must match what was sent.** The transition topic is built as
   `Topic.create<E>(paths: eventPaths)`, and `arguments` do not participate in the topic — you can
   pass transition parameters through them without breaking routing. A transition registered
-  without `eventPaths` fires on the type alone (`send<Start>(...)` with no `paths`).
+  without `eventPaths` fires on the type alone (`fire<Start>(...)` with no `paths`).
+* **`eventPaths` are exact.** The FSM looks a transition up by the whole topic key; wildcard
+  transitions (`paths: ['sensor', '*']`) are **not** matched against concrete events. Use one
+  transition per exact path, or route events through a single stable path.
 * **One transition per (event, state) pair.** Calling `addFSMTransition` again with the same
-  `E`/`fromState` overwrites the previous one — the old handler/transition pair stops working
-  (verified).
-* **The state machine sees every event on the bus**, including the ones delivered to nobody.
-  `allEventStream` carries a delivery flag, but FSM ignores it.
+  `E`/`fromState` overwrites the previous one — the old handler/transition pair stops working.
+* **The state machine sees every event on the bus**, including the ones delivered to nobody and
+  requests that end with `NoHandlerException`. `allEventStream` carries a delivery flag, but FSM
+  ignores it.
 * **The state lives only in the mixin's memory.** It is not published to the bus automatically: if
   other components need to know the state, send an event from the transition handler manually.
 * **`changeStateByEvent` is a full alias for `changeState`** (identical bodies), and is the only
@@ -129,9 +135,9 @@ addFSMTransition<int>(S.a, S.b, handler: (current, last, event, ignored) async {
   return null;
 });
 
-bus.send<int>(1);
-bus.send<int>(2);   // arrives in the first transition's ignoredEvents
-bus.send<int>(3);   // there too
+bus.fire<int>(1);
+bus.fire<int>(2);   // arrives in the first transition's ignoredEvents
+bus.fire<int>(3);   // there too
 ```
 
 If you need to process such events instead of losing them, collect them into your own queue inside

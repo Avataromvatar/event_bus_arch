@@ -64,10 +64,13 @@ What you need to know right away:
 
 * Version: 3.0.0, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
 * Tests: 131 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO,
-  wildcards) — they pass. The NATS transport has its own suite in `packages/event_bus_nats/test`.
+  wildcards) — they pass. Transport suites: `packages/event_bus_transport` (24),
+  `packages/event_bus_nats` (52 with a live server), `packages/event_bus_mqtt` (39 with a live
+  broker).
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
   (FSM), `example/event_bus_layers_example.dart` (layers),
-  `packages/event_bus_nats/example/event_bus_nats_example.dart` (NATS).
+  `packages/event_bus_nats/example/event_bus_nats_example.dart` (NATS),
+  `packages/event_bus_mqtt/example/event_bus_mqtt_example.dart` (MQTT 5).
 * The fix history of version 2.3.0 is in [07-caveats.md](07-caveats.md#what-was-fixed-in-230).
 * What changed in 3.0.0 (the address) is in
   [07-caveats.md](07-caveats.md#what-changed-in-300) and [CHANGELOG.md](../CHANGELOG.md).

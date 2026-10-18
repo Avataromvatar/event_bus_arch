@@ -24,6 +24,16 @@ Future<void> main() async {
     serializers: {
       'int.sensor.temp': (dto) =>
           (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+      'int.sensor.double': (dto) =>
+          (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+    },
+    deserializers: {
+      // A remote request needs a deserializer for the response.
+      'int.sensor.double': (data, topic, {arguments}) => EventDTO<int>(
+        int.parse(utf8.decode(data)),
+        topic: Topic.parse(topic),
+        arguments: arguments,
+      ),
     },
   );
 

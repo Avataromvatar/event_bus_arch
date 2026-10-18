@@ -119,12 +119,20 @@ not send a client its own publications. The server does the wildcard matching.
 On an incoming message the adapter:
 
 1. extracts the topic, payload, response topic and user properties;
-2. matches the concrete topic against every registered subscription and calls
-   the base with the registration id;
+2. reads the MQTT 5 subscription identifier and calls the base with exactly the
+   registration that matched; when the broker omits identifiers, it falls back
+   to matching all local filters;
 3. the base applies the origin filter;
 4. the node strips the prefix, parses the concrete topic into a local topic,
    calls the deserializer, re-checks the core wildcard pattern (the `#` case),
    checks `dto.data is T`, and delivers locally without publishing again.
+
+Every subscription gets a unique subscription identifier (the registration id
+plus one). This matters when filters overlap: an exact node and a pattern node
+on the same client both match a topic, and a broker may send one PUBLISH per
+matching subscription. The identifier tells the adapter which registration the
+copy belongs to, so each node receives the event once. A broker that sends one
+PUBLISH carrying several identifiers also works: each node is notified once.
 
 Deserialization failures and type mismatches are reported on `bus.errors`; the
 node and its subscription stay alive.
@@ -153,8 +161,11 @@ transport route the call throws `NoHandlerException`; a responder without a
 handler reports `NoHandlerException` on `bus.errors`, and the requester sees
 `TimeoutException`.
 
-Correlation data is not used: every request gets its own response topic. There
-are no shared subscriptions, so every subscribed bus receives the request.
+Only the node whose topic equals the handler's registration topic answers, so a
+request that matches both an exact node and a pattern node is answered once and
+reaches listeners once. Correlation data is not used: every request gets its own
+response topic. A bus without a matching handler stays silent. There are no
+shared subscriptions, so every subscribed bus receives the request.
 
 ---
 

@@ -165,10 +165,14 @@ subject with a NATS inbox (`_INBOX.…`) as the reply subject:
 The response always goes to the inbox: a serializer subject override is ignored
 for responses. The responder's serializer therefore has to encode the handler's
 return value under the request topic. Without a local handler and without a
-transport route the call throws `NoHandlerException`; a responder without a
-handler reports `NoHandlerException` on `bus.errors`, and the requester sees
-`TimeoutException`. There are no queue groups, so every subscribed bus receives
-the request.
+transport route the call throws `NoHandlerException`; a bus without a matching
+handler stays silent, and the requester sees `TimeoutException`.
+
+Only the node whose topic equals the handler's registration topic answers. A
+request can arrive on several overlapping subscriptions (an exact listener node
+and a pattern handler node, for example), so without this rule the handler would
+run once per matching node and listeners would see the request several times.
+There are no queue groups, so every subscribed bus still receives the request.
 
 ---
 

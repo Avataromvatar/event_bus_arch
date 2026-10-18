@@ -531,6 +531,14 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
     return _resolveHandler(topic) != null;
   }
 
+  ///The registered topic of the handler that would answer [topic], or null
+  ///when no handler accepts it.
+  ///
+  ///Intended for transports: an incoming request may arrive on several
+  ///overlapping subscriptions, but only the node whose topic equals the
+  ///handler's registration topic must answer it.
+  Topic? handlerTopicFor(Topic topic) => _resolveHandler(topic)?.topic;
+
   ///The exact handler for [topic], or the most specific pattern handler that
   ///matches it. A pattern topic is resolved by the exact key only.
   RequestHandler? _resolveHandler(Topic topic) {

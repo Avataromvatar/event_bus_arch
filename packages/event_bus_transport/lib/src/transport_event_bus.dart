@@ -116,7 +116,7 @@ class TransportEventBus extends EventBusImpl {
       subjects: _subjects,
       originId: _originId,
       onError: (error, stackTrace) => _reportError(error, stackTrace),
-      onRequest: _answerRequest,
+      onRequest: (dto, message) => _answerRequest(topic, dto, message),
       topic: topic,
       currentData: currentData,
       serializer: _serializerFor(topic),
@@ -167,8 +167,15 @@ class TransportEventBus extends EventBusImpl {
   ) async {
     final serializer = _serializerFor(topic);
     final deserializer = _deserializerFor(topic);
-    if (serializer == null || deserializer == null) {
+    if (serializer == null && deserializer == null) {
       throw NoHandlerException(topic.topic);
+    }
+    if (serializer == null || deserializer == null) {
+      throw EventBusTransportException(
+        'a remote request on "${topic.topic}" needs both a serializer and a '
+        'deserializer; ${serializer == null ? 'no serializer' : 'no deserializer'} '
+        'is registered',
+      );
     }
 
     _subjects.validatePublish(topic);
@@ -224,10 +231,17 @@ class TransportEventBus extends EventBusImpl {
   ///Invokes the local handler for an incoming request and encodes its result.
   ///The response always goes to the request's reply subject: a subject
   ///returned by the serializer is ignored.
+  ///
+  ///A request can reach several overlapping subscriptions (an exact listener
+  ///node and a pattern handler node, for example). Only the node that owns the
+  ///handler's registration topic answers; the others stay silent.
   Future<Uint8List?> _answerRequest(
+    Topic nodeTopic,
     EventDTO dto,
     TransportMessage message,
   ) async {
+    if (handlerTopicFor(dto.topic) != nodeTopic) return null;
+
     final result = await handleIncomingRequest(dto);
     final serializer = _serializerFor(dto.topic);
     if (serializer == null) {

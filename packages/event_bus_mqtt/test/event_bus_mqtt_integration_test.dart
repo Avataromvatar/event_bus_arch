@@ -94,7 +94,12 @@ void main() {
       expect(await received.future.timeout(const Duration(seconds: 5)), 7);
     });
 
-    test('a request is answered by a handler on another bus', () async {
+    test('a request is answered and reaches listeners once', () async {
+      final values = <int>[];
+      final subscription = busB
+          .listen<int>(paths: ['sensor', '*'])
+          .listen(values.add);
+      addTearDown(subscription.cancel);
       busB.setHandler<int>(
         paths: ['sensor', 'double'],
         handler: (dto, lastData) async => dto.data * 2,
@@ -106,8 +111,30 @@ void main() {
         paths: ['sensor', 'double'],
         timeout: const Duration(seconds: 5),
       );
+      await Future<void>.delayed(const Duration(milliseconds: 300));
 
       expect(result, 42);
+      expect(values, [21]);
+    });
+
+    test('overlapping subscriptions deliver a fire once per node', () async {
+      final values = <int>[];
+      final subscription = busB
+          .listen<int>(paths: ['sensor', '*'])
+          .listen(values.add);
+      addTearDown(subscription.cancel);
+      // An exact node next to the pattern node: both filters match, but a
+      // listener on the pattern node must see the event once.
+      busB.setHandler<int>(
+        paths: ['sensor', 'temp'],
+        handler: (dto, lastData) async => dto.data,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      busA.fire<int>(5, paths: ['sensor', 'temp']);
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+
+      expect(values, [5]);
     });
 
     test('a remote request times out when nobody answers', () async {

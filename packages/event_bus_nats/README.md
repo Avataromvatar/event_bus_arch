@@ -172,8 +172,10 @@ through the core and publishes the result back to that inbox.
 The response is decoded with the requester's deserializer registered for the
 request topic, so the responder serializes its result under the same topic. A
 request with neither a local handler nor a transport route throws
-`NoHandlerException`. A responder with no handler reports `NoHandlerException`
-on `bus.errors`; the requester sees `TimeoutException`.
+`NoHandlerException`. Only the node that owns the handler's registration topic
+answers, so overlapping exact/pattern subscriptions do not duplicate the
+response or the listener notification. A bus without a matching handler stays
+silent; the requester sees `TimeoutException`.
 
 ## Connection lifecycle
 

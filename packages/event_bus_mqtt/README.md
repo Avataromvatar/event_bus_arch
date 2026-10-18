@@ -176,8 +176,17 @@ The requester decodes it with the deserializer registered for the request topic.
 The responder needs a handler plus a serializer and a deserializer: the
 deserializer decodes the request, the serializer encodes the handler's result
 under the request topic. A request with neither a local handler nor a transport
-route throws `NoHandlerException`. A responder without a handler reports
-`NoHandlerException` on `bus.errors`; the requester sees `TimeoutException`.
+route throws `NoHandlerException`. Only the node that owns the handler's
+registration topic answers, so overlapping exact/pattern subscriptions do not
+duplicate the response or the listener notification. A bus without a matching
+handler stays silent; the requester sees `TimeoutException`.
+
+Each subscription carries a unique MQTT 5 subscription identifier. A broker that
+sends one PUBLISH per matching subscription therefore does not make the adapter
+deliver the same event to several nodes; a broker that sends one PUBLISH with
+several identifiers notifies each node once. If a broker omits subscription
+identifiers, the adapter falls back to local filter matching, and overlapping
+filters may duplicate a message.
 
 ## Connection lifecycle
 

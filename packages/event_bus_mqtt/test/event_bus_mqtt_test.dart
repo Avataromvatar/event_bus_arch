@@ -418,6 +418,24 @@ void main() {
     );
   });
 
+  test(
+    'a remote request without a deserializer reports the missing half',
+    () async {
+      final connection = FakeMqttConnection();
+      final bus = EventBusMqtt(
+        Uri.parse('mqtt://localhost:1883'),
+        serializers: {'int.sensor': (dto) => (null, Uint8List(0))},
+        connection: connection,
+      );
+      addTearDown(bus.dispose);
+
+      expect(
+        () => bus.request<int>(1, paths: ['sensor']),
+        throwsA(isA<EventBusTransportException>()),
+      );
+    },
+  );
+
   test('a request with a wildcard path is rejected', () {
     final connection = FakeMqttConnection();
     final bus = EventBusMqtt(

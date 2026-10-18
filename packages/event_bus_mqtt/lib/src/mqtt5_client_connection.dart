@@ -193,9 +193,15 @@ class MqttServerConnection extends ReconnectingTransportConnection {
     final option = mqtt.MqttSubscriptionOption()
       ..maximumQos = _qos
       ..noLocal = options.noLocal;
-    client.subscribeWithSubscription(
-      mqtt.MqttSubscription(mqtt.MqttSubscriptionTopic(subject), option),
-    );
+    // The identifier lets the broker say which subscription matched. Without
+    // it, overlapping filters (an exact node and a pattern node) would make
+    // the adapter dispatch one broker message to several nodes, duplicating
+    // listeners and request handlers.
+    final subscription = mqtt.MqttSubscription(
+      mqtt.MqttSubscriptionTopic(subject),
+      option,
+    )..subscriptionIdentifier = id + 1;
+    client.subscribeWithSubscription(subscription);
   }
 
   @override
@@ -264,9 +270,28 @@ class MqttServerConnection extends ReconnectingTransportConnection {
         arguments: arguments,
         replyTo: replyTo,
       );
-      for (final entry in _subscriptions.entries) {
-        if (_matches(entry.value, subject)) {
-          dispatchMessage(entry.key, transportMessage, origin: origin);
+      final identifiers = header?.subscriptionIdentifier ?? const <int?>[];
+      if (identifiers.isNotEmpty) {
+        // The broker names the subscription(s) that matched. Each node is
+        // notified once even when several filters overlap.
+        final seen = <int>{};
+        for (final identifier in identifiers) {
+          if (identifier == null) continue;
+          final id = identifier - 1;
+          final filter = _subscriptions[id];
+          if (filter == null || !seen.add(id)) continue;
+          if (_matches(filter, subject)) {
+            dispatchMessage(id, transportMessage, origin: origin);
+          }
+        }
+      } else {
+        // The broker does not send subscription identifiers; fall back to
+        // local filter matching. Overlapping filters may then duplicate the
+        // message across nodes, which is unavoidable without the identifier.
+        for (final entry in _subscriptions.entries) {
+          if (_matches(entry.value, subject)) {
+            dispatchMessage(entry.key, transportMessage, origin: origin);
+          }
         }
       }
     }

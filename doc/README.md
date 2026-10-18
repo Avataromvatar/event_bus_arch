@@ -16,6 +16,7 @@ Detailed description of the `event_bus_arch` 3.0.0 package. The main README (in 
 | 07 | [Pitfalls](07-caveats.md) | Known defects, reproductions, workarounds, checklist |
 | 08 | [Transports](08-transports.md) | Running the bus over NATS / Redis / NanoMQ: address model, packaging, pitfalls |
 | 09 | [event_bus_nats](09-event-bus-nats.md) | The implemented NATS transport: architecture, registries, reconnection, request/reply, limitations |
+| 10 | [event_bus_mqtt](10-event-bus-mqtt.md) | The implemented MQTT 5 transport: grammar, wildcard difference, user properties, request/reply, limitations |
 
 ## Quick summary
 

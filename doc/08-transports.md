@@ -193,11 +193,12 @@ would also end the "no code generation, no broker lock-in" property the README s
 
 **Recommendation: B.** Separate *published* packages in a workspace inside this repository.
 
-**Status (v3).** `packages/event_bus_transport` now holds the broker-agnostic contract and the
-shared bus/connection layer; `packages/event_bus_nats` is its first adapter. Redis and MQTT 3.1.1
-are out of scope — only NATS and MQTT 5 are planned. The sketches below are the analysis that led
-to the implementation; the implemented contract is described in
-[09-event-bus-nats.md](09-event-bus-nats.md) and the package READMEs.
+**Status (v3).** `packages/event_bus_transport` holds the broker-agnostic contract and the shared
+bus/connection layer; `packages/event_bus_nats` and `packages/event_bus_mqtt` are its adapters.
+Redis and MQTT 3.1.1 are out of scope. The sketches below are the analysis that led to the
+implementation; the implemented contracts are described in
+[09-event-bus-nats.md](09-event-bus-nats.md), [10-event-bus-mqtt.md](10-event-bus-mqtt.md) and the
+package READMEs.
 
 Dart supports this natively since 3.6 via [pub workspaces](https://dart.dev/tools/pub/workspaces):
 a `workspace:` list in the root pubspec, `resolution: workspace` in each member, one

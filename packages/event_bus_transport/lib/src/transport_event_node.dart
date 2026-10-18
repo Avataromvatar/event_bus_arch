@@ -171,6 +171,14 @@ class TransportEventNode<T>
       return;
     }
 
+    // Broker wildcards are not always identical to the core ones: MQTT `#`
+    // also matches zero levels, while the core `>` requires one. Drop
+    // over-delivered messages so every transport keeps the core semantics.
+    if (TopicPattern.isPattern(topic) &&
+        !TopicPattern.matches(topic, dto.topic)) {
+      return;
+    }
+
     if (dto.data is! T) {
       _report(
         TransportDeserializationException(

@@ -258,6 +258,7 @@ Detailed guides live in [doc/](doc/README.md):
 | [07-caveats.md](doc/07-caveats.md) | What 3.0.0 changed, what remains by design, checklist |
 | [08-transports.md](doc/08-transports.md) | Running the bus over NATS / Redis / NanoMQ: analysis |
 | [09-event-bus-nats.md](doc/09-event-bus-nats.md) | The implemented NATS transport: usage, architecture, limitations |
+| [10-event-bus-mqtt.md](doc/10-event-bus-mqtt.md) | The implemented MQTT 5 transport: usage, architecture, limitations |
 
 ## Version 3.0.0 changes
 
@@ -273,7 +274,9 @@ The address model changed; this is a breaking release.
 - **`packages/event_bus_nats`** adds a NATS transport as a separate package; the core stays
   broker-free (see [doc/09-event-bus-nats.md](doc/09-event-bus-nats.md))
 - **`packages/event_bus_transport`** holds the broker-agnostic connection, mapping, bus and node
-  shared by NATS and the planned MQTT 5 transport
+  shared by the NATS and MQTT 5 transports
+- **`packages/event_bus_mqtt`** adds an MQTT 5 transport
+  (see [doc/10-event-bus-mqtt.md](doc/10-event-bus-mqtt.md))
 - The deprecated `queueLenght`, `initalData`, `initialDataNeedExecute` and `shema` aliases were removed
 
 The full migration table is in [doc/07-caveats.md](doc/07-caveats.md#migration-table).

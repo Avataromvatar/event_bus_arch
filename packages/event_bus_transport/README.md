@@ -5,7 +5,8 @@ Broker-agnostic transport layer for
 broker client and no broker-specific grammar: a concrete transport package
 supplies a connection adapter and a `SubjectGrammar`.
 
-`event_bus_nats` is the reference adapter; MQTT 5 uses the same layer.
+`event_bus_nats` and `event_bus_mqtt` are the adapters; they use the same layer
+and differ only in the client, the grammar and the wire metadata.
 
 ## What is here
 

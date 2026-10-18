@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:event_bus_arch/event_bus_arch.dart';
-
 import 'transport_connection.dart';
 import 'transport_exception.dart';
 
@@ -148,15 +146,33 @@ class FakeTransportConnection implements TransportConnection {
 
   ///Delivers [message] to every active subscription whose subject pattern
   ///matches.
+  ///
+  ///Both broker wildcard styles are understood: `*`/`>` (dot-separated) and
+  ///`+`/`#` (slash-separated). `>` needs at least one trailing token, `#`
+  ///also matches zero, exactly like the brokers.
   void deliver(TransportMessage message) {
-    final topic = Topic.fromString(message.subject);
     for (final registration in List.of(_registrations)) {
       if (registration.cancelled) continue;
-      final pattern = Topic.fromString(registration.subject);
-      if (TopicPattern.matches(pattern, topic)) {
+      if (_matchesSubscription(registration.subject, message.subject)) {
         registration.onMessage(message);
       }
     }
+  }
+
+  static bool _matchesSubscription(String filter, String subject) {
+    final separator = filter.contains('/') ? '/' : '.';
+    final pattern = filter.split(separator);
+    final topic = subject.split(separator);
+    for (var i = 0; i < pattern.length; i++) {
+      final token = pattern[i];
+      if (token == '>' || token == '#') {
+        return token == '#' || i < topic.length;
+      }
+      if (i >= topic.length) return false;
+      if (token == '*' || token == '+') continue;
+      if (token != topic[i]) return false;
+    }
+    return pattern.length == topic.length;
   }
 
   ///The subjects of all subscriptions that have not been cancelled.

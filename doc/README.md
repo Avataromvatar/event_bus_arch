@@ -15,6 +15,7 @@ Detailed description of the `event_bus_arch` 3.0.0 package. The main README (in 
 | 06 | [API reference](06-api-reference.md) | Every public type and member with signatures |
 | 07 | [Pitfalls](07-caveats.md) | Known defects, reproductions, workarounds, checklist |
 | 08 | [Transports](08-transports.md) | Running the bus over NATS / Redis / NanoMQ: address model, packaging, pitfalls |
+| 09 | [event_bus_nats](09-event-bus-nats.md) | The implemented NATS transport: architecture, registries, reconnection, limitations |
 
 ## Quick summary
 
@@ -51,11 +52,12 @@ What you need to know right away:
 
 ## Package status
 
-* Version: 3.0.0, SDK `>=3.0.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
-* Tests: 110 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO) —
-  they pass.
+* Version: 3.0.0, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
+* Tests: 115 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO) —
+  they pass. The NATS transport has its own suite in `packages/event_bus_nats/test`.
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
-  (FSM), `example/event_bus_layers_example.dart` (layers).
+  (FSM), `example/event_bus_layers_example.dart` (layers),
+  `packages/event_bus_nats/example/event_bus_nats_example.dart` (NATS).
 * The fix history of version 2.3.0 is in [07-caveats.md](07-caveats.md#what-was-fixed-in-230).
 * What changed in 3.0.0 (the address) is in
   [07-caveats.md](07-caveats.md#what-changed-in-300) and [CHANGELOG.md](../CHANGELOG.md).

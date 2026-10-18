@@ -230,6 +230,7 @@ Detailed guides live in [doc/](doc/README.md):
 | [06-api-reference.md](doc/06-api-reference.md) | Every public type and member |
 | [07-caveats.md](doc/07-caveats.md) | What 3.0.0 changed, what remains by design, checklist |
 | [08-transports.md](doc/08-transports.md) | Running the bus over NATS / Redis / NanoMQ: analysis |
+| [09-event-bus-nats.md](doc/09-event-bus-nats.md) | The implemented NATS transport: usage, architecture, limitations |
 
 ## Version 3.0.0 changes
 
@@ -242,6 +243,8 @@ The address model changed; this is a breaking release.
   both locally and across an isolate
 - The type in the address is `'$T'` as written — no lowercasing, no percent-encoding
 - `topic.topic` is the single routing key (`fullTopic`/`topicWithFragment` are gone)
+- **`packages/event_bus_nats`** adds a NATS transport as a separate package; the core stays
+  broker-free (see [doc/09-event-bus-nats.md](doc/09-event-bus-nats.md))
 - The deprecated `queueLenght`, `initalData`, `initialDataNeedExecute` and `shema` aliases were removed
 
 The full migration table is in [doc/07-caveats.md](doc/07-caveats.md#migration-table).

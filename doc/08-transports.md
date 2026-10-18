@@ -2,10 +2,10 @@
 
 [← 07. What was fixed](07-caveats.md) · [Contents](README.md)
 
-This document is an analysis, not a description of shipped behaviour: nothing in this chapter
-exists in 2.3.0 yet. It covers what it takes to run the bus over a real broker, whether the
-`Topic` address should be replaced with a broker-style subject, where the code should live, and
-which pitfalls follow from each choice.
+This document is the analysis that preceded the transport work. The NATS part is now
+implemented in [`packages/event_bus_nats`](../packages/event_bus_nats) and described in
+[09-event-bus-nats.md](09-event-bus-nats.md). The analysis below remains useful for the MQTT and
+Redis options and for the reasoning behind the broker boundary.
 
 ---
 
@@ -386,7 +386,7 @@ runtime type name.
 
 ## What next
 
-* [09-v3-plan.md](09-v3-plan.md) — the decisions taken after this analysis, and the plan for v3.0.
+* [09-event-bus-nats.md](09-event-bus-nats.md) — the implemented NATS transport and its usage.
 * [01-architecture.md](01-architecture.md) — the current address model in full.
 * [03-isolate-and-layers.md](03-isolate-and-layers.md) — the existing boundary-crossing design
   that a transport should mirror.

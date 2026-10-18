@@ -1,12 +1,16 @@
 // TODO: Put public facing types in this file.
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
-
+import 'package:dart_nats/dart_nats.dart' as NATS;
+// import 'package:dart_nats/src/platform/platform_stub.dart' as NATS_P;
 import 'package:event_bus_arch/event_bus_arch.dart';
 
-//Serialization. Deserialization
-typedef EventDTOSerialization = (Uint8List, String?) Function(EventDTO dto);
+
+///(topic?,data) if topic not set whey taked from dto.topic.topic 
+typedef EventDTOSerialization = ( String?,Uint8List) Function(EventDTO dto);
+
 typedef EventDTODeserialization =
     EventDTO Function(Uint8List data, String topic);
 
@@ -47,8 +51,24 @@ class EventNodeNatsImpl<T> implements EventNode<T> {
 }
 
 class EventBusNats with EventBusMixin {
-  Map<String, EventDTOSerialization> serializator;
-  Map<String, EventDTODeserialization> deserializator;
+  Map<String, EventDTOSerialization> serializator = {};
+  Map<String, EventDTODeserialization> deserializator= {};
+  late NATS.Client client;
+  late StreamSubscription<NATS.Status> subscriptionStatus;
+  Exception? _extension;
+  EventBusNats(Uri natsServer,{SecurityContext? security})
+  {
+    
+    client =NATS.Client();
+    subscriptionStatus =  client.statusStream.listen(_updateClientStatus);
+    client.connect(natsServer,pingInterval: Duration(seconds: 5),/*securityContext: security*/);
+
+  }
+
+  void _updateClientStatus(NATS.Status status)
+  {
+
+  }
 
   @override
   EventNode<T> createNode<T>({T? currentData, Handler<T>? handler}) {

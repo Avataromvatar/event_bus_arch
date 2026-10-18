@@ -15,6 +15,7 @@ typedef EventDTODeserialization =
     EventDTO Function(Uint8List data, String topic);
 
 class EventNodeNatsImpl<T> implements EventNode<T> {
+  NATS.Client client;
   @override
   Handler<T>? handler;
 
@@ -51,12 +52,12 @@ class EventNodeNatsImpl<T> implements EventNode<T> {
 }
 
 class EventBusNats with EventBusMixin {
-  Map<String, EventDTOSerialization> serializator = {};
-  Map<String, EventDTODeserialization> deserializator= {};
+  Map<String, EventDTOSerialization> _serializator = {};
+  Map<String, EventDTODeserialization> _deserializator= {};
   late NATS.Client client;
   late StreamSubscription<NATS.Status> subscriptionStatus;
   Exception? _extension;
-  EventBusNats(Uri natsServer,{SecurityContext? security})
+  EventBusNats(Uri natsServer,{SecurityContext? security, Map<String, EventDTOSerialization>? serializator,Map<String, EventDTODeserialization>?deserializator})
   {
     
     client =NATS.Client();

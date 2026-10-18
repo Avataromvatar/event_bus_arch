@@ -1,0 +1,14 @@
+name: event_bus_transport
+description: Broker-agnostic transport layer for event_bus_arch.
+version: 0.1.0
+resolution: workspace
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  event_bus_arch: ^3.0.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

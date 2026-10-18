@@ -298,6 +298,109 @@ void main() {
     },
   );
 
+  test('an outgoing request is answered through the connection', () async {
+    final connection = FakeNatsConnection();
+    final bus = EventBusNats(
+      Uri.parse('nats://localhost:4222'),
+      serializers: {
+        'int.sensor': (dto) =>
+            (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+      },
+      deserializers: {
+        'int.sensor': (data, topic, {arguments}) => EventDTO<int>(
+          int.parse(utf8.decode(data)),
+          topic: Topic.parse(topic),
+          arguments: arguments,
+        ),
+      },
+      connection: connection,
+    );
+    addTearDown(bus.dispose);
+
+    final pending = bus.request<int>(
+      21,
+      paths: ['sensor'],
+      timeout: const Duration(seconds: 1),
+    );
+
+    final request = connection.requests.single;
+    expect(request.subject, 'int.sensor');
+    expect(request.originId, bus.originId);
+
+    connection.deliver(
+      NatsMessage(
+        subject: request.replyTo,
+        data: Uint8List.fromList(utf8.encode('42')),
+      ),
+    );
+
+    expect(await pending, 42);
+  });
+
+  test('an incoming request is answered by the local handler', () async {
+    final connection = FakeNatsConnection();
+    final bus = EventBusNats(
+      Uri.parse('nats://localhost:4222'),
+      serializers: {
+        'int.sensor': (dto) =>
+            (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+      },
+      deserializers: {
+        'int.sensor': (data, topic, {arguments}) => EventDTO<int>(
+          int.parse(utf8.decode(data)),
+          topic: Topic.parse(topic),
+          arguments: arguments,
+        ),
+      },
+      connection: connection,
+    );
+    addTearDown(bus.dispose);
+    bus.setHandler<int>(
+      paths: ['sensor'],
+      handler: (dto, lastData) async => dto.data * 2,
+    );
+
+    connection.deliver(
+      NatsMessage(
+        subject: 'int.sensor',
+        data: Uint8List.fromList(utf8.encode('21')),
+        replyTo: '_INBOX.1',
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(connection.publishes.single.subject, '_INBOX.1');
+    expect(utf8.decode(connection.publishes.single.data), '42');
+  });
+
+  test('a request without a local handler or transport route throws', () async {
+    final connection = FakeNatsConnection();
+    final bus = EventBusNats(
+      Uri.parse('nats://localhost:4222'),
+      connection: connection,
+    );
+    addTearDown(bus.dispose);
+
+    expect(
+      () => bus.request<int>(1, paths: ['sensor']),
+      throwsA(isA<NoHandlerException>()),
+    );
+  });
+
+  test('a request with a wildcard path is rejected', () {
+    final connection = FakeNatsConnection();
+    final bus = EventBusNats(
+      Uri.parse('nats://localhost:4222'),
+      connection: connection,
+    );
+    addTearDown(bus.dispose);
+
+    expect(
+      () => bus.request<int>(1, paths: ['sensor', '*']),
+      throwsA(isA<EventBusException>()),
+    );
+  });
+
   test('rejects an invalid registry key at construction', () {
     expect(
       () => EventBusNats(

@@ -16,6 +16,12 @@ abstract class KeepAliveNode {
   bool get keepAlive;
 }
 
+///A node that can receive an event from a transport and deliver it to local
+///listeners without publishing it back to the transport.
+abstract class IncomingEventNode {
+  void deliverIncoming(EventDTO dto);
+}
+
 ///A node holds the current value of a topic and the stream of its listeners.
 ///Request handlers are registered on the bus, not on the node.
 abstract class EventNode<T> {
@@ -350,18 +356,29 @@ mixin EventBusMixin implements EventBus {
   }
 
   ///Delivers to the exact node and to every matching pattern node.
-  bool _dispatchToListeners(EventDTO dto) {
+  ///
+  ///An [incoming] event came from another process: a transport node delivers it
+  ///locally without publishing it back.
+  bool _dispatchToListeners(EventDTO dto, {bool incoming = false}) {
     var matched = false;
     final exact = _eventsMap[dto.topic];
     if (exact != null) {
-      exact.deliver(dto);
+      _deliverNode(exact, dto, incoming);
       matched = true;
     }
     for (final entry in _matchingPatternEntries(dto.topic)) {
-      entry.value.deliver(dto);
+      _deliverNode(entry.value, dto, incoming);
       matched = true;
     }
     return matched;
+  }
+
+  void _deliverNode(EventNode node, EventDTO dto, bool incoming) {
+    if (incoming && node is IncomingEventNode) {
+      (node as IncomingEventNode).deliverIncoming(dto);
+    } else {
+      node.deliver(dto);
+    }
   }
 
   ///Pattern nodes matching a concrete topic, most specific first.
@@ -570,13 +587,22 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
     return registration.invoke(dto, lastData);
   }
 
+  ///Dispatches a request received from another process, for example a
+  ///transport.
+  ///
+  ///The handler is resolved exactly like a local [request]; listeners are
+  ///notified too. The returned future is the handler's response. Throws
+  ///[NoHandlerException] when no registered handler accepts the data.
+  Future<dynamic> handleIncomingRequest(EventDTO dto) =>
+      _dispatchIncoming(dto)!;
+
   ///Dispatches an event received from another isolate.
   ///
   ///A request needs a registered handler; a fire event is delivered to
   ///listeners only.
   Future? _dispatchIncoming(EventDTO dto, {bool request = true}) {
     if (!request) {
-      final matched = _dispatchToListeners(dto);
+      final matched = _dispatchToListeners(dto, incoming: true);
       _addAllEvent(dto, matched);
       return null;
     }
@@ -589,7 +615,7 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
 
     final handlerNode = _nodeByTopic(registration.topic);
     final previous = handlerNode?.currentData;
-    final matched = _dispatchToListeners(dto);
+    final matched = _dispatchToListeners(dto, incoming: true);
     _addAllEvent(dto, matched);
     return _invoke(registration, dto, previous);
   }

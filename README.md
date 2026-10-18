@@ -272,6 +272,8 @@ The address model changed; this is a breaking release.
 - `topic.topic` is the single routing key (`fullTopic`/`topicWithFragment` are gone)
 - **`packages/event_bus_nats`** adds a NATS transport as a separate package; the core stays
   broker-free (see [doc/09-event-bus-nats.md](doc/09-event-bus-nats.md))
+- **`packages/event_bus_transport`** holds the broker-agnostic connection, mapping, bus and node
+  shared by NATS and the planned MQTT 5 transport
 - The deprecated `queueLenght`, `initalData`, `initialDataNeedExecute` and `shema` aliases were removed
 
 The full migration table is in [doc/07-caveats.md](doc/07-caveats.md#migration-table).

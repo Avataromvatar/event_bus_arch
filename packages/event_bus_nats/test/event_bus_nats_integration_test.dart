@@ -92,6 +92,33 @@ void main() {
       expect(await received.future.timeout(const Duration(seconds: 5)), 7);
     });
 
+    test('a request is answered by a handler on another bus', () async {
+      busB.setHandler<int>(
+        paths: ['sensor', 'double'],
+        handler: (dto, lastData) async => dto.data * 2,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      final result = await busA.request<int>(
+        21,
+        paths: ['sensor', 'double'],
+        timeout: const Duration(seconds: 5),
+      );
+
+      expect(result, 42);
+    });
+
+    test('a remote request times out when nobody answers', () async {
+      await expectLater(
+        busA.request<int>(
+          1,
+          paths: ['sensor', 'nobody'],
+          timeout: const Duration(milliseconds: 200),
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+
     test('arguments travel with the event', () async {
       final received = Completer<Map<String, String>?>();
       final busC = EventBusNats(

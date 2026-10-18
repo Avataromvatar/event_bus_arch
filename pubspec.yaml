@@ -8,6 +8,7 @@ environment:
 
 workspace:
   - packages/event_bus_nats
+  - packages/event_bus_transport
 
 dependencies:
   # equatable: ^2.0.0

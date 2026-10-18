@@ -6,6 +6,12 @@ NATS transport for [`event_bus_arch`](https://pub.dev/packages/event_bus_arch).
 NATS server. Application code keeps using `fire`, `request`, `listen`, `subscribe` and
 `setHandler`; the transport is configured with serializers and deserializers.
 
+The package is a thin NATS adapter over
+[`event_bus_transport`](../event_bus_transport): the connection lifecycle,
+subscription registry, topic ↔ subject mapping, node and bus are shared with
+other transports. This package supplies the `dart_nats` client adapter, the
+NATS grammar and the public `Nats*` names.
+
 ## Requirements
 
 - Dart SDK 3.12 or newer.
@@ -143,6 +149,32 @@ if one is configured. It must be a concrete publish subject.
 JSON. The deserializer receives it as the named `arguments` parameter and
 decides whether to put it into the `EventDTO`. This requires NATS headers.
 
+## Requests
+
+`request` keeps local semantics when a handler is registered on the bus. When
+there is no local handler, the request goes over NATS and the first response is
+returned:
+
+```dart
+final doubled = await requester.request<int>(
+  21,
+  paths: ['sensor', 'double'],
+  timeout: const Duration(seconds: 2),
+);
+```
+
+The responder needs a handler plus a serializer and a deserializer for the
+topic: the deserializer decodes the request, the serializer encodes the
+handler's return value. The request is published with a NATS inbox in the reply
+subject. A node that receives a message with `replyTo` invokes the local handler
+through the core and publishes the result back to that inbox.
+
+The response is decoded with the requester's deserializer registered for the
+request topic, so the responder serializes its result under the same topic. A
+request with neither a local handler nor a transport route throws
+`NoHandlerException`. A responder with no handler reports `NoHandlerException`
+on `bus.errors`; the requester sees `TimeoutException`.
+
 ## Connection lifecycle
 
 ```dart
@@ -157,10 +189,10 @@ bus.errors;               // stream of asynchronous transport/node errors
   topic while the connection is down throws
   `NatsServerUnavailableException` before local delivery; the event is not
   silently buffered.
-- Reconnection is owned by the transport: a new `dart_nats` client is created
-  per attempt, with exponential backoff (`NatsReconnectPolicy`, default 1s →
-  30s, unlimited attempts). Subscriptions are restored from a local registry,
-  exactly once.
+- Reconnection is owned by the shared `ReconnectingTransportConnection`: a new
+  `dart_nats` client is created per attempt, with exponential backoff
+  (`NatsReconnectPolicy`, default 1s → 30s, unlimited attempts). Subscriptions
+  are restored from a local registry, exactly once.
 - The bus writes `X-EventBus-Origin` on every publish and drops messages with
   its own origin, so a node that both publishes and subscribes does not receive
   its own event twice. Local listeners still receive it from the local fire.
@@ -173,9 +205,9 @@ bus.errors;               // stream of asynchronous transport/node errors
 
 - `NatsServerUnavailableException` — `fire` while disconnected.
 - `NatsSerializationException` — the serializer threw; the caller receives it.
-- `NatsDeserializationException` — an incoming payload could not be decoded or
-  its data type does not match `T`; it is reported on `bus.errors` and the node
-  keeps running.
+- `NatsDeserializationException` — an incoming payload or request response
+  could not be decoded, or an event's data type does not match `T`; it is
+  reported on `bus.errors` and the node keeps running.
 - Transport failures that happen after `fire` returned (a race on the socket)
   are reported on `bus.errors`.
 
@@ -188,8 +220,9 @@ bus.errors;               // stream of asynchronous transport/node errors
 - The local-only members keep their local meaning: `haveListener` and
   `haveHandler` only see this process, and `allEventStream` sees outgoing
   events, not incoming ones.
-- `request` is local-only in this package. Remote request/reply is not
-  implemented yet; `msg.replyTo` is carried by the connection for a future API.
+- `request` is local when a handler is registered; otherwise it uses NATS
+  request/reply with the inbox from `replyTo`. There is no queue-group
+  competing-consumer routing: every subscribed bus receives the request.
 - `EventNodeNatsImpl.copy()` throws: a node cannot be rebound to another bus.
 - `runtimeType` as a wire address is not stable under web minification or AOT
   obfuscation. Use `typeTags` (or a type whose name is stable) before deploying.
@@ -207,4 +240,5 @@ $env:NATS_URL = "nats://127.0.0.1:4222"
 dart test
 ```
 
-The integration files skip themselves when `NATS_URL` is not set.
+The integration files skip themselves when `NATS_URL` is not set. The shared
+layer has its own suite in [`packages/event_bus_transport`](../event_bus_transport).

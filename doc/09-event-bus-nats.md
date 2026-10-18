@@ -11,8 +11,8 @@ way it does and what the MQTT/Redis options would cost.
 
 ## 1. Scope
 
-`EventBusNats` is an `EventBus` that keeps the local API (`send`, `listen`,
-`subscribe`, `setHandler`, `currentData`) and adds a NATS direction:
+`EventBusNats` is an `EventBus` that keeps the local API (`fire`, `request`,
+`listen`, `subscribe`, `setHandler`, `currentData`) and adds a NATS direction:
 
 * a **serializer** decides how an outgoing event becomes bytes;
 * a **deserializer** decides how incoming bytes become an `EventDTO`;
@@ -22,25 +22,33 @@ way it does and what the MQTT/Redis options would cost.
 The bus does not require a code generator. The price is a registry of functions,
 kept in sync by the application on both sides of the wire.
 
+The NATS package is a thin adapter. The lifecycle, registries, mapping, node and
+bus live in [`packages/event_bus_transport`](../packages/event_bus_transport)
+and are shared with the planned MQTT 5 transport; this package supplies the
+`dart_nats` client adapter, the NATS grammar and the public `Nats*` names.
+
 ---
 
 ## 2. Architecture
 
 ```text
-EventBusNats extends EventBusImpl
- ├── NatsSubjectMapper        local topic <-> wire subject, prefix, type tags
- ├── NatsRegistryIndex        serializer/deserializer resolution
- ├── NatsConnection           transport seam
- │    └── DartNatsConnection  dart_nats client, reconnect, headers
- └── EventNodeNatsImpl<T>     one per topic
-      ├── EventNodeImp<T>     local value stream and currentData
-      ├── serializer          used by send()
-      └── deserializer        used by the NATS subscription
+EventBusNats                     NATS factory and public aliases
+ └── TransportEventBus           shared bus: registries, createNode, request
+      ├── TopicSubjectMapper     local topic <-> wire subject, prefix, type tags
+      │    └── NatsGrammar       NATS separator and wildcard symbols
+      ├── TopicRegistryIndex     serializer/deserializer resolution
+      ├── TransportConnection    transport seam
+      │    └── ReconnectingTransportConnection
+      │         └── DartNatsConnection   dart_nats client, headers
+      └── TransportEventNode<T>  one per topic
+           ├── EventNodeImp<T>   local value stream and currentData
+           ├── serializer       used by fire()
+           └── deserializer     used by the NATS subscription
 ```
 
 `dart_nats` is imported only by `dart_nats_connection.dart`. Everything else
-depends on the `NatsConnection` interface, which is what makes the bus testable
-without a server.
+depends on `TransportConnection`, which is what makes the bus testable without a
+server.
 
 ---
 
@@ -94,11 +102,11 @@ subscribes only when a deserializer resolves.
 
 ## 5. Outbound flow
 
-`send<T>` is the ordinary core method. The core creates a node lazily for a
+`fire<T>` is the ordinary core method. The core creates a node lazily for a
 topic present in either registry (`shouldCreateNodeOnSend`); for any other
-topic, a send with no node still returns `null`, exactly like a local bus.
+topic, a fire with no node still returns `false`, exactly like a local bus.
 
-`EventNodeNatsImpl.send` then:
+`TransportEventNode.deliver` then:
 
 1. checks `connection.isConnected` and throws
    `NatsServerUnavailableException` before local delivery when the server is
@@ -127,7 +135,8 @@ On an incoming message the node:
 2. calls the deserializer with the payload, the local topic and the arguments
    from the headers;
 3. checks that `dto.data is T`;
-4. delivers the event with `EventNodeImp.send`, **without** publishing it again.
+4. delivers the event with `EventNodeImp.deliver` (or `deliverIncoming` when a
+   request handler dispatches it), **without** publishing it again.
 
 Deserialization failures and type mismatches are reported on `bus.errors`; the
 node and its subscription stay alive.
@@ -136,6 +145,30 @@ The node is a `KeepAliveNode`: the transport owns an incoming subscription, so
 cancelling the last local listener does not remove the node, its subscription or
 its `currentData`; `bus.dispose()` does. `haveHandler` reflects request handlers
 registered on the bus, not the transport subscription.
+
+### Remote requests
+
+`request<T>` first resolves a local handler. When one exists, the request never
+leaves the process, exactly as on a local bus. When none does, and the topic has
+both a serializer and a deserializer, the request is published to the mapped
+subject with a NATS inbox (`_INBOX.…`) as the reply subject:
+
+1. the requester's serializer encodes the request DTO;
+2. `TransportConnection.request` subscribes to the inbox, publishes, and waits
+   for the first response or the timeout;
+3. on the responder the node decodes the message, invokes the local handler
+   through `EventBusHandlersMixin.handleIncomingRequest`, and publishes the
+   encoded result back to `replyTo`;
+4. the requester decodes the response with the deserializer registered for the
+   request topic and returns `dto.data`.
+
+The response always goes to the inbox: a serializer subject override is ignored
+for responses. The responder's serializer therefore has to encode the handler's
+return value under the request topic. Without a local handler and without a
+transport route the call throws `NoHandlerException`; a responder without a
+handler reports `NoHandlerException` on `bus.errors`, and the requester sees
+`TimeoutException`. There are no queue groups, so every subscribed bus receives
+the request.
 
 ---
 
@@ -205,8 +238,9 @@ Asynchronous failures are reported on `errors`. Errors that happen before
   with multiple publishers is not.
 * **Local-only members stay local.** `haveListener` and `haveHandler` inspect
   this process; `allEventStream` sees outgoing events, not incoming ones.
-* **`request` is local-only.** Remote request/reply is not implemented; the
-  connection carries `replyTo` for a future API.
+* **Requests prefer the local handler.** A remote request is sent only when no
+  local handler is registered; there are no queue groups, so every subscribed
+  bus receives it and answers on the inbox.
 * **`runtimeType` is not a stable wire address.** Web release builds minify
   type names, AOT obfuscation renames them. Use `typeTags` or stable explicit
   type names in production.
@@ -227,8 +261,10 @@ NATS_URL=nats://127.0.0.1:4222 dart test
 
 They cover the adapter (publish, echo filter, arguments) and the bus (two buses
 exchanging events, wildcard delivery, arguments, publisher not receiving its own
-echo). The example `packages/event_bus_nats/example/event_bus_nats_example.dart`
-is a two-bus end-to-end demo.
+echo, remote request/reply and its timeout). The example
+`packages/event_bus_nats/example/event_bus_nats_example.dart` is a two-bus
+end-to-end demo. The shared layer has its own suite in
+`packages/event_bus_transport/test`.
 
 ---
 
@@ -236,12 +272,25 @@ is a two-bus end-to-end demo.
 
 | File | Responsibility |
 |---|---|
-| `event_bus_nats_base.dart` | `EventBusNats`, registries, error stream |
-| `event_node_nats.dart` | `EventNodeNatsImpl`, outbound/inbound flows |
-| `nats_connection.dart` | `NatsConnection`, statuses, message, options |
-| `dart_nats_connection.dart` | real client, reconnect, headers, subscriptions |
-| `nats_subject.dart` | topic ↔ subject mapping and validation |
-| `nats_registry.dart` | exact/type/pattern resolution |
-| `nats_serialization.dart` | serializer/deserializer typedefs |
-| `nats_reconnect_policy.dart` | backoff |
-| `nats_exception.dart` | error types |
+| `event_bus_nats_base.dart` | `EventBusNats`: NATS factory over `TransportEventBus` |
+| `event_node_nats.dart` | `EventNodeNatsImpl` alias for `TransportEventNode` |
+| `nats_connection.dart` | `NatsConnection` aliases, statuses, message, options |
+| `dart_nats_connection.dart` | `dart_nats` client adapter: connect, headers, subscriptions |
+| `nats_subject.dart` | `NatsGrammar` and `NatsSubjectMapper` |
+| `nats_registry.dart` | `NatsRegistryIndex` alias for `TopicRegistryIndex` |
+| `nats_serialization.dart` | shared serializer/deserializer typedefs |
+| `nats_reconnect_policy.dart` | `NatsReconnectPolicy` alias for `ReconnectPolicy` |
+| `nats_exception.dart` | `Nats*` aliases for the shared transport errors |
+
+Shared layer (`packages/event_bus_transport/lib/src`):
+
+| File | Responsibility |
+|---|---|
+| `transport_connection.dart` | connection seam, message, status, headers |
+| `reconnecting_transport_connection.dart` | lifecycle, registry, reconnect, request/reply |
+| `transport_event_bus.dart` | bus, registries, remote request |
+| `transport_event_node.dart` | outbound/inbound node, request answering |
+| `topic_subject_mapper.dart` | local topic ↔ subject mapping |
+| `subject_grammar.dart` | broker separator and wildcard symbols |
+| `topic_registry_index.dart` | exact/type/pattern resolution |
+| `transport_exception.dart` | shared error types |

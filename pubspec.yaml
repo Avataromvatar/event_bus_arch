@@ -14,8 +14,6 @@ workspace:
 dependencies:
   # equatable: ^2.0.0
   # uuid: ^3.0.6
-  event_bus_transport: ^0.1.0
-    # resolution: workspace
   intl: ^0.20.2
   async: ^2.13.0
   rxdart: ^0.28.0

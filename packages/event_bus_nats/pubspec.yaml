@@ -1,21 +1,18 @@
 name: event_bus_nats
 description: NATS transport for event_bus_arch.
 version: 1.0.0
-# repository: https://github.com/my_org/my_repo
+repository: https://github.com/Avataromvatar/dart_event_bus
 
 resolution: workspace
 
 environment:
-  sdk: ^3.12.0
+  sdk: ^3.6.0
 
 # Add regular dependencies here.
 dependencies:
-
   # path: ^1.9.0
-  event_bus_arch: 
-    resolution: workspace
-  event_bus_transport:
-    resolution: workspace
+  event_bus_arch: ^3.0.0
+  event_bus_transport: ^0.1.0
   dart_nats: ^1.6.1
 
 dev_dependencies:

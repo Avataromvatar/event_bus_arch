@@ -1,16 +1,15 @@
 name: event_bus_mqtt
 description: MQTT 5 transport for event_bus_arch.
 version: 0.1.0
+repository: https://github.com/Avataromvatar/dart_event_bus
 resolution: workspace
 
 environment:
-  sdk: ^3.12.0
+  sdk: ^3.8.0
 
 dependencies:
-  event_bus_arch: 
-    resolution: workspace
-  event_bus_transport: 
-    resolution: workspace
+  event_bus_arch: ^3.0.0
+  event_bus_transport: ^0.1.0
   mqtt5_client: ^5.1.0
   typed_data: ^1.3.2
 

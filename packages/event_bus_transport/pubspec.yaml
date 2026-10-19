@@ -1,15 +1,14 @@
 name: event_bus_transport
 description: Broker-agnostic transport layer for event_bus_arch.
 version: 0.1.0
+repository: https://github.com/Avataromvatar/dart_event_bus
 resolution: workspace
 
 environment:
   sdk: ^3.6.0
 
 dependencies:
-# event_bus_arch:  ^3.0.0
-  event_bus_arch:
-    resolution: workspace
+  event_bus_arch: ^3.0.0
 
 dev_dependencies:
   lints: ^6.0.0

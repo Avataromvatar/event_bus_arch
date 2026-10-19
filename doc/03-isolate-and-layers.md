@@ -5,9 +5,9 @@
 ## Why
 
 An isolate is the only way to take a second core in Dart. `EventBusIsolate` gives a bus that looks
-like a regular one, but events go to a worker isolate and come back from it. On top of it, `Layers`
-builds chains of layers: `main ↔ isolate₂ ↔ isolate₁ ↔ isolate₀`, where each isolate is a separate
-"floor" of the application with its own bus.
+like a regular one, but events go to a worker isolate and requests come back from it. On top of it,
+`Layers` builds chains of layers: `main ↔ isolate₂ ↔ isolate₁ ↔ isolate₀`, where each isolate is a
+separate "floor" of the application with its own bus.
 
 ## EventBusIsolate
 
@@ -18,8 +18,8 @@ class EventBusIsolate extends EventBusImpl {
     Object? initialData,
   });
 
-  Future<bool> get waitInit;   // completes when the worker has handed over the SendPort
-  bool get isInit;             // true if the SendPort has been received
+  Future<bool> get waitInit;   // completes when onInit has finished
+  bool get isInit;             // true if the worker is ready
   Future<void> dispose();      // close the streams, the port, and kill the isolate
 }
 ```
@@ -41,9 +41,9 @@ Future<void> main() async {
 Future<void> _initWorker(EventBus bus, Object? initialData) async {
   final prefix = initialData as String;
   await _heavyInit();                       // async initialization is fine too
-  bus.subscribe<String>(onData: (e) => bus.send('$prefix: $e'));
+  bus.subscribe<String>(onData: (e) => bus.fire('$prefix: $e'));
   bus.handlers.setHandler<int>(handler: (dto, lastData) async {
-    dto.completer?.complete(dto.data * 2);
+    return dto.data * 2;                    // the response for request()
   });
 }
 ```
@@ -70,27 +70,31 @@ iso.isInit;                       // true
 await iso.ping();                 // true — the worker is alive (for example, before reusing it)
 ```
 
-### Sending
+### Publishing
 
 ```dart
 final iso = EventBusIsolate(onInit: _initWorker);
 await iso.waitInit;
 
-// 1. Request-response: whatever the worker put into the completer comes back
-final doubled = await iso.send<int>(21);              // 42
+// 1. Request-response: the worker handler's returned value comes back
+final doubled = await iso.request<int>(21);           // 42
 
-// 1a. Before waitInit, send throws a StateError — you can no longer silently do nothing
+// 1a. Before waitInit, fire/request throw a StateError — no silent no-ops
 
-// 2. A one-way event: the usual common scenario
-await iso.send<String>('ping');
+// 2. A one-way event: returns true when it was handed to the worker
+iso.fire<String>('ping');
 
 // 3. Receiving events sent FROM the worker
 iso.subscribe<String>(onData: (e) => print('from worker: $e'));
 ```
 
-On the main side, `send` **does not look for a local node** — it always goes to the isolate (this is
-an overridden implementation). Events coming from the worker, in turn, are dispatched to the local
-nodes of the main isolate: listeners and handlers.
+On the main side, `fire` and `request` **do not look for a local node** — they always go to the
+isolate. Events and requests coming from the worker, in turn, are dispatched to the local nodes of
+the main isolate: `fire` to listeners, `request` to the local handler. The worker bus works the
+same way in the other direction.
+
+`fire` never waits for a handler and sends no reply. `request` waits for exactly one response:
+the handler's return value or its exception.
 
 ### How it works internally
 
@@ -99,33 +103,38 @@ nodes of the main isolate: listeners and handlers.
  ┌────────────────────────┐                     ┌────────────────────────────┐
  │ EventBusIsolate        │  SendPort ────────► │ ReceivePort                │
  │  _toEBSender ──────────┼─────────────────────┼─► _EventBusForIsolate      │
- │                        │   EventDTO          │     _eventsMap, handlers   │
+ │                        │  _IsolateRequest    │     _eventsMap, handlers   │
+ │                        │  _IsolateFire       │                            │
  │  _receivePort ◄────────┼─────────────────────┼── SendPort                 │
- │  _request:             │   (Topic, value)    │   _request:                │
- │    Topic → [Completer] │   EventDTO          │     Topic → [Completer]    │
+ │  _link._pending:       │  _IsolateResponse   │   _link._pending:          │
+ │    id → Completer      │  _IsolateError…     │     id → Completer         │
  └────────────────────────┘                     └────────────────────────────┘
 ```
 
-* A `Completer` is **never passed across the isolate boundary**. The sender puts its `Completer`
-  into `_requests[id]`, and the worker sends back a response with the same `id`; the response pulls
-  the right `Completer` from the map, so the order of responses does not matter.
-* An `EventDTO` going through the port travels **without** a `completer` — the result travels as a
-  separate message.
-* When the worker receives an event, it creates its own copy of the DTO with a new `Completer`, and
-  sends the result of ITS OWN handler back up. Main behaves in exactly the same way when it receives
-  an event from the worker: if there is a local handler for it, its result goes back to the isolate.
+* A `Completer` is **never passed across the isolate boundary**. The sender keeps its completer
+  in a local map under a request id, and the other side sends a response with the same id; the
+  response pulls the right completer, so the order of responses does not matter.
+* `EventDTO` has no completer at all in 3.0.0 — the result travels as a separate protocol message
+  (`_IsolateResponse` or `_IsolateErrorResponse`).
+* `_IsolateFire` has no reply. The receiver dispatches it to listeners only (`request: false`);
+  request handlers are not invoked.
+* `_IsolateRequest` is dispatched by resolving a handler on the receiving bus, notifying its
+  listeners and invoking the handler. Its returned future is sent back; an exception is sent as
+  `_IsolateErrorResponse`.
 
 ### Guarantees and limitations
 
 | Rule | Consequence |
 |---|---|
 | Exactly one response per request, correlated by `id` | Concurrent requests of the same type each get their own result; the order of responses does not matter |
-| No node for the topic in the isolate | The request resolves with `null` (not an error and not a hang) |
-| An exception in a worker handler | Reaches the sender as an error from `await iso.send(...)` |
+| No handler for the topic in the target isolate | `request` fails with `NoHandlerException` (it does not hang and does not return null) |
+| An exception in a worker handler | Reaches the sender as an error from `await iso.request(...)` |
+| `fire` has no response | A worker listener sees it; a worker handler does not run |
 | `dispose` or worker death with a request in flight | The wait completes with an `EventBusException`; there are no forever-pending `await`s |
 | Only "sendable" objects can cross the isolate | Closures, `StreamController`s, open files and the like cannot be sent |
-| `await iso.send(...)` returns the handler's result, not event ordering | The result may arrive later than events sent by the worker inside the handler (the source comment warns about this explicitly) |
+| `await iso.request(...)` returns the handler's result, not event ordering | The result may arrive later than events fired by the worker inside the handler |
 | The worker does not know about `isModelBus` | The bus inside the worker is always common |
+| Wildcard paths are rejected | `fire`/`request` on the isolate address concrete topics, like everywhere else |
 
 ### Shutdown
 
@@ -134,9 +143,9 @@ await iso.dispose();
 ```
 
 `dispose` is idempotent: it completes all pending requests with an error, closes `allEventStream`,
-the main-bus nodes and the `ReceivePort`, then kills the isolate. After it is closed, `send` throws
-a `StateError` and `ping()` returns `false`. If the worker dies on its own, pending waits also
-complete with an error.
+the main-bus nodes and the `ReceivePort`, then kills the isolate. After it is closed, `fire` and
+`request` throw a `StateError` and `ping()` returns `false`. If the worker dies on its own,
+pending waits also complete with an error.
 
 ## Layers — multi-layer setups
 
@@ -149,6 +158,7 @@ typedef fnInitLayer = FutureOr<void> Function(Layer layer, Object? initialData);
 static Future<Layer> createLayers(
   List<(fnInitLayer, Object?, bool)> layers, {
   bool currentIsModelBus = true,
+  Duration? timeout,
 });
 ```
 
@@ -168,11 +178,11 @@ Worker N (layers[N] ran exactly here)
 
 Rules:
 
-* `layer.top!.send(...)` — the event goes **up**;
-* `layer.bottom!.send(...)` — the event goes **down**;
+* `layer.top!.fire(...)` / `layer.top!.request(...)` — the event goes **up**;
+* `layer.bottom!.fire(...)` / `layer.bottom!.request(...)` — the event goes **down**;
 * `layer.current` — the layer's local bus for internal logic;
-* sending down/up is asymmetric: `send` to `bottom`/`top` goes through the isolate branch and
-  returns the handler's result, while the layer's "own" events live in `current`;
+* `fire` is one-way and returns whether the event was handed to the isolate; `request` crosses
+  the isolate boundary and waits for the handler's result on the other side;
 * the init function runs **inside** the corresponding isolate and must be top-level/static (see
   below).
 
@@ -198,7 +208,7 @@ Future<void> main() async {
   final answerFuture = layer.bottom!.listen<Ping>().first;
   layer.bottom!.subscribe<Ping>(onData: (e) => print('back to top: ${e.count}'));
 
-  layer.bottom!.send(Ping(0));
+  layer.bottom!.fire(Ping(0));
 
   final answer = await answerFuture;
   print('result: ${answer.count}');       // 3
@@ -208,13 +218,13 @@ Future<void> main() async {
 
 // runs in the MIDDLE isolate (may be async — createLayers waits for it)
 Future<void> _initMiddle(Layer layer, Object? _) async {
-  layer.top!.subscribe<Ping>(onData: (e) => layer.bottom!.send(Ping(e.count + 1)));
-  layer.bottom!.subscribe<Ping>(onData: (e) => layer.top!.send(Ping(e.count + 1)));
+  layer.top!.subscribe<Ping>(onData: (e) => layer.bottom!.fire(Ping(e.count + 1)));
+  layer.bottom!.subscribe<Ping>(onData: (e) => layer.top!.fire(Ping(e.count + 1)));
 }
 
 // runs in the BOTTOM isolate
 void _initBottom(Layer layer, Object? _) {
-  layer.top!.subscribe<Ping>(onData: (e) => layer.top!.send(Ping(e.count + 1)));
+  layer.top!.subscribe<Ping>(onData: (e) => layer.top!.fire(Ping(e.count + 1)));
 }
 ```
 
@@ -225,17 +235,20 @@ parameter.
 Data flow in this example:
 
 ```text
-main  send(Ping(0))
-        │  layer.bottom!.send
+main  fire(Ping(0))
+        │  layer.bottom!.fire
         ▼
-isolate[A]  top receives 0 → bottom!.send(Ping(1))
+isolate[A]  top receives 0 → bottom!.fire(Ping(1))
         ▼
-isolate[B]  top receives 1 → top!.send(Ping(2))
+isolate[B]  top receives 1 → top!.fire(Ping(2))
         ▲
-isolate[A]  bottom receives 2 → top!.send(Ping(3))
+isolate[A]  bottom receives 2 → top!.fire(Ping(3))
         ▲
 main  receives 3
 ```
+
+For a value that must be computed in a lower layer, use `request` instead — the future resolves
+with the handler's return value from that layer.
 
 ### Shutdown
 

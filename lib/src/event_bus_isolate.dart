@@ -32,6 +32,12 @@ class _IsolateRequest {
   const _IsolateRequest(this.id, this.dto);
 }
 
+///A fire-and-forget event. The receiver dispatches it and does not reply.
+class _IsolateFire {
+  final EventDTO dto;
+  const _IsolateFire(this.dto);
+}
+
 ///A reply to a specific request. value == null means "handled without a result"
 ///or "there is no node for the event".
 class _IsolateResponse {
@@ -73,7 +79,7 @@ class _PendingRequest {
 class _IsolateLink {
   _IsolateLink(this._host);
 
-  final EventBusMixin _host;
+  final EventBusImpl _host;
 
   ///Port to the other side. On the worker side it is known from the start, on the
   ///main side it appears after the handshake.
@@ -102,6 +108,16 @@ class _IsolateLink {
     return completer.future;
   }
 
+  ///Sends an event without waiting for a reply.
+  bool fire(EventDTO dto) {
+    var port = sendPort;
+    if (port == null || _closed) {
+      return false;
+    }
+    port.send(_IsolateFire(dto));
+    return true;
+  }
+
   ///Checks that the worker is alive and responds.
   Future<bool> ping(Duration timeout) {
     var port = sendPort;
@@ -124,13 +140,18 @@ class _IsolateLink {
     if (message is _IsolateResponse) {
       _pending.remove(message.id)?.completer.complete(message.value);
     } else if (message is _IsolateErrorResponse) {
-      _pending.remove(message.id)?.completer.completeError(message.error, message.stackTrace);
+      _pending
+          .remove(message.id)
+          ?.completer
+          .completeError(message.error, message.stackTrace);
     } else if (message is _IsolatePong) {
       _pings.remove(message.id)?.complete(true);
     } else if (message is _IsolatePing) {
       sendPort?.send(_IsolatePong(message.id));
     } else if (message is _IsolateRequest) {
       unawaited(_answer(message));
+    } else if (message is _IsolateFire) {
+      _host._dispatchIncoming(message.dto, request: false);
     }
     // any other message (including late replies) is ignored
   }
@@ -142,7 +163,7 @@ class _IsolateLink {
       return;
     }
     try {
-      var value = await _dispatchIncoming(_host, request.dto);
+      var value = await _host._dispatchIncoming(request.dto);
       if (!_closed) {
         port.send(_IsolateResponse(request.id, value));
       }
@@ -159,8 +180,8 @@ class _IsolateLink {
     _closed = true;
     for (var pending in _pending.values) {
       if (!pending.completer.isCompleted) {
-        pending.completer
-            .completeError(EventBusException('$error (pending event "${pending.topic}")'));
+        pending.completer.completeError(
+            EventBusException('$error (pending event "${pending.topic}")'));
       }
     }
     _pending.clear();
@@ -171,22 +192,6 @@ class _IsolateLink {
     }
     _pings.clear();
   }
-}
-
-///Dispatches an event that came from the other isolate: hands it to the local
-///nodes and returns the handler result. It always completes its completer, so a
-///reply reaches the sender in any case.
-Future? _dispatchIncoming(EventBusMixin bus, EventDTO dto) {
-  var completer = Completer();
-  var dtoCopy = EventDTOImpl(dto.topic, dto.data, completer: completer);
-  var node = bus._eventsMap[dtoCopy.topic];
-  if (node != null) {
-    node.send(dtoCopy);
-    bus._addAllEvent(dtoCopy, true);
-    return completer.future;
-  }
-  bus._addAllEvent(dtoCopy, false);
-  return null;
 }
 
 ///Atention The result of calling the event can be received later than the events called in the event handler on the isolate side
@@ -224,27 +229,52 @@ class EventBusIsolate extends EventBusImpl {
   EventBusIsolate({
     required this.onInit,
     Object? initialData,
-    @Deprecated('Use initialData') Object? initalData,
   }) : super(false) {
-    _init(initalData: initialData ?? initalData);
+    _init(initialData: initialData);
   }
 
   @override
-  Future<dynamic> send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments}) async {
+  bool fire<T>(T data,
+      {List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments}) {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
     }
     if (!_ready) {
-      throw StateError('EventBusIsolate is not initialized: await waitInit before send');
+      throw StateError(
+          'EventBusIsolate is not initialized: await waitInit before fire');
     }
-    var dto =
-        EventDTO<T>(data, path: path, fragment: fragment, arguments: arguments, target: target, completer: null);
-    return _link.request(dto);
+    _rejectWildcardPaths(paths, 'fire');
+    var dto = EventDTO<T>(data,
+        paths: paths, arguments: arguments, separator: separator);
+    return _link.fire(dto);
+  }
+
+  @override
+  Future<dynamic> request<T>(T data,
+      {List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments,
+      Duration? timeout}) async {
+    if (isDisposed) {
+      throw StateError('EventBusIsolate is disposed');
+    }
+    if (!_ready) {
+      throw StateError(
+          'EventBusIsolate is not initialized: await waitInit before request');
+    }
+    _rejectWildcardPaths(paths, 'request');
+    var dto = EventDTO<T>(data,
+        paths: paths, arguments: arguments, separator: separator);
+    final future = _link.request(dto);
+    return timeout == null ? await future : await future.timeout(timeout);
   }
 
   ///Liveness check: true if the worker replied within [timeout].
   ///Readiness (a finished onInit) is reported by [waitInit] and [isInit].
-  Future<bool> ping({Duration timeout = const Duration(seconds: 2)}) => _link.ping(timeout);
+  Future<bool> ping({Duration timeout = const Duration(seconds: 2)}) =>
+      _link.ping(timeout);
 
   @override
   Future<void> dispose() async {
@@ -274,13 +304,15 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   void _init({
-    Object? initalData,
+    Object? initialData,
   }) async {
     _receivePort = ReceivePort();
     try {
-      _isolate = await Isolate.spawn(_worker, [_receivePort!.sendPort, onInit, initalData]);
+      _isolate = await Isolate.spawn(
+          _worker, [_receivePort!.sendPort, onInit, initialData]);
     } catch (error, stackTrace) {
-      _completeInitError(EventBusException('Isolate.spawn failed: $error'), stackTrace);
+      _completeInitError(
+          EventBusException('Isolate.spawn failed: $error'), stackTrace);
       return;
     }
 
@@ -294,7 +326,8 @@ class EventBusIsolate extends EventBusImpl {
         } else if (message is _IsolateInitError) {
           _ready = false;
           _completeInitError(
-              EventBusException('worker onInit failed: ${message.error}'), message.stackTrace);
+              EventBusException('worker onInit failed: ${message.error}'),
+              message.stackTrace);
           // a broken isolate is useless: release its resources
           unawaited(dispose());
         } else {
@@ -319,7 +352,7 @@ class EventBusIsolate extends EventBusImpl {
 void _worker(dynamic data) async {
   var sendPort = data[0] as SendPort;
   var onInit = data[1] as FutureOr<void> Function(EventBus, Object?);
-  Object? initalData = data[2];
+  Object? initialData = data[2];
 
   var innerReceivePort = ReceivePort();
   var s = innerReceivePort.asBroadcastStream();
@@ -330,7 +363,7 @@ void _worker(dynamic data) async {
   sendPort.send(innerReceivePort.sendPort);
 
   try {
-    await onInit(eventBus, initalData);
+    await onInit(eventBus, initialData);
     sendPort.send(const _IsolateReady());
   } catch (error, stackTrace) {
     sendPort.send(_IsolateInitError(error, stackTrace));
@@ -355,12 +388,32 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  Future<dynamic> send<T>(T data, {String? path, String? fragment, String? target, Map<String, String>? arguments}) async {
+  bool fire<T>(T data,
+      {List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments}) {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
-    var dto =
-        EventDTO<T>(data, path: path, fragment: fragment, arguments: arguments, target: target, completer: null);
-    return _link.request(dto);
+    _rejectWildcardPaths(paths, 'fire');
+    var dto = EventDTO<T>(data,
+        paths: paths, arguments: arguments, separator: separator);
+    return _link.fire(dto);
+  }
+
+  @override
+  Future<dynamic> request<T>(T data,
+      {List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments,
+      Duration? timeout}) async {
+    if (isDisposed) {
+      throw StateError('EventBus is disposed');
+    }
+    _rejectWildcardPaths(paths, 'request');
+    var dto = EventDTO<T>(data,
+        paths: paths, arguments: arguments, separator: separator);
+    final future = _link.request(dto);
+    return timeout == null ? await future : await future.timeout(timeout);
   }
 }

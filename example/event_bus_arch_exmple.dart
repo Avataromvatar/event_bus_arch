@@ -1,58 +1,65 @@
-
 import 'dart:isolate';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 
-class TestIntData
-{
+class TestIntData {
   final int value;
   TestIntData(this.value);
 }
-class TestStrData
-{
+
+class TestStrData {
   final String value;
   TestStrData(this.value);
 }
 
-
-Future<void> main()async
-{
+Future<void> main() async {
   print('Main Isolate ${Isolate.current.hashCode}');
-  var isolateBus = EventBusIsolate(onInit: _initIsolate,initalData: 'Test');
-  await isolateBus.waitInit;  
-  ///When subscribe or listen you can add some parametr for filtering event by path and target
-  ///listen return Stream<T> 
-  isolateBus.listen<TestStrData>(path: 'origin').listen((e){
+  var isolateBus = EventBusIsolate(onInit: _initIsolate, initialData: 'Test');
+  await isolateBus.waitInit;
+
+  ///When subscribe or listen you can add paths for narrowing the address:
+  ///the topic is type + paths, so 'TestStrData.origin' is not 'TestStrData'
+  ///listen return Stream<T>
+  isolateBus.listen<TestStrData>(paths: ['origin']).listen((e) {
     print(e.value);
   });
-  ///subscribe return StreamSubscription<T> 
-  isolateBus.subscribe<TestStrData>(onData: (e) {
-    print(e.value);
-  },);
-  await isolateBus.send(TestStrData('Hello from main isolate'));
-  ///If you sethandler for event you can call completer 
-  ///what return result
-  ///You can send arguments in dto 
-  var ret = await isolateBus.send<TestIntData>(TestIntData(1),arguments: {'multiplier':10.toString()});
+
+  ///subscribe return StreamSubscription<T>
+  isolateBus.subscribe<TestStrData>(
+    onData: (e) {
+      print(e.value);
+    },
+  );
+  isolateBus.fire(TestStrData('Hello from main isolate'));
+
+  ///If you sethandler for event you can return a result
+  ///from the handler as the request response
+  ///You can send arguments in dto
+  var ret = await isolateBus.request<TestIntData>(TestIntData(1),
+      paths: ['calc'], arguments: {'multiplier': 10.toString()});
   print(ret);
   await Future.delayed(Duration(seconds: 1));
   await isolateBus.dispose();
 }
 
-
-void _initIsolate(EventBus bus,Object? initalData) async
-{
-  var name = initalData as String;
+void _initIsolate(EventBus bus, Object? initialData) async {
+  var name = initialData as String;
   print('Worker Isolate ${Isolate.current.hashCode}');
-  bus.subscribe<TestStrData>(onData: (e) {
-    bus.send(TestStrData('$name get ${e.value}'));
-    bus.send(TestStrData(e.value),path: 'origin');
-  },);
-  ///sethandler what can return result
-  (bus as EventBusHandlers).setHandler<TestIntData>(handler: (dto, lastData) async{
+  bus.subscribe<TestStrData>(
+    onData: (e) {
+      bus.fire(TestStrData('$name get ${e.value}'));
+      bus.fire(TestStrData(e.value), paths: ['origin']);
+    },
+  );
 
-     print('Arguments:'+dto.topic.arguments.toString()); 
-     var multStr = dto.topic.arguments?['multiplier']??'';
-     dto.completer?.complete(dto.data.value*(int.tryParse(multStr)??1));
-  },);
+  ///sethandler what can return result
+  ///the handler answers on the address TestIntData.calc
+  (bus as EventBusHandlers).setHandler<TestIntData>(
+    paths: ['calc'],
+    handler: (dto, lastData) async {
+      print('Arguments:${dto.arguments}');
+      var multStr = dto.arguments?['multiplier'] ?? '';
+      return dto.data.value * (int.tryParse(multStr) ?? 1);
+    },
+  );
 }

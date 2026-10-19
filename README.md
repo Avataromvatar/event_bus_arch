@@ -1,23 +1,25 @@
 # EventBus Arch
 
 `event_bus_arch` is an event-driven architecture toolkit for Dart and Flutter. Components talk to
-each other through events addressed by a URI-like **topic**, so they stay decoupled and can be
-moved between isolates without changing their logic.
+each other through events addressed by a **topic** — a type plus a path — so they stay decoupled
+and can be moved between isolates without changing their logic.
 
 On top of the bus the package ships a finite state machine, an isolate bridge, multi-isolate
 "layers", and a scope/command wrapper for stateful values.
 
 * Detailed documentation: **[doc/](doc/README.md)**
 * Full API reference: [doc/06-api-reference.md](doc/06-api-reference.md)
-* What changed in 2.3.0 and what to watch out for: [doc/07-caveats.md](doc/07-caveats.md)
+* Upgrading from 2.x: [doc/07-caveats.md](doc/07-caveats.md#what-changed-in-300)
 
 ## Features
 
-- Send and receive events between components (`send` / `listen` / `subscribe`)
-- Handlers that can return a result to the sender (`EventDTO.completer`)
+- **Two publish modes**: `fire` (one-way, listeners only) and `request` (one handler, returns a
+  result) — see [Two modes: `fire` and `request`](#two-modes-fire-and-request)
+- Send and receive events between components (`listen` / `subscribe`)
+- Handlers that return a result to `request`
 - Two bus flavours: **common** (`EventBus()`) and **model** (`EventBus(isModelBus: true)`) —
   the model bus keeps the last value per topic even when nobody is listening
-- Topic-based routing: event type + `target` + `path`, plus `fragment` and `arguments` as payload
+- Topic-based routing: event type + `paths`, plus `arguments` as call parameters
 - `EventBusIsolate` — the same API, but the events are processed in a worker isolate
 - `Layers` — chains of isolates: `main ↔ isolate₂ ↔ isolate₁ ↔ isolate₀`
 - `FSM` — finite state machine driven by bus events
@@ -29,14 +31,14 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 
 ```yaml
 dependencies:
-  event_bus_arch: ^2.3.0
+  event_bus_arch: ^3.0.0
 ```
 
 ```bash
 dart pub get      # or: flutter pub get
 ```
 
-Dart SDK `>=3.0.0 <4.0.0`. The package re-exports `rxdart`, so `BehaviorSubject`,
+Dart SDK `>=3.6.0 <4.0.0`. The package re-exports `rxdart`, so `BehaviorSubject`,
 `debounceTime`, `doOnCancel` and friends are available without an extra import.
 
 ## Quick start
@@ -50,48 +52,142 @@ Future<void> main() async {
   // Receive: every event of that topic, current and future
   final sub = bus.subscribe<String>(onData: (event) => print('got: $event'));
 
-  // Handle: the handler may answer the sender through dto.completer.
+  // Handle: the handler returns the response; request waits for it.
   // lastData is the PREVIOUS value of this topic, dto.data is the current one.
   bus.handlers.setHandler<String>(handler: (dto, lastData) async {
-    dto.completer?.complete('processed: ${dto.data}');
+    return 'processed: ${dto.data}';
   });
 
-  final result = await bus.send<String>('hello');
+  final result = await bus.request<String>('hello');
   print(result);                 // processed: hello
 
-  // by now the listener has already received the value: send() is a sync point
+  // by now the listener has already received the value: request() is a sync point
   await sub.cancel();
   await bus.dispose();
 }
 ```
 
+## Two modes: `fire` and `request`
+
+There are exactly two ways to publish an event, and they have different contracts:
+
+| | `fire<T>(...)` | `request<T>(...)` |
+|---|---|---|
+| Purpose | one-way event | ask a handler for a result |
+| Invokes `setHandler` responders | **no** — listeners only | **yes** — exactly one handler |
+| Return value | `bool` — was the event accepted | `Future<dynamic>` — the handler's result |
+| No listener / no handler | `false`, not an error | throws `NoHandlerException` |
+| Waits | no, returns immediately | yes, until the handler returns; optional `timeout` |
+| Call arguments | `arguments` reach listeners in `dto.arguments` | the same, plus the handler |
+| Wildcard paths | rejected — the call names a concrete topic | rejected — the call names a concrete topic |
+
+```dart
+final bus = EventBus();
+
+// Listeners can be registered on a concrete topic or on a pattern.
+bus.subscribe<int>(paths: ['sensor', '*'], onData: (v) => print('event: $v'));
+
+// A handler is a request responder; fire never calls it.
+bus.handlers.setHandler<int>(
+  paths: ['sensor', 'temp'],
+  handler: (dto, lastData) async => dto.data * 2,
+);
+
+// fire: one-way, returns whether the event was accepted.
+final delivered = bus.fire<int>(21, paths: ['sensor', 'temp']);   // true
+// the wildcard listener printed "event: 21" (asynchronously)
+
+// request: waits for the handler and returns its result.
+final doubled = await bus.request<int>(21, paths: ['sensor', 'temp']);   // 42
+// the wildcard listener also saw the request: "event: 21"
+```
+
+`fire` and `request` both notify listeners; the difference is the handler call and the result
+channel. A request without a handler is an error, not a silently ignored event.
+
 ### Topics
 
-A topic is built from the **static type argument** of the call plus `target` and `path`:
+A topic is the **static type argument** of the call plus an optional path:
 
 ```text
-event://all.String/origin#frag?a=b
-       └ target └ type  └ path  └ fragment, arguments
+OrderPlaced.warehouse.in
+     │            │
+     │            └── paths: ['warehouse', 'in']
+     └─────────────── type: the type parameter T of the call
 ```
 
 ```dart
-await bus.send<Order>(order, target: 'warehouse', path: '/in', arguments: {'priority': '1'});
+bus.fire<Order>(order, paths: ['warehouse', 'in'], arguments: {'priority': '1'});
 
-bus.subscribe<Order>(target: 'warehouse', path: '/in', onData: (order) => print(order));
+bus.subscribe<Order>(paths: ['warehouse', 'in'], onData: (order) => print(order));
 ```
 
-`target` and `path` select the topic; `fragment` and `arguments` are delivered to the handler but
-do not affect routing. Because the type is part of the address, `send<int>` and a handler
+`paths` selects the topic; `arguments` are delivered to the handler as `dto.arguments` but do not
+affect routing. Because the type is part of the address, `request<int>` and a handler
 registered with `setHandler<num>` are **different topics** — always be explicit with type
 arguments.
+
+A path token must not contain the separator (`.` by default): `paths: ['a.b']` and
+`paths: ['a', 'b']` build the same address. Pass `separator: '/'` to address such a topic,
+or change the fallback for a whole bus:
+
+```dart
+final bus = EventBusImpl(false)..defaultTopicPathSeparator = '/';
+```
+
+### Wildcards
+
+`listen`, `subscribe` and `setHandler` accept wildcard path tokens:
+
+- `*` matches exactly one path token: `int.sensor.*`;
+- `>` matches one or more trailing tokens and must be the last token:
+  `int.sensor.>`.
+
+### `fire` through a wildcard
+
+`fire` always names a concrete topic; a wildcard subscription receives every matching event:
+
+```dart
+final sub = bus.subscribe<int>(
+  paths: ['sensor', '*'],                       // one path token after "sensor"
+  onData: (value) => print('sensor: $value'),
+);
+
+// Concrete events; no wildcard in the fire() call itself.
+bus.fire<int>(21, paths: ['sensor', 'temp']);       // true → sensor: 21
+bus.fire<int>(22, paths: ['sensor', 'humidity']);   // true → sensor: 22
+bus.fire<int>(23, paths: ['sensor', 'room', 'x']);  // false — '*' matches one token, not two
+
+// '>' matches one or more trailing tokens.
+bus.subscribe<int>(paths: ['sensor', '>'], onData: (v) => print('subtree: $v'));
+bus.fire<int>(24, paths: ['sensor', 'room', 'temp']);   // true → subtree: 24
+```
+
+The same pattern can answer requests when it is registered as a handler:
+
+```dart
+bus.handlers.setHandler<int>(paths: ['sensor', '*'],
+    handler: (dto, lastData) async => dto.data * 2);
+await bus.request<int>(21, paths: ['sensor', 'temp']);   // 42
+```
+
+A `fire` or `request` call itself must name a concrete topic: wildcard paths
+throw. A request may be answered by a handler registered on a pattern (exact
+handler first, then the most specific pattern). `fire` delivers to the exact
+node and to every matching pattern node. `currentData(pattern)` returns the
+last matching value; `currentData(concrete)` reads only the exact node.
 
 ### Model bus vs common bus
 
 | | `EventBus()` | `EventBus(isModelBus: true)` |
 |---|---|---|
-| Creates a node when sending to an unknown topic | no | yes |
-| Keeps `lastData` after the last listener unsubscribes | no | yes |
-| `send` to a topic nobody handles | resolves with `null`, event goes to `allEventStream` with flag `false` | resolves with `null`, node is created |
+| Creates a node on `fire` to an unknown topic | no | yes |
+| Keeps `currentData` after the last listener unsubscribes | no | yes |
+| `fire` to a topic with no node | returns `false`, event goes to `allEventStream` with flag `false` | returns `true`, node is created |
+| `request` without a handler | throws `NoHandlerException` | throws `NoHandlerException` |
+
+A handler registered with `setHandler` is a request responder: `request` invokes it, while
+`fire` only notifies listeners.
 
 Use the model bus when the bus is a store of current state, and the common bus when it is a
 message pipe.
@@ -107,7 +203,7 @@ Future<void> main() async {
   await iso.waitInit;                                  // true when onInit has completed
 
   iso.subscribe<String>(onData: (e) => print('from worker: $e'));
-  final doubled = await iso.send<int>(21, arguments: {'multiplier': '2'});
+  final doubled = await iso.request<int>(21, arguments: {'multiplier': '2'});
   print(doubled);                                      // 42
 
   await iso.dispose();
@@ -117,14 +213,15 @@ Future<void> main() async {
 Future<void> _worker(EventBus bus, Object? initialData) async {
   await _heavyInit();                                  // async init is fine
   bus.handlers.setHandler<int>(handler: (dto, lastData) async {
-    final m = int.tryParse(dto.topic.arguments?['multiplier'] ?? '1') ?? 1;
-    dto.completer?.complete(dto.data * m);
+    final m = int.tryParse(dto.arguments?['multiplier'] ?? '1') ?? 1;
+    return dto.data * m;
   });
 }
 ```
 
 `EventBusIsolate` behaves like a normal bus on both sides: events sent from the worker reach
-main-isolate listeners, and `send` from main returns the worker's handler result.
+main-isolate listeners, and `request` from main returns the worker's handler result. Paths, separator
+and `arguments` cross the boundary with the event.
 
 Good to know:
 
@@ -133,8 +230,8 @@ Good to know:
    after it are never lost. Errors from `onInit` surface as an `EventBusException` from
    `waitInit`.
 3. Every request is answered exactly once and correlated by request id, so concurrent requests of
-   the same type each get their own result. A topic the worker knows nothing about resolves to
-   `null`; a handler error is rethrown at the sender; an in-flight request fails with
+   the same type each get their own result. A topic the worker has no handler for fails with
+   `NoHandlerException`; a handler error is rethrown at the sender; an in-flight request fails with
    `EventBusException` if the isolate is disposed.
 4. `ping()` only checks liveness ("is the worker alive"), not readiness.
 
@@ -150,7 +247,7 @@ final layer = await Layers.createLayers([
 // createLayers completes only when every layer in the chain is initialized,
 // so events can be sent right away
 layer.bottom!.subscribe<Ping>(onData: (e) => print(e.count));
-layer.bottom!.send(Ping(0));
+layer.bottom!.fire(Ping(0));
 await layer.close();
 ```
 
@@ -169,6 +266,7 @@ class Loader with FSM<State> {
   Loader(EventBus bus) {
     initFSM(bus, State.idle);
     addFSMTransition<Start>(State.idle, State.loading,
+      eventPaths: ['api', 'items'],            // the transition listens on Start.api.items
       filter: (current, last, event) => event.url.isNotEmpty,
       handler: (current, last, event, ignored) async {
         print('$last -> $current ($event)');
@@ -177,11 +275,11 @@ class Loader with FSM<State> {
   }
 }
 
-await bus.send(Start('/api/items'));   // State.idle -> State.loading
+bus.fire(Start('/api/items'), paths: ['api', 'items']);   // State.idle -> State.loading
 ```
 
 Events arriving while a transition handler is running are collected into the `ignoredEvents`
-argument and are not replayed afterwards.
+argument and are not replayed afterwards. `FSM.dispose()` unsubscribes the machine from the bus.
 
 ### Scope and Command
 
@@ -189,7 +287,7 @@ argument and are not replayed afterwards.
 final scope = Scope<int>();
 await scope.initScope(
   bus,
-  path: '/counter',
+  paths: ['counter'],
   initialData: 0,
   maxLenForUndo: 10,                 // history depth; undo needs at least 2 entries
   onUpdate: (value) => print('value: $value'),
@@ -206,7 +304,7 @@ bus. `undo()` returns `null` when there is nothing to roll back to.
 
 ## Documentation
 
-Detailed guides live in [docs/](docs/README.md) (Russian):
+Detailed guides live in [doc/](doc/README.md):
 
 | Document | Content |
 |---|---|
@@ -216,28 +314,61 @@ Detailed guides live in [docs/](docs/README.md) (Russian):
 | [04-fsm.md](doc/04-fsm.md) | State machine on top of the bus |
 | [05-scope-and-command.md](doc/05-scope-and-command.md) | State with history, command pattern |
 | [06-api-reference.md](doc/06-api-reference.md) | Every public type and member |
-| [07-caveats.md](doc/07-caveats.md) | What was fixed in 2.3.0, what remains by design, checklist |
+| [07-caveats.md](doc/07-caveats.md) | What 3.0.0 changed, what remains by design, checklist |
+| [08-transports.md](doc/08-transports.md) | Running the bus over NATS / Redis / NanoMQ: analysis |
+| [09-event-bus-nats.md](doc/09-event-bus-nats.md) | The implemented NATS transport: usage, architecture, limitations |
+| [10-event-bus-mqtt.md](doc/10-event-bus-mqtt.md) | The implemented MQTT 5 transport: usage, architecture, limitations |
+
+## Version 3.0.0 changes
+
+The address model changed; this is a breaking release.
+
+- `Topic` is no longer URI-like: **`scheme`, `target` and `fragment` are gone**
+- `path: '/in'` became **`paths: ['in']`** — a list of tokens joined by a configurable `separator`
+  (`.` by default, `EventBus.defaultTopicPathSeparator`)
+- **`arguments` moved from `Topic` to `EventDTO`**: `dto.topic.arguments` is now `dto.arguments`,
+  both locally and across an isolate
+- **`send` is split into `fire` and `request`**: `fire` is one-way and returns `bool`; `request`
+  invokes a handler and waits for its result (or `NoHandlerException`)
+- **Handlers return their response**; `EventDTO.completer` was removed, and `fire` no longer
+  invokes handlers
+- **`lastData` was renamed `currentData`** (`bus.currentData<T>()`, `EventNode.currentData`)
+- **Local wildcards**: `*` matches one path token, `>` one or more trailing tokens;
+  `listen`/`subscribe`/`setHandler` accept patterns, `fire`/`request` require concrete topics
+- The type in the address is `'$T'` normalised to a subject-safe token —
+  no lowercasing, no percent-encoding (`List<int>` → `List(int)`)
+- `topic.topic` is the single routing key (`fullTopic`/`topicWithFragment` are gone)
+- **`packages/event_bus_nats`** adds a NATS transport as a separate package; the core stays
+  broker-free (see [doc/09-event-bus-nats.md](doc/09-event-bus-nats.md))
+- **`packages/event_bus_transport`** holds the broker-agnostic connection, mapping, bus and node
+  shared by the NATS and MQTT 5 transports
+- **`packages/event_bus_mqtt`** adds an MQTT 5 transport
+  (see [doc/10-event-bus-mqtt.md](doc/10-event-bus-mqtt.md))
+- The deprecated `queueLenght`, `initalData`, `initialDataNeedExecute` and `shema` aliases were removed
+
+The full migration table is in [doc/07-caveats.md](doc/07-caveats.md#migration-table).
 
 ## Version 2 changes
 
 - `EventBusIsolate`, `Layers`, `FSM`, `Scope`/`Command`, `subscribe`, `dispose` were added
 - Reduced API surface; the bus always returns a result or `null` (the old `call` method is gone)
 - `EventBusMaster` was removed — buses no longer need names
-- Handlers return values through `EventDTO.completer`
+- Handlers return values through `EventDTO.completer` (removed in 3.0.0 — handlers return the
+  value directly)
 
 ## Version 2.3.0 changes
 
 - `EventBus` now exposes `handlers` (no more `bus as EventBusHandlers`) and an idempotent `dispose()`
 - Handler failures reach the sender instead of hanging it; listeners receive values before
-  `await send(...)` returns
+  `await request(...)` returns
 - `EventBusIsolate` correlates responses by request id, `waitInit` means "onInit completed",
   and `ping()` checks liveness; in-flight requests fail instead of hanging on dispose
 - `Layers.createLayers` completes only when the whole chain is initialized; `Layer.close()` works
   from any layer
 - `Scope`/`Command` `undo()` sends the previous value; `Scope.maxLenForUndo` defaults to 10
-- `EventDTO.toJson` no longer encodes data; `Topic.copy` keeps `path`; `EventBusException` is exported
+- `EventDTO.toJson` no longer encodes data; `EventBusException` is exported
 - Typo'd members got correct names (`queueLength`, `initialData`, `scheme`,
-  `initialDataNeedExecute`) with the old ones kept as `@Deprecated`
+  `initialDataNeedExecute`) — those aliases were removed again in 3.0.0
 
 The full list with reproductions is in [doc/07-caveats.md](doc/07-caveats.md#what-was-fixed-in-230).
 

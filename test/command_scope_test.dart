@@ -42,7 +42,8 @@ void main() {
       expect(await command.undo(), null);
 
       await command.execute(1);
-      expect(await command.undo(), null); // nothing to roll back: only one call in history
+      expect(await command.undo(),
+          null); // nothing to roll back: only one call in history
       await bus.dispose();
     });
 
@@ -59,13 +60,34 @@ void main() {
       await bus.dispose();
     });
 
-    test('queueLenght is kept as a deprecated alias', () async {
+    test('the history keeps the arguments of the call', () async {
       final bus = EventBus(isModelBus: true);
       final command = Command<int>(bus, maxLen: 5);
-      await command.execute(1);
 
-      // ignore: deprecated_member_use_from_same_package
-      expect(command.queueLenght, command.queueLength);
+      await command.execute(1, arguments: {'multiplier': '10'});
+
+      expect(command.lastCall?.$1, 1);
+      expect(command.lastCall?.$2, {'multiplier': '10'});
+      await bus.dispose();
+    });
+
+    test('execute sends to the node of the command paths', () async {
+      final bus = EventBus(isModelBus: true);
+      final seen = <int>[];
+      bus.handlers.setHandler<int>(
+          paths: ['counter'],
+          handler: (dto, lastData) async {
+            seen.add(dto.data);
+          });
+      final command = Command<int>(bus, paths: ['counter'], maxLen: 5);
+
+      await command.execute(7);
+
+      expect(seen, [7]);
+      // a command with other paths addresses another node
+      final other = Command<int>(bus, paths: ['other'], maxLen: 5);
+      await other.execute(8);
+      expect(seen, [7]);
       await bus.dispose();
     });
   });
@@ -123,30 +145,34 @@ void main() {
       expect(() => scope.scopeBus, throwsA(isA<EventBusException>()));
     });
 
-    test('a repeated initScope removes the handler of the previous topic', () async {
+    test('a repeated initScope removes the handler of the previous topic',
+        () async {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
-      await scope.initScope(bus, path: '/a', maxLenForUndo: 10);
-      bus.handlers.setHandler<int>(path: '/a', handler: (dto, lastData) async {});
+      await scope.initScope(bus, paths: ['a'], maxLenForUndo: 10);
+      bus.handlers
+          .setHandler<int>(paths: ['a'], handler: (dto, lastData) async {});
 
-      await scope.initScope(bus, path: '/b', maxLenForUndo: 10);
+      await scope.initScope(bus, paths: ['b'], maxLenForUndo: 10);
 
-      expect(bus.haveHandler<int>(path: '/a'), false);
-      expect(bus.haveListener<int>(path: '/b'), true);
+      expect(bus.haveHandler<int>(paths: ['a']), false);
+      expect(bus.haveListener<int>(paths: ['b']), true);
       scope.disposeScope();
       await bus.dispose();
     });
 
-    test('disposeScope(removeHandler: false) does not touch a handler it does not own',
+    test(
+        'disposeScope(removeHandler: false) does not touch a handler it does not own',
         () async {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
-      await scope.initScope(bus, path: '/a', maxLenForUndo: 10);
-      bus.handlers.setHandler<int>(path: '/a', handler: (dto, lastData) async {});
+      await scope.initScope(bus, paths: ['a'], maxLenForUndo: 10);
+      bus.handlers
+          .setHandler<int>(paths: ['a'], handler: (dto, lastData) async {});
 
       scope.disposeScope(removeHandler: false);
 
-      expect(bus.haveHandler<int>(path: '/a'), true);
+      expect(bus.haveHandler<int>(paths: ['a']), true);
       await bus.dispose();
     });
   });

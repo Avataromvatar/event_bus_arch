@@ -1,169 +1,173 @@
 part of event_arch;
 
-const String _targetDefault = 'all';
-const String _shema = 'event';
-
-///By default Topic equals by Topic.topic
+///The event address: a type plus an optional path.
+///
+///An address reads `<type><separator><path...>`, so with the default separator
+///`Topic.create<String>(paths: ['a', 'b'])` is `String.a.b`.
+///
+///Two topics are equal when their [topic] strings are equal — the type and the
+///paths are what select a node. Call parameters (`arguments`) are payload and
+///live on the [EventDTO], not here.
+///
+///The type token is derived from `$T`, so it is normalised to a token that is
+///safe in a broker subject: `<` becomes `(`, `>` becomes `)`, and commas and
+///whitespace become `_`. Without this a generic type such as `List<int>` would
+///produce `List<int>`, and `>` is a wildcard in NATS.
 abstract class Topic /*extends Equatable*/ {
-  ///Topic scheme, 'event' by default
-  String get scheme;
-
-  @Deprecated('Use scheme')
-  String get shema => scheme;
-
-  String? get target;
+  ///The event type — the first token of the address, usually `T` of the call.
   String get type;
 
-  ///target.type
-  String get host;
-  String get path;
+  ///The path tokens after the type. Empty when the address is the type alone.
+  List<String> get paths;
 
-  String? get fragment;
-  Map<String, String>? get arguments;
+  ///The string that joins [type] and [paths] into [topic].
+  String get separator;
 
-  ///This topic used in EventBus for detect handler.
-  ///this string not include: fragment and arguments
+  ///The routing key. This is the string the bus looks a node up by.
   String get topic;
 
+  ///A copy with [paths] and/or [separator] replaced. The type is kept.
+  Topic copy({List<String>? paths, String? separator});
+
+  ///The topic of the static type [T] with the given [paths].
+  static Topic create<T>({List<String>? paths, String separator = '.'}) {
+    return TopicImpl('$T', paths: paths ?? [], separator: separator);
+  }
+
+  ///Parses an address built as `<type><separator><path...>`.
   ///
-  String get topicWithFragment;
-
-  ///this string include: fragment and arguments
-  String get fullTopic;
-
-  ///Topic copy. Parameters that are not passed are taken from the current topic
-  ///(including path, fragment and arguments).
-  Topic copy({String? target, String? scheme, String? fragment, Map<String, String>? arguments, String? path});
-
-  static Topic create<T>({String? target, String? path, String? fragment, Map<String, String>? arguments}) {
-    return Topic.fromParametr(
-        type: T..runtimeType, target: target, path: path, fragment: fragment, arguments: arguments);
+  ///An empty type is rejected: a topic that no `create` can produce would never
+  ///match a node.
+  factory Topic.parse(String str, {String separator = '.'}) {
+    var l = str.split(separator);
+    if (l.isEmpty || l.first.isEmpty) {
+      throw EventBusException('Cant parse topic $str');
+    }
+    return TopicImpl(l[0],
+        paths: l.length > 1 ? l.sublist(1) : [], separator: separator);
   }
 
-  factory Topic.parse(String fullTopic) {
-    return EventTopicImpl.parse(fullTopic);
-  }
-
-  ///Required type or nameType
+  ///The topic of an explicitly given [type], for a type known only at runtime.
   factory Topic.fromParametr(
-      {Type? type, String? nameType, String? target, String? path, String? fragment, Map<String, String>? arguments}) {
-    return EventTopicImpl.create(
-        type: type,
-        nameType: nameType,
-        target: target ?? _targetDefault,
-        path: path,
-        fragment: fragment,
-        arguments: arguments);
+      {Type? type, List<String>? paths, String separator = '.'}) {
+    if (type == null) {
+      throw EventBusException('Topic.fromParametr required type !');
+    }
+    return TopicImpl('$type', paths: paths ?? [], separator: separator);
   }
-  factory Topic.fromString(String topic) {
-    return EventTopicImpl.parse(topic);
+
+  factory Topic.fromString(String topic, {String separator = '.'}) {
+    return Topic.parse(topic, separator: separator);
   }
+
   @override
   String toString() {
-    return fullTopic;
+    return topic;
   }
 }
 
-class EventTopicImpl implements Topic {
-  late final Uri _uri;
+///Replaces characters that cannot appear in a broker subject token.
+String _normalizeTypeToken(String raw) {
+  return raw
+      .replaceAll('<', '(')
+      .replaceAll('>', ')')
+      .replaceAll(',', '_')
+      .replaceAll(RegExp(r'\s+'), '_')
+      .replaceAll(RegExp(r'_+'), '_');
+}
+
+class TopicImpl implements Topic {
+  TopicImpl(String type, {this.separator = '.', this.paths = const []})
+      : type = _normalizeTypeToken(type);
 
   @override
-  String get scheme => _uri.scheme;
-  @override
-  @Deprecated('Use scheme')
-  String get shema => scheme;
-  @override
-  String? get target => _uri.host.split('.').first;
-  @override
-  String get type => _uri.host.split('.').last;
-
-  ///target.type
-  @override
-  String get host => _uri.host;
-  @override
-  String get path => _uri.path;
+  final String separator;
 
   @override
-  String get fragment => _uri.fragment;
-  @override
-  Map<String, String>? get arguments => _uri.queryParameters;
-
-  ///This topic used in EventBus for detect handler.
-  ///this string not include: fragment and arguments
-  @override
-  String get topic => _getTopic();
+  final List<String> paths;
 
   @override
-  String get topicWithFragment => _getTopic(needFragment: true);
+  final String type;
 
-  ///this string include: fragment and arguments
   @override
-  String get fullTopic => '$_uri';
-
-  EventTopicImpl.parse(String topic) {
-    var tmp = Uri.tryParse(topic);
-    if (tmp != null) {
-      _uri = tmp;
-    } else {
-      throw EventBusException('Cant parse topic $topic');
-    }
-  }
-
-  ///Must required type or nameType
-  EventTopicImpl.create(
-      {Type? type,
-      String? nameType,
-      String target = _targetDefault,
-      String? path,
-      String? fragment,
-      String scheme = _shema,
-      @Deprecated('Use scheme') String? shema,
-      Map<String, String>? arguments}) {
-    if (type == null && nameType == null) {
-      throw EventBusException('Topic.create required type or nameType !');
-    }
-    var typeName = '${type ?? nameType}'.replaceAll("?", "^");
-    // the topic host is "target.type": a dot inside a part breaks parsing
-    // and makes addresses collide (a.b.int is indistinguishable from a.int)
-    assert(
-        !target.contains('.') && !typeName.contains('.'),
-        'Topic host must be "target.type": "target" and type name must not '
-        'contain a dot (got "$target.$typeName")');
-    _uri = Uri(
-        scheme: shema ?? scheme,
-        host: '$target.$typeName',
-        path: path,
-        fragment: fragment,
-        queryParameters: arguments);
-  }
-
-  String _getTopic({bool needFragment = false}) {
-    return '${_uri.scheme}://${target ?? _targetDefault}.$type$path${needFragment ? '#$fragment' : ''}';
+  Topic copy({List<String>? paths, String? separator}) {
+    return TopicImpl(type,
+        separator: separator ?? this.separator, paths: paths ?? this.paths);
   }
 
   @override
-  Topic copy({String? target, String? scheme, String? fragment, Map<String, String>? arguments, String? path}) {
-    return EventTopicImpl.create(
-        nameType: type,
-        scheme: scheme ?? this.scheme,
-        target: target ?? this.target!,
-        fragment: fragment ?? (this.fragment.isEmpty ? null : this.fragment),
-        arguments: arguments ?? ((this.arguments?.isEmpty ?? true) ? null : this.arguments),
-        path: path ?? (this.path.isEmpty ? null : this.path));
-  }
+  String get topic =>
+      paths.isEmpty ? type : '$type$separator${paths.join(separator)}';
+
+  ///The routing key: implementations use `implements`, so the body in [Topic]
+  ///is not inherited and has to be repeated here.
+  @override
+  String toString() => topic;
 
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
 
-    return other is EventTopicImpl && other.topic == topic;
+    return other is Topic && other.topic == topic;
   }
 
   @override
   int get hashCode => Object.hashAll([topic]);
+}
 
-  @override
-  String toString() {
-    return fullTopic;
+///Canonical wildcard rules for local topics.
+///
+///`*` matches exactly one path token. `>` matches one or more trailing path
+///tokens and must be the last token. Wildcards are only allowed as whole path
+///tokens; the type token is always concrete.
+abstract final class TopicPattern {
+  static const String single = '*';
+  static const String tail = '>';
+
+  ///Whether [topic] contains wildcard characters in its paths.
+  static bool isPattern(Topic topic) =>
+      topic.paths.any((path) => path.contains(single) || path.contains(tail));
+
+  ///Validates a pattern topic; a mixed token such as `a*` is rejected.
+  static void validate(Topic topic) {
+    for (var i = 0; i < topic.paths.length; i++) {
+      final token = topic.paths[i];
+      if (token == tail) {
+        if (i != topic.paths.length - 1) {
+          throw EventBusException(
+              'the ">" wildcard must be the last path token');
+        }
+        continue;
+      }
+      if (token == single) continue;
+      if (token.contains(single) || token.contains(tail)) {
+        throw EventBusException(
+            'a wildcard must be a whole path token: "$token"');
+      }
+    }
   }
+
+  ///Whether [pattern] matches the concrete [topic].
+  static bool matches(Topic pattern, Topic topic) {
+    if (pattern.type != topic.type) return false;
+    if (isPattern(topic)) return false;
+
+    final patternPaths = pattern.paths;
+    final topicPaths = topic.paths;
+    var index = 0;
+    for (; index < patternPaths.length; index++) {
+      final token = patternPaths[index];
+      if (token == tail) {
+        return index == patternPaths.length - 1 && index < topicPaths.length;
+      }
+      if (index >= topicPaths.length) return false;
+      if (token == single) continue;
+      if (token != topicPaths[index]) return false;
+    }
+    return index == topicPaths.length;
+  }
+
+  ///The number of literal tokens in [pattern]; more specific patterns win.
+  static int specificity(Topic pattern) =>
+      pattern.paths.where((token) => token != single && token != tail).length;
 }

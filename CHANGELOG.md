@@ -1,3 +1,16 @@
+## 3.0.0
+-  breaking: new address model — `Topic` lost `scheme`/`target`/`fragment`; `path: '/in'` became `paths: ['in']` with a configurable `separator`; `arguments` moved to `EventDTO`; the type token is `'$T'` normalised for broker subjects (`List<int>` → `List(int)`)
+-  breaking: `EventBus.send` is split into `fire<T>` (one-way, returns `bool`, listeners only) and `request<T>` (one handler, returns its result, supports `timeout`, throws `NoHandlerException`, rejects wildcard paths)
+-  breaking: `EventDTO.completer` is removed; handlers return the response and throw to fail a request; `fire` never invokes a handler
+-  breaking: `lastData` renamed to `currentData` (`bus.currentData<T>()`, `EventNode.currentData`); `EventNode.send` became `deliver`
+-  add: local wildcards `*` (one path token) and `>` (one or more trailing tokens) for `listen`/`subscribe`/`setHandler`, with exact and pattern node maps and exact → most-specific-pattern handler resolution
+-  add: transport hooks (`KeepAliveNode`, `IncomingEventNode`, `createNode`/`shouldCreateNodeOnSend`); handlers moved from nodes into `EventBusHandlersMixin`; `removeHandler` keeps a node that still has listeners
+-  change: `EventBusIsolate` uses `fire`/`request`; a request with no handler in the worker fails with `NoHandlerException` instead of returning `null`
+-  add: pub workspace with `packages/event_bus_transport` (shared broker layer), `packages/event_bus_nats` (NATS) and `packages/event_bus_mqtt` (MQTT 5): reconnection, arguments via headers/user properties, self-echo filtering and request/reply
+-  remove: the deprecated `queueLenght`, `initalData`, `initialDataNeedExecute` and `shema` aliases (`changeStateByEvent` remains deprecated)
+-  docs: README and `doc/01–07` migrated to the 3.0.0 API; new `doc/09` (NATS) and `doc/10` (MQTT 5)
+-  tests: 131 core tests, plus 24 shared-transport, 52 NATS (live) and 39 MQTT (live)
+
 ## 2.3.0
 -  fix: EventBus now exposes `handlers` and an idempotent `dispose()` in its interface
 -  fix: a handler error completes the completer with that error (the sender used to wait forever)

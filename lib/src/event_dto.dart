@@ -1,31 +1,30 @@
 part of event_arch;
 
+///One event: its topic, the data and the call arguments.
 abstract class EventDTO<T> {
   Topic get topic;
   T get data;
-
-  ///completed with null after call handler, if not completed in handler.
-  ///If the handler throws, the completer is completed with that error.
-  Completer? get completer;
+  Map<String, String>? get arguments;
 
   static EventDTO<T> create<T>(T data,
-      {String? target, String? path, Map<String, String>? arguments, String? fragment, Completer? completer}) {
+      {List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments}) {
     return EventDTO<T>(data,
-        target: target, path: path, completer: completer, fragment: fragment, arguments: arguments);
+        paths: paths, separator: separator, arguments: arguments);
   }
 
   factory EventDTO(T data,
       {Topic? topic,
-      String? target,
-      String? path,
+      List<String>? paths,
       Map<String, String>? arguments,
-      String? fragment,
-      Completer? completer}) {
+      String? separator}) {
     return EventDTOImpl<T>(
-        topic ?? Topic.create<T>(target: target, path: path, fragment: fragment, arguments: arguments), data,
-        completer: completer
-        /* route*/
-        );
+      topic ?? Topic.create<T>(paths: paths, separator: separator ?? '.'),
+      data,
+      arguments: arguments,
+      /* route*/
+    );
   }
 
   ///Event representation for logs and serialization.
@@ -40,14 +39,15 @@ class EventDTOImpl<T> implements EventDTO<T> {
   @override
   T data;
   @override
-  Completer? completer;
-
-  EventDTOImpl(this.topic, this.data, {this.completer});
+  Map<String, String>? arguments;
+  EventDTOImpl(this.topic, this.data, {this.arguments});
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
 
-    return other is EventDTOImpl<T> && other.topic == topic && other.data == data;
+    return other is EventDTOImpl<T> &&
+        other.topic == topic &&
+        other.data == data;
   }
 
   @override
@@ -55,19 +55,23 @@ class EventDTOImpl<T> implements EventDTO<T> {
 
   @override
   String toString() {
-    return 'EventDTO(${topic.fullTopic}, data: $data)';
+    return 'EventDTO(${topic.topic}, data: $data)';
   }
 
   @override
   Map<String, dynamic> toJson() {
     return {
-      'topic': topic.fullTopic,
+      'topic': topic.topic,
       'data': data,
     };
   }
 
-  static EventDTO<T> fromJson<T>(Map<String, dynamic> json, {T Function(String topic, dynamic data)? dataConverter}) {
-    return EventDTOImpl<T>(Topic.parse(json['topic']),
-        dataConverter != null ? dataConverter.call(json['topic'], json['data']) : json['data']);
+  static EventDTO<T> fromJson<T>(Map<String, dynamic> json,
+      {T Function(String topic, dynamic data)? dataConverter}) {
+    return EventDTOImpl<T>(
+        Topic.parse(json['topic']),
+        dataConverter != null
+            ? dataConverter.call(json['topic'], json['data'])
+            : json['data']);
   }
 }

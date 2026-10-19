@@ -12,3 +12,11 @@ class EventBusException implements Exception {
     return "EventBusException: $message";
   }
 }
+
+///A [EventBus.request] had no handler to answer it.
+class NoHandlerException extends EventBusException {
+  NoHandlerException(this.topic) : super('no request handler for "$topic"');
+
+  ///The topic of the request.
+  final String topic;
+}

@@ -13,7 +13,9 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 
 ## Features
 
-- Send and receive events between components (`fire` / `request` / `listen` / `subscribe`)
+- **Two publish modes**: `fire` (one-way, listeners only) and `request` (one handler, returns a
+  result) — see [Two modes: `fire` and `request`](#two-modes-fire-and-request)
+- Send and receive events between components (`listen` / `subscribe`)
 - Handlers that return a result to `request`
 - Two bus flavours: **common** (`EventBus()`) and **model** (`EventBus(isModelBus: true)`) —
   the model bus keeps the last value per topic even when nobody is listening
@@ -65,6 +67,44 @@ Future<void> main() async {
 }
 ```
 
+## Two modes: `fire` and `request`
+
+There are exactly two ways to publish an event, and they have different contracts:
+
+| | `fire<T>(...)` | `request<T>(...)` |
+|---|---|---|
+| Purpose | one-way event | ask a handler for a result |
+| Invokes `setHandler` responders | **no** — listeners only | **yes** — exactly one handler |
+| Return value | `bool` — was the event accepted | `Future<dynamic>` — the handler's result |
+| No listener / no handler | `false`, not an error | throws `NoHandlerException` |
+| Waits | no, returns immediately | yes, until the handler returns; optional `timeout` |
+| Call arguments | `arguments` reach listeners in `dto.arguments` | the same, plus the handler |
+| Wildcard paths | rejected — the call names a concrete topic | rejected — the call names a concrete topic |
+
+```dart
+final bus = EventBus();
+
+// Listeners can be registered on a concrete topic or on a pattern.
+bus.subscribe<int>(paths: ['sensor', '*'], onData: (v) => print('event: $v'));
+
+// A handler is a request responder; fire never calls it.
+bus.handlers.setHandler<int>(
+  paths: ['sensor', 'temp'],
+  handler: (dto, lastData) async => dto.data * 2,
+);
+
+// fire: one-way, returns whether the event was accepted.
+final delivered = bus.fire<int>(21, paths: ['sensor', 'temp']);   // true
+// the wildcard listener printed "event: 21" (asynchronously)
+
+// request: waits for the handler and returns its result.
+final doubled = await bus.request<int>(21, paths: ['sensor', 'temp']);   // 42
+// the wildcard listener also saw the request: "event: 21"
+```
+
+`fire` and `request` both notify listeners; the difference is the handler call and the result
+channel. A request without a handler is an error, not a silently ignored event.
+
 ### Topics
 
 A topic is the **static type argument** of the call plus an optional path:
@@ -103,10 +143,29 @@ final bus = EventBusImpl(false)..defaultTopicPathSeparator = '/';
 - `>` matches one or more trailing tokens and must be the last token:
   `int.sensor.>`.
 
-```dart
-bus.subscribe<int>(paths: ['sensor', '*'], onData: (value) => print(value));
-bus.fire<int>(21, paths: ['sensor', 'temp']);     // delivered to the pattern
+### `fire` through a wildcard
 
+`fire` always names a concrete topic; a wildcard subscription receives every matching event:
+
+```dart
+final sub = bus.subscribe<int>(
+  paths: ['sensor', '*'],                       // one path token after "sensor"
+  onData: (value) => print('sensor: $value'),
+);
+
+// Concrete events; no wildcard in the fire() call itself.
+bus.fire<int>(21, paths: ['sensor', 'temp']);       // true → sensor: 21
+bus.fire<int>(22, paths: ['sensor', 'humidity']);   // true → sensor: 22
+bus.fire<int>(23, paths: ['sensor', 'room', 'x']);  // false — '*' matches one token, not two
+
+// '>' matches one or more trailing tokens.
+bus.subscribe<int>(paths: ['sensor', '>'], onData: (v) => print('subtree: $v'));
+bus.fire<int>(24, paths: ['sensor', 'room', 'temp']);   // true → subtree: 24
+```
+
+The same pattern can answer requests when it is registered as a handler:
+
+```dart
 bus.handlers.setHandler<int>(paths: ['sensor', '*'],
     handler: (dto, lastData) async => dto.data * 2);
 await bus.request<int>(21, paths: ['sensor', 'temp']);   // 42

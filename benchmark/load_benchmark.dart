@@ -53,14 +53,22 @@ class _CollectFireRequest {
   const _CollectFireRequest();
 }
 
+class _FireIntegrityRequest {
+  const _FireIntegrityRequest();
+}
+
 ///Worker side: records `_FireEvent` latencies and answers the control
 ///requests. Runs inside the worker isolate.
 Future<void> _workerInit(EventBus bus, Object? initialData) async {
   final workerClock = Stopwatch()..start();
   final fireLatencies = <int>[];
+  final fireSeqs = <int>{};
+  var fireReceived = 0;
   int? offsetUs;
 
   bus.listen<_FireEvent>().listen((event) {
+    fireReceived++;
+    fireSeqs.add(event.seq);
     final offset = offsetUs;
     if (offset == null) return;
     final latency = workerClock.elapsedMicroseconds + offset - event.sentAtUs;
@@ -84,14 +92,19 @@ Future<void> _workerInit(EventBus bus, Object? initialData) async {
   bus.handlers.setHandler<_ResetFireRequest>(
     handler: (dto, lastData) async {
       fireLatencies.clear();
+      fireSeqs.clear();
+      fireReceived = 0;
       return null;
     },
   );
   bus.handlers.setHandler<_CountFireRequest>(
-    handler: (dto, lastData) async => fireLatencies.length,
+    handler: (dto, lastData) async => fireReceived,
   );
   bus.handlers.setHandler<_CollectFireRequest>(
     handler: (dto, lastData) async => List<int>.of(fireLatencies),
+  );
+  bus.handlers.setHandler<_FireIntegrityRequest>(
+    handler: (dto, lastData) async => <int>[fireReceived, fireSeqs.length],
   );
 }
 
@@ -137,6 +150,7 @@ class _Result {
     required this.rate,
     required this.sent,
     required this.delivered,
+    required this.unique,
     required this.rejected,
     required this.errors,
     required this.generationUs,
@@ -148,6 +162,9 @@ class _Result {
   final int rate;
   final int sent;
   final int delivered;
+
+  ///Distinct sequence numbers among the delivered events.
+  final int unique;
   final int rejected;
   final int errors;
   final int generationUs;
@@ -174,12 +191,16 @@ class _Result {
   }
 
   String row() {
-    final missed = delivered < sent ? ' (${sent - delivered} missed)' : '';
+    final lost = sent - unique;
+    final duplicates = delivered - unique;
+    final lostText = lost > 0 ? ' lost=$lost' : '';
+    final duplicateText = duplicates > 0 ? ' dup=$duplicates' : '';
     final rejectedText = rejected > 0 ? ' rejected=$rejected' : '';
     final errorText = errors > 0 ? ' errors=$errors' : '';
     final negativeText = negatives > 0 ? ' neg=$negatives' : '';
     return '| $scenario | $rate | $sent$rejectedText$errorText | '
-        '$delivered$missed$negativeText | ${achievedRate.toStringAsFixed(0)} | '
+        '$delivered$lostText$duplicateText$negativeText | '
+        '${achievedRate.toStringAsFixed(0)} | '
         '${_percentile(0.5)} | ${_percentile(0.9)} | '
         '${_percentile(0.99)} | ${_percentile(1.0)} | $mean |';
   }
@@ -242,9 +263,11 @@ Future<_Result> _localFire(
 ) async {
   final bus = EventBus();
   final samples = <int>[];
+  final seen = <int>{};
   var sent = 0;
   var rejected = 0;
   final sub = bus.listen<_FireEvent>().listen((event) {
+    seen.add(event.seq);
     final latency = clock.elapsedMicroseconds - event.sentAtUs;
     samples.add(latency < 0 ? 0 : latency);
   });
@@ -258,6 +281,7 @@ Future<_Result> _localFire(
   );
   await _waitUntil(() => samples.length >= warmupSent);
   samples.clear();
+  seen.clear();
 
   var generationUs = 0;
   sent = 0;
@@ -280,6 +304,7 @@ Future<_Result> _localFire(
     rate: rate,
     sent: sent,
     delivered: samples.length,
+    unique: seen.length,
     rejected: rejected,
     errors: 0,
     generationUs: generationUs,
@@ -297,13 +322,17 @@ Future<_Result> _localRequest(
     handler: (dto, lastData) async => dto.data.seq,
   );
   final samples = <int>[];
+  final seen = <int>{};
   var errors = 0;
 
   Future<void> one(int seq, int sentAt) {
     return bus.request<_RequestEvent>(_RequestEvent(seq)).then(
-          (_) => samples.add(max(0, clock.elapsedMicroseconds - sentAt)),
-          onError: (Object _) => errors++,
-        );
+      (value) {
+        seen.add(value as int);
+        samples.add(max(0, clock.elapsedMicroseconds - sentAt));
+      },
+      onError: (Object _) => errors++,
+    );
   }
 
   // Warm-up.
@@ -316,6 +345,7 @@ Future<_Result> _localRequest(
   );
   await Future.wait(warmup);
   samples.clear();
+  seen.clear();
 
   final pending = <Future<void>>[];
   var sent = 0;
@@ -335,6 +365,7 @@ Future<_Result> _localRequest(
     rate: rate,
     sent: sent,
     delivered: samples.length,
+    unique: seen.length,
     rejected: 0,
     errors: errors,
     generationUs: generationUs,
@@ -406,6 +437,9 @@ Future<_Result> _isolateFire(
   await _waitForWorker(iso, sent);
   final raw = (await iso
       .request<_CollectFireRequest>(const _CollectFireRequest())) as List<int>;
+  final integrity = (await iso.request<_FireIntegrityRequest>(
+    const _FireIntegrityRequest(),
+  )) as List<int>;
   final negatives = raw.where((value) => value < 0).length;
   final samples = raw.map((value) => value < 0 ? 0 : value).toList();
 
@@ -413,7 +447,8 @@ Future<_Result> _isolateFire(
     scenario: 'isolate fire',
     rate: rate,
     sent: sent,
-    delivered: samples.length,
+    delivered: integrity[0],
+    unique: integrity[1],
     rejected: rejected,
     errors: 0,
     generationUs: generationUs,
@@ -441,13 +476,17 @@ Future<_Result> _isolateRequest(
   Stopwatch clock,
 ) async {
   final samples = <int>[];
+  final seen = <int>{};
   var errors = 0;
 
   Future<void> one(int seq, int sentAt) {
     return iso.request<_RequestEvent>(_RequestEvent(seq)).then(
-          (_) => samples.add(max(0, clock.elapsedMicroseconds - sentAt)),
-          onError: (Object _) => errors++,
-        );
+      (value) {
+        seen.add(value as int);
+        samples.add(max(0, clock.elapsedMicroseconds - sentAt));
+      },
+      onError: (Object _) => errors++,
+    );
   }
 
   // Warm-up.
@@ -460,6 +499,7 @@ Future<_Result> _isolateRequest(
   );
   await Future.wait(warmup);
   samples.clear();
+  seen.clear();
 
   final pending = <Future<void>>[];
   var sent = 0;
@@ -478,6 +518,7 @@ Future<_Result> _isolateRequest(
     rate: rate,
     sent: sent,
     delivered: samples.length,
+    unique: seen.length,
     rejected: 0,
     errors: errors,
     generationUs: generationUs,

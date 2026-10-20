@@ -10,6 +10,7 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 * Detailed documentation: **[doc/](doc/README.md)**
 * Full API reference: [doc/06-api-reference.md](doc/06-api-reference.md)
 * Upgrading from 2.x: [doc/07-caveats.md](doc/07-caveats.md#what-changed-in-300)
+* Load benchmark: [benchmark/README.md](benchmark/README.md)
 
 ## Features
 

@@ -4,9 +4,12 @@
 //   dart run benchmark/nats_load_benchmark.dart
 //   dart run benchmark/nats_load_benchmark.dart --rates=100,1000,10000
 //   dart run benchmark/nats_load_benchmark.dart --scenario=fire --rates=100000 --seconds=2
+//   dart run benchmark/nats_load_benchmark.dart --mode=isolated
 //
 // `NATS_URL` (default nats://127.0.0.1:4222) or --url= selects the broker.
 // `--scenario=fire|request|both` selects the scenarios.
+// `--mode=shared|isolated` selects whether both peers share this isolate
+// (default) or the publisher/requester runs in a worker isolate.
 //
 // The benchmark runs a publisher and a subscriber (and, for requests, a
 // requester and a responder) in one process. It is a measurement tool, not a
@@ -17,6 +20,7 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -101,6 +105,7 @@ class _Options {
     required this.warmup,
     required this.url,
     required this.scenario,
+    required this.mode,
   });
 
   final List<int> rates;
@@ -111,16 +116,22 @@ class _Options {
   ///`both` (default), `fire` or `request`.
   final String scenario;
 
+  ///`shared` (both peers in this isolate) or `isolated` (peers in a worker).
+  final String mode;
+
   static _Options parse(List<String> args) {
     var rates = const [100, 500, 1000, 5000, 10000];
     var seconds = 2.0;
     var warmupMs = 500;
     var scenario = 'both';
+    var mode = 'shared';
     var url = Uri.parse(
       Platform.environment['NATS_URL'] ?? 'nats://127.0.0.1:4222',
     );
     for (final arg in args) {
-      if (arg.startsWith('--scenario=')) {
+      if (arg.startsWith('--mode=')) {
+        mode = arg.substring('--mode='.length);
+      } else if (arg.startsWith('--scenario=')) {
         scenario = arg.substring('--scenario='.length);
       } else if (arg.startsWith('--rates=')) {
         rates = arg
@@ -142,6 +153,7 @@ class _Options {
       warmup: Duration(milliseconds: warmupMs),
       url: url,
       scenario: scenario,
+      mode: mode,
     );
   }
 }
@@ -157,6 +169,7 @@ class _Result {
     required this.errors,
     required this.generationUs,
     required this.samples,
+    this.negatives = 0,
   });
 
   final String scenario;
@@ -168,6 +181,10 @@ class _Result {
   final int errors;
   final int generationUs;
   final List<int> samples;
+
+  ///Samples below zero (clamped): the cross-isolate clock offset is off by
+  ///more than the event latency.
+  final int negatives;
 
   double get achievedRate =>
       generationUs <= 0 ? 0 : sent * 1000000 / generationUs;
@@ -192,8 +209,10 @@ class _Result {
     final duplicateText = duplicates > 0 ? ' dup=$duplicates' : '';
     final rejectedText = rejected > 0 ? ' rejected=$rejected' : '';
     final errorText = errors > 0 ? ' errors=$errors' : '';
+    final negativeText = negatives > 0 ? ' neg=$negatives' : '';
     return '| $scenario | $rate | $sent$rejectedText$errorText | '
-        '$delivered$lostText$duplicateText | ${achievedRate.toStringAsFixed(0)} | '
+        '$delivered$lostText$duplicateText$negativeText | '
+        '${achievedRate.toStringAsFixed(0)} | '
         '${_percentile(0.5)} | ${_percentile(0.9)} | '
         '${_percentile(0.99)} | ${_percentile(1.0)} | $mean |';
   }
@@ -356,13 +375,18 @@ Future<void> main(List<String> args) async {
     exitCode = 64;
     return;
   }
+  if (!const {'shared', 'isolated'}.contains(options.mode)) {
+    print('Unknown mode "${options.mode}": use shared or isolated');
+    exitCode = 64;
+    return;
+  }
   final clock = Stopwatch()..start();
 
   print('EventBus NATS load benchmark');
   print('Dart ${Platform.version.split(' ').first}, '
       '${Platform.operatingSystem}, CPUs: ${Platform.numberOfProcessors}');
   print('broker: ${options.url}');
-  print('scenario: ${options.scenario}, '
+  print('mode: ${options.mode}, scenario: ${options.scenario}, '
       'duration: ${options.duration.inMilliseconds} ms, '
       'warm-up: ${options.warmup.inMilliseconds} ms, '
       'rates: ${options.rates.join(', ')} events/s');
@@ -371,6 +395,14 @@ Future<void> main(List<String> args) async {
       'p50 ms | p90 ms | p99 ms | max ms | mean ms |');
   print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
 
+  if (options.mode == 'shared') {
+    await _runShared(options, clock);
+  } else {
+    await _runIsolated(options, clock);
+  }
+}
+
+Future<void> _runShared(_Options options, Stopwatch clock) async {
   final fireErrors = <Object>[];
   final requestErrors = <Object>[];
 
@@ -471,6 +503,7 @@ Future<void> main(List<String> args) async {
           warmup: options.warmup,
           url: options.url,
           scenario: 'request',
+          mode: options.mode,
         ),
         1000,
         clock,
@@ -519,4 +552,435 @@ Future<void> main(List<String> args) async {
       'listener/handler completion.');
   print('NATS core is at-most-once; lost/dup markers mean the broker or a '
       'socket did not deliver a sequence number.');
+}
+
+// ---------------------------------------------------------------------------
+// Isolated mode: publisher/requester in a worker isolate, subscriber/responder
+// in the main isolate. The consumer event loop no longer competes with the
+// generator.
+// ---------------------------------------------------------------------------
+
+class _WorkerReady {
+  const _WorkerReady(this.commands);
+  final SendPort commands;
+}
+
+class _WorkerError {
+  const _WorkerError(this.message);
+  final String message;
+}
+
+class _CalibrateRequest {
+  const _CalibrateRequest(this.id, this.mainT0);
+  final int id;
+  final int mainT0;
+}
+
+class _CalibrateReply {
+  const _CalibrateReply(this.id, this.workerAt);
+  final int id;
+  final int workerAt;
+}
+
+class _FireRun {
+  const _FireRun(this.rate, this.durationUs);
+  final int rate;
+  final int durationUs;
+}
+
+class _FireDone {
+  const _FireDone(this.sent, this.rejected, this.generationUs);
+  final int sent;
+  final int rejected;
+  final int generationUs;
+}
+
+class _RequestRun {
+  const _RequestRun(this.rate, this.durationUs);
+  final int rate;
+  final int durationUs;
+}
+
+class _RequestDone {
+  const _RequestDone(
+    this.sent,
+    this.generationUs,
+    this.samples,
+    this.unique,
+    this.errors,
+  );
+
+  final int sent;
+  final int generationUs;
+  final List<int> samples;
+  final int unique;
+  final int errors;
+}
+
+class _Stop {
+  const _Stop();
+}
+
+class _Stopped {
+  const _Stopped();
+}
+
+Future<void> _disposeWorker(
+  EventBusNats publisher,
+  EventBusNats requester,
+  List<StreamSubscription<Object>> errorSubscriptions,
+) async {
+  for (final subscription in errorSubscriptions) {
+    await subscription.cancel();
+  }
+  await publisher.dispose();
+  await requester.dispose();
+}
+
+Future<void> _isolatedWorker(List<dynamic> args) async {
+  final control = args[0] as SendPort;
+  final url = Uri.parse(args[1] as String);
+  final clock = Stopwatch()..start();
+  final publisher = EventBusNats(
+    url,
+    serializers: {'LoadEvent': _encodeLoad},
+  );
+  final requester = EventBusNats(
+    url,
+    serializers: {'RequestEvent': _encodeRequest},
+    deserializers: {'RequestEvent': _decodeRequest},
+  );
+  var asyncErrors = 0;
+  final errorSubscriptions = <StreamSubscription<Object>>[
+    publisher.errors.listen((error) {
+      asyncErrors++;
+      if (asyncErrors <= 5) control.send(_WorkerError('$error'));
+    }),
+    requester.errors.listen((error) {
+      asyncErrors++;
+      if (asyncErrors <= 5) control.send(_WorkerError('$error'));
+    }),
+  ];
+
+  try {
+    await Future.wait([
+      publisher.waitConnected(timeout: const Duration(seconds: 5)),
+      requester.waitConnected(timeout: const Duration(seconds: 5)),
+    ]);
+  } catch (error) {
+    control.send(_WorkerError('cannot connect: $error'));
+    await _disposeWorker(publisher, requester, errorSubscriptions);
+    return;
+  }
+
+  final commands = ReceivePort();
+  control.send(_WorkerReady(commands.sendPort));
+
+  await for (final message in commands) {
+    if (message is _CalibrateRequest) {
+      control.send(_CalibrateReply(message.id, clock.elapsedMicroseconds));
+    } else if (message is _FireRun) {
+      var rejected = 0;
+      final start = clock.elapsedMicroseconds;
+      final sent = await _drive(
+        rate: message.rate,
+        duration: Duration(microseconds: message.durationUs),
+        clock: clock,
+        send: (seq, at) {
+          if (!publisher.fire<LoadEvent>(LoadEvent(seq, at))) rejected++;
+        },
+      );
+      control.send(
+        _FireDone(sent, rejected, clock.elapsedMicroseconds - start),
+      );
+    } else if (message is _RequestRun) {
+      final samples = <int>[];
+      final seen = <int>{};
+      var errors = 0;
+      final pending = <Future<void>>[];
+
+      Future<void> one(int seq, int sentAt) {
+        return requester
+            .request<RequestEvent>(
+          RequestEvent(seq),
+          timeout: const Duration(seconds: 10),
+        )
+            .then(
+          (value) {
+            seen.add(value as int);
+            samples.add(max(0, clock.elapsedMicroseconds - sentAt));
+          },
+          onError: (Object _) => errors++,
+        );
+      }
+
+      final start = clock.elapsedMicroseconds;
+      final sent = await _drive(
+        rate: message.rate,
+        duration: Duration(microseconds: message.durationUs),
+        clock: clock,
+        send: (seq, at) => pending.add(one(seq, at)),
+      );
+      final generationUs = clock.elapsedMicroseconds - start;
+      try {
+        await Future.wait(pending).timeout(const Duration(seconds: 120));
+      } catch (_) {
+        // A few requests may still be pending; report what arrived.
+      }
+      control.send(
+        _RequestDone(
+          sent,
+          generationUs,
+          samples,
+          seen.length,
+          errors + asyncErrors,
+        ),
+      );
+    } else if (message is _Stop) {
+      break;
+    }
+  }
+
+  commands.close();
+  await _disposeWorker(publisher, requester, errorSubscriptions);
+  control.send(const _Stopped());
+}
+
+Future<void> _runIsolated(_Options options, Stopwatch clock) async {
+  final mainErrors = <Object>[];
+  final workerMessages = <String>[];
+  final samples = <int>[];
+  final seen = <int>{};
+  var negatives = 0;
+  int? offsetUs;
+
+  final subscriber = EventBusNats(
+    options.url,
+    deserializers: {'LoadEvent': _decodeLoad},
+  );
+  final responder = EventBusNats(
+    options.url,
+    serializers: {'RequestEvent': _encodeRequest},
+    deserializers: {'RequestEvent': _decodeRequest},
+  );
+  try {
+    await Future.wait([
+      subscriber.waitConnected(timeout: const Duration(seconds: 5)),
+      responder.waitConnected(timeout: const Duration(seconds: 5)),
+    ]);
+  } catch (error) {
+    print('Cannot connect to the broker: $error');
+    print('Start a NATS server (nats-server -p 4222) or pass --url=...');
+    await subscriber.dispose();
+    await responder.dispose();
+    exitCode = 2;
+    return;
+  }
+
+  final errorSubscriptions = <StreamSubscription<Object>>[
+    subscriber.errors.listen(mainErrors.add),
+    responder.errors.listen(mainErrors.add),
+  ];
+  final fireSubscription = subscriber.listen<LoadEvent>().listen((event) {
+    seen.add(event.seq);
+    final offset = offsetUs;
+    if (offset == null) return;
+    final latency = clock.elapsedMicroseconds - (event.sentAtUs + offset);
+    if (latency < 0) negatives++;
+    samples.add(latency < 0 ? 0 : latency);
+  });
+  responder.setHandler<RequestEvent>(
+    handler: (dto, lastData) async => dto.data.seq,
+  );
+  await _waitForSubscriptions();
+
+  final control = ReceivePort();
+  final ready = Completer<SendPort>();
+  final stopped = Completer<void>();
+  final calibrations = <int, Completer<int>>{};
+  Completer<_FireDone>? fireDone;
+  Completer<_RequestDone>? requestDone;
+
+  control.listen((message) {
+    if (message is _WorkerReady) {
+      if (!ready.isCompleted) ready.complete(message.commands);
+    } else if (message is _CalibrateReply) {
+      calibrations.remove(message.id)?.complete(message.workerAt);
+    } else if (message is _FireDone) {
+      fireDone?.complete(message);
+      fireDone = null;
+    } else if (message is _RequestDone) {
+      requestDone?.complete(message);
+      requestDone = null;
+    } else if (message is _WorkerError) {
+      workerMessages.add(message.message);
+      if (!ready.isCompleted) {
+        ready.completeError(StateError(message.message));
+      }
+    } else if (message is _Stopped) {
+      if (!stopped.isCompleted) stopped.complete();
+    }
+  });
+
+  final isolate = await Isolate.spawn(
+    _isolatedWorker,
+    [control.sendPort, options.url.toString()],
+  );
+
+  SendPort commands;
+  try {
+    commands = await ready.future.timeout(const Duration(seconds: 8));
+  } catch (error) {
+    print('Worker failed: $error');
+    isolate.kill(priority: Isolate.immediate);
+    control.close();
+    await _cleanupIsolated(
+      fireSubscription,
+      errorSubscriptions,
+      subscriber,
+      responder,
+    );
+    exitCode = 2;
+    return;
+  }
+
+  var nextId = 0;
+
+  Future<int> calibrate() async {
+    var bestRtt = 1 << 62;
+    var bestOffset = 0;
+    for (var i = 0; i < 7; i++) {
+      final id = nextId++;
+      final completer = Completer<int>();
+      calibrations[id] = completer;
+      final t0 = clock.elapsedMicroseconds;
+      commands.send(_CalibrateRequest(id, t0));
+      final workerAt =
+          await completer.future.timeout(const Duration(seconds: 2));
+      final t1 = clock.elapsedMicroseconds;
+      final rtt = t1 - t0;
+      if (rtt < bestRtt) {
+        bestRtt = rtt;
+        bestOffset = t0 + rtt ~/ 2 - workerAt;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+    }
+    return bestOffset;
+  }
+
+  Future<_FireDone> runFire(int rate, Duration duration) {
+    final completer = Completer<_FireDone>();
+    fireDone = completer;
+    commands.send(_FireRun(rate, duration.inMicroseconds));
+    return completer.future.timeout(const Duration(seconds: 90));
+  }
+
+  Future<_RequestDone> runRequest(int rate, Duration duration) {
+    final completer = Completer<_RequestDone>();
+    requestDone = completer;
+    commands.send(_RequestRun(rate, duration.inMicroseconds));
+    return completer.future.timeout(const Duration(seconds: 180));
+  }
+
+  try {
+    offsetUs = await calibrate();
+
+    if (options.scenario == 'fire' || options.scenario == 'both') {
+      final warmup = await runFire(1000, options.warmup);
+      await _waitUntilCount(() => seen.length, warmup.sent);
+      samples.clear();
+      seen.clear();
+      negatives = 0;
+
+      for (final rate in options.rates) {
+        final done = await runFire(rate, options.duration);
+        await _waitUntilCount(() => seen.length, done.sent);
+        final result = _Result(
+          scenario: 'nats fire (isolated)',
+          rate: rate,
+          sent: done.sent,
+          delivered: samples.length,
+          unique: seen.length,
+          rejected: done.rejected,
+          errors: mainErrors.length + workerMessages.length,
+          generationUs: done.generationUs,
+          samples: samples,
+          negatives: negatives,
+        );
+        print(result.row());
+        samples.clear();
+        seen.clear();
+        negatives = 0;
+      }
+    }
+
+    if (options.scenario == 'request' || options.scenario == 'both') {
+      await runRequest(1000, options.warmup);
+      for (final rate in options.rates) {
+        final done = await runRequest(rate, options.duration);
+        final result = _Result(
+          scenario: 'nats request (isolated)',
+          rate: rate,
+          sent: done.sent,
+          delivered: done.samples.length,
+          unique: done.unique,
+          rejected: 0,
+          errors: done.errors + mainErrors.length + workerMessages.length,
+          generationUs: done.generationUs,
+          samples: done.samples,
+        );
+        print(result.row());
+      }
+    }
+  } catch (error) {
+    print('Isolated run failed: $error');
+    exitCode = 1;
+  } finally {
+    commands.send(const _Stop());
+    try {
+      await stopped.future.timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // The worker is killed below.
+    }
+    isolate.kill(priority: Isolate.immediate);
+    control.close();
+    await _cleanupIsolated(
+      fireSubscription,
+      errorSubscriptions,
+      subscriber,
+      responder,
+    );
+  }
+
+  print('');
+  if (mainErrors.isNotEmpty || workerMessages.isNotEmpty) {
+    print('async errors: main=${mainErrors.length}, '
+        'worker=${workerMessages.length}');
+    for (final error in [
+      ...mainErrors.map((e) => '$e'),
+      ...workerMessages,
+    ].take(5)) {
+      print('  $error');
+    }
+  } else {
+    print('async errors: none');
+  }
+  print('Isolated mode: publisher/requester in a worker isolate, '
+      'subscriber/responder in the main isolate.');
+  print('The fire latency uses a calibrated stopwatch offset (best of 7 '
+      'SendPort round trips); negative samples are counted as neg=N.');
+}
+
+Future<void> _cleanupIsolated(
+  StreamSubscription<LoadEvent> fireSubscription,
+  List<StreamSubscription<Object>> errorSubscriptions,
+  EventBusNats subscriber,
+  EventBusNats responder,
+) async {
+  await fireSubscription.cancel();
+  for (final subscription in errorSubscriptions) {
+    await subscription.cancel();
+  }
+  await subscriber.dispose();
+  await responder.dispose();
 }

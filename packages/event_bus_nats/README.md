@@ -244,3 +244,4 @@ dart test
 
 The integration files skip themselves when `NATS_URL` is not set. The shared
 layer has its own suite in [`packages/event_bus_transport`](../event_bus_transport).
+A load benchmark is in [`benchmark/`](benchmark/README.md).

@@ -1,3 +1,5 @@
+## 3.0.1
+-  change name for inner packages
 ## 3.0.0
 -  breaking: new address model — `Topic` lost `scheme`/`target`/`fragment`; `path: '/in'` became `paths: ['in']` with a configurable `separator`; `arguments` moved to `EventDTO`; the type token is `'$T'` normalised for broker subjects (`List<int>` → `List(int)`)
 -  breaking: `EventBus.send` is split into `fire<T>` (one-way, returns `bool`, listeners only) and `request<T>` (one handler, returns its result, supports `timeout`, throws `NoHandlerException`, rejects wildcard paths)

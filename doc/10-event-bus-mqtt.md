@@ -1,10 +1,10 @@
-# 10. `event_bus_mqtt`: running the bus over MQTT 5
+# 10. `event_bus_arch_mqtt`: running the bus over MQTT 5
 
-[← 09. event_bus_nats](09-event-bus-nats.md) · [Contents](README.md)
+[← 09. event_bus_arch_nats](09-event-bus-nats.md) · [Contents](README.md)
 
 This chapter describes the MQTT 5 transport implemented in
-[`packages/event_bus_mqtt`](../packages/event_bus_mqtt). It builds on the shared
-layer in [`packages/event_bus_transport`](../packages/event_bus_transport), so
+[`packages/event_bus_arch_mqtt`](../packages/event_bus_arch_mqtt). It builds on the shared
+layer in [`packages/event_bus_arch_transport`](../packages/event_bus_arch_transport), so
 the architecture is the same as in
 [09-event-bus-nats.md](09-event-bus-nats.md); this chapter covers what MQTT
 changes.
@@ -235,7 +235,7 @@ MQTT_URL=mqtt://127.0.0.1:1883 dart test
 
 They cover two buses exchanging events, wildcard delivery, echo suppression,
 arguments, request/reply and its timeout. The example
-`packages/event_bus_mqtt/example/event_bus_mqtt_example.dart` is a two-bus
+`packages/event_bus_arch_mqtt/example/event_bus_arch_mqtt_example.dart` is a two-bus
 end-to-end demo.
 
 ---
@@ -244,7 +244,7 @@ end-to-end demo.
 
 | File | Responsibility |
 |---|---|
-| `event_bus_mqtt_base.dart` | `EventBusMqtt`: MQTT factory over `TransportEventBus` |
+| `event_bus_arch_mqtt_base.dart` | `EventBusMqtt`: MQTT factory over `TransportEventBus` |
 | `mqtt5_client_connection.dart` | `mqtt5_client` adapter: connect, user properties, subscriptions, matching |
 | `mqtt_connection.dart` | `MqttConnection` aliases, options, QoS enum |
 | `mqtt_subject.dart` | `MqttGrammar` and `MqttSubjectMapper` |

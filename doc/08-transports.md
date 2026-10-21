@@ -3,7 +3,7 @@
 [← 07. What was fixed](07-caveats.md) · [Contents](README.md)
 
 This document is the analysis that preceded the transport work. The NATS part is now
-implemented in [`packages/event_bus_nats`](../packages/event_bus_nats) and described in
+implemented in [`packages/event_bus_arch_nats`](../packages/event_bus_arch_nats) and described in
 [09-event-bus-nats.md](09-event-bus-nats.md). The analysis below remains useful for the MQTT and
 Redis options and for the reasoning behind the broker boundary.
 
@@ -158,7 +158,7 @@ Three options.
 
 ### A. Separate repositories, one package per broker
 
-`event_bus_nats`, `event_bus_mqtt`, `event_bus_redis`, each in its own repo.
+`event_bus_arch_nats`, `event_bus_arch_mqtt`, `event_bus_redis`, each in its own repo.
 
 * **For:** full isolation; independent CI and release cadence.
 * **Against:** the core's internal contract cannot be changed without touching N repos in
@@ -172,9 +172,9 @@ event_bus_arch/                     ← core, zero broker dependencies
 ├── pubspec.yaml                    ← workspace root
 ├── lib/
 ├── packages/
-│   ├── event_bus_transport/        ← Transport contract + fake transport (no broker deps)
-│   ├── event_bus_nats/
-│   ├── event_bus_mqtt/
+│   ├── event_bus_arch_transport/        ← Transport contract + fake transport (no broker deps)
+│   ├── event_bus_arch_nats/
+│   ├── event_bus_arch_mqtt/
 │   └── event_bus_redis/
 ```
 
@@ -193,8 +193,8 @@ would also end the "no code generation, no broker lock-in" property the README s
 
 **Recommendation: B.** Separate *published* packages in a workspace inside this repository.
 
-**Status (v3).** `packages/event_bus_transport` holds the broker-agnostic contract and the shared
-bus/connection layer; `packages/event_bus_nats` and `packages/event_bus_mqtt` are its adapters.
+**Status (v3).** `packages/event_bus_arch_transport` holds the broker-agnostic contract and the shared
+bus/connection layer; `packages/event_bus_arch_nats` and `packages/event_bus_arch_mqtt` are its adapters.
 Redis and MQTT 3.1.1 are out of scope. The sketches below are the analysis that led to the
 implementation; the implemented contracts are described in
 [09-event-bus-nats.md](09-event-bus-nats.md), [10-event-bus-mqtt.md](10-event-bus-mqtt.md) and the

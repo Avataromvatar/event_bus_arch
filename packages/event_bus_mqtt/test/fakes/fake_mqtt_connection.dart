@@ -1,6 +1,0 @@
-import 'package:event_bus_transport/testing.dart';
-
-export 'package:event_bus_transport/testing.dart';
-
-///An in-memory MQTT connection for tests; the shared transport fake.
-typedef FakeMqttConnection = FakeTransportConnection;

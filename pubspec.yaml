@@ -7,9 +7,9 @@ environment:
   sdk: '>=3.6.0 <4.0.0'
 
 workspace:
-  - packages/event_bus_nats
-  - packages/event_bus_transport
-  - packages/event_bus_mqtt
+  - packages/event_bus_arch_nats
+  - packages/event_bus_arch_transport
+  - packages/event_bus_arch_mqtt
 
 dependencies:
   # equatable: ^2.0.0

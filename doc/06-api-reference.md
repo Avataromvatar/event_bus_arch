@@ -562,8 +562,8 @@ is a usage error, not a domain error.
 
 * Internal types: `_FSM`, `_FSMNode`, `_EventBusForIsolate`, `_IsolateLink`, `_LayerInitDto`,
   `_worker`, `_initLayer`, and the service messages of the isolate protocol.
-* Transport packages are separate: `packages/event_bus_transport`, `packages/event_bus_nats`,
-  `packages/event_bus_mqtt`.
+* Transport packages are separate: `packages/event_bus_arch_transport`, `packages/event_bus_arch_nats`,
+  `packages/event_bus_arch_mqtt`.
 
 ## What is missing from the API
 

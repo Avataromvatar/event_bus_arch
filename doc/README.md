@@ -15,8 +15,8 @@ Detailed description of the `event_bus_arch` 3.0.0 package. The main README (in 
 | 06 | [API reference](06-api-reference.md) | Every public type and member with signatures |
 | 07 | [Pitfalls](07-caveats.md) | Known defects, reproductions, workarounds, checklist |
 | 08 | [Transports](08-transports.md) | Running the bus over NATS / Redis / NanoMQ: address model, packaging, pitfalls |
-| 09 | [event_bus_nats](09-event-bus-nats.md) | The implemented NATS transport: architecture, registries, reconnection, request/reply, limitations |
-| 10 | [event_bus_mqtt](10-event-bus-mqtt.md) | The implemented MQTT 5 transport: grammar, wildcard difference, user properties, request/reply, limitations |
+| 09 | [event_bus_arch_nats](09-event-bus-nats.md) | The implemented NATS transport: architecture, registries, reconnection, request/reply, limitations |
+| 10 | [event_bus_arch_mqtt](10-event-bus-mqtt.md) | The implemented MQTT 5 transport: grammar, wildcard difference, user properties, request/reply, limitations |
 
 ## Quick summary
 
@@ -64,13 +64,13 @@ What you need to know right away:
 
 * Version: 3.0.0, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
 * Tests: 131 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO,
-  wildcards) — they pass. Transport suites: `packages/event_bus_transport` (24),
-  `packages/event_bus_nats` (52 with a live server), `packages/event_bus_mqtt` (39 with a live
+  wildcards) — they pass. Transport suites: `packages/event_bus_arch_transport` (24),
+  `packages/event_bus_arch_nats` (52 with a live server), `packages/event_bus_arch_mqtt` (39 with a live
   broker).
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
   (FSM), `example/event_bus_layers_example.dart` (layers),
-  `packages/event_bus_nats/example/event_bus_nats_example.dart` (NATS),
-  `packages/event_bus_mqtt/example/event_bus_mqtt_example.dart` (MQTT 5).
+  `packages/event_bus_arch_nats/example/event_bus_arch_nats_example.dart` (NATS),
+  `packages/event_bus_arch_mqtt/example/event_bus_arch_mqtt_example.dart` (MQTT 5).
 * The fix history of version 2.3.0 is in [07-caveats.md](07-caveats.md#what-was-fixed-in-230).
 * What changed in 3.0.0 (the address) is in
   [07-caveats.md](07-caveats.md#what-changed-in-300) and [CHANGELOG.md](../CHANGELOG.md).

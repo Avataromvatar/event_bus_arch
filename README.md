@@ -339,11 +339,11 @@ The address model changed; this is a breaking release.
 - The type in the address is `'$T'` normalised to a subject-safe token —
   no lowercasing, no percent-encoding (`List<int>` → `List(int)`)
 - `topic.topic` is the single routing key (`fullTopic`/`topicWithFragment` are gone)
-- **`packages/event_bus_nats`** adds a NATS transport as a separate package; the core stays
+- **`packages/event_bus_arch_nats`** adds a NATS transport as a separate package; the core stays
   broker-free (see [doc/09-event-bus-nats.md](doc/09-event-bus-nats.md))
-- **`packages/event_bus_transport`** holds the broker-agnostic connection, mapping, bus and node
+- **`packages/event_bus_arch_transport`** holds the broker-agnostic connection, mapping, bus and node
   shared by the NATS and MQTT 5 transports
-- **`packages/event_bus_mqtt`** adds an MQTT 5 transport
+- **`packages/event_bus_arch_mqtt`** adds an MQTT 5 transport
   (see [doc/10-event-bus-mqtt.md](doc/10-event-bus-mqtt.md))
 - The deprecated `queueLenght`, `initalData`, `initialDataNeedExecute` and `shema` aliases were removed
 

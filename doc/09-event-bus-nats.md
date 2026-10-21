@@ -1,9 +1,9 @@
-# 09. `event_bus_nats`: running the bus over NATS
+# 09. `event_bus_arch_nats`: running the bus over NATS
 
 [← 08. Transports](08-transports.md) · [Contents](README.md)
 
 This chapter describes the NATS transport implemented in
-[`packages/event_bus_nats`](../packages/event_bus_nats). The earlier analysis in
+[`packages/event_bus_arch_nats`](../packages/event_bus_arch_nats). The earlier analysis in
 [08-transports.md](08-transports.md) explains why the broker boundary looks the
 way it does and what the MQTT/Redis options would cost.
 
@@ -23,7 +23,7 @@ The bus does not require a code generator. The price is a registry of functions,
 kept in sync by the application on both sides of the wire.
 
 The NATS package is a thin adapter. The lifecycle, registries, mapping, node and
-bus live in [`packages/event_bus_transport`](../packages/event_bus_transport)
+bus live in [`packages/event_bus_arch_transport`](../packages/event_bus_arch_transport)
 and are shared with the planned MQTT 5 transport; this package supplies the
 `dart_nats` client adapter, the NATS grammar and the public `Nats*` names.
 
@@ -266,9 +266,9 @@ NATS_URL=nats://127.0.0.1:4222 dart test
 They cover the adapter (publish, echo filter, arguments) and the bus (two buses
 exchanging events, wildcard delivery, arguments, publisher not receiving its own
 echo, remote request/reply and its timeout). The example
-`packages/event_bus_nats/example/event_bus_nats_example.dart` is a two-bus
+`packages/event_bus_arch_nats/example/event_bus_arch_nats_example.dart` is a two-bus
 end-to-end demo. The shared layer has its own suite in
-`packages/event_bus_transport/test`.
+`packages/event_bus_arch_transport/test`.
 
 ---
 
@@ -276,7 +276,7 @@ end-to-end demo. The shared layer has its own suite in
 
 | File | Responsibility |
 |---|---|
-| `event_bus_nats_base.dart` | `EventBusNats`: NATS factory over `TransportEventBus` |
+| `event_bus_arch_nats_base.dart` | `EventBusNats`: NATS factory over `TransportEventBus` |
 | `event_node_nats.dart` | `EventNodeNatsImpl` alias for `TransportEventNode` |
 | `nats_connection.dart` | `NatsConnection` aliases, statuses, message, options |
 | `dart_nats_connection.dart` | `dart_nats` client adapter: connect, headers, subscriptions |
@@ -286,7 +286,7 @@ end-to-end demo. The shared layer has its own suite in
 | `nats_reconnect_policy.dart` | `NatsReconnectPolicy` alias for `ReconnectPolicy` |
 | `nats_exception.dart` | `Nats*` aliases for the shared transport errors |
 
-Shared layer (`packages/event_bus_transport/lib/src`):
+Shared layer (`packages/event_bus_arch_transport/lib/src`):
 
 | File | Responsibility |
 |---|---|

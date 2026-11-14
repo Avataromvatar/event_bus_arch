@@ -226,11 +226,15 @@ class EventBusIsolate extends EventBusImpl {
   ///true after a successful worker initialization
   bool get isInit => _ready;
 
+  ///[isModelBus] applies to both sides of the bridge: the bus in the main
+  ///isolate and the bus inside the worker. A model bus keeps the node and the
+  ///current value of a topic after its last listener cancels.
   EventBusIsolate({
     required this.onInit,
     Object? initialData,
-  }) : super(false) {
-    _init(initialData: initialData);
+    bool isModelBus = false,
+  }) : super(isModelBus) {
+    _init(initialData: initialData, isModelBus: isModelBus);
   }
 
   @override
@@ -305,11 +309,12 @@ class EventBusIsolate extends EventBusImpl {
 
   void _init({
     Object? initialData,
+    bool isModelBus = false,
   }) async {
     _receivePort = ReceivePort();
     try {
       _isolate = await Isolate.spawn(
-          _worker, [_receivePort!.sendPort, onInit, initialData]);
+          _worker, [_receivePort!.sendPort, onInit, initialData, isModelBus]);
     } catch (error, stackTrace) {
       _completeInitError(
           EventBusException('Isolate.spawn failed: $error'), stackTrace);
@@ -353,13 +358,13 @@ void _worker(dynamic data) async {
   var sendPort = data[0] as SendPort;
   var onInit = data[1] as FutureOr<void> Function(EventBus, Object?);
   Object? initialData = data[2];
-
+  bool isModelBus = data[3] as bool;
   var innerReceivePort = ReceivePort();
   var s = innerReceivePort.asBroadcastStream();
 
   // the bus is created before the handshake: its listener subscribes to the port
   // right away, so no message from main can be lost
-  var eventBus = _EventBusForIsolate(false, s, sendPort);
+  var eventBus = _EventBusForIsolate(isModelBus, s, sendPort);
   sendPort.send(innerReceivePort.sendPort);
 
   try {

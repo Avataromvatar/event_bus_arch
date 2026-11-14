@@ -1,3 +1,7 @@
+## 3.0.2
+-  add: `isModelBus` flag for the `EventBusIsolate` constructor — applies to both the main-side and the worker bus
+-  add: `bridgeIsModelBus` flag for `Layers.createLayers` — applies to every `EventBusIsolate` bridge between layers
+-  fix: documentation for the isolate and layers model-bus flags
 ## 3.0.1
 -  change name for inner packages
 ## 3.0.0

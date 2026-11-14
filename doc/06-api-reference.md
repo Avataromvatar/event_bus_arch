@@ -384,6 +384,7 @@ class EventBusIsolate extends EventBusImpl {
   EventBusIsolate({
     required FutureOr<void> Function(EventBus bus, Object? initialData) onInit,  // can be async
     Object? initialData,
+    bool isModelBus = false,   // model bus on both the main side and in the worker
   });
 
   final FutureOr<void> Function(EventBus isolateBu, Object? initialData) onInit;
@@ -406,8 +407,9 @@ class EventBusIsolate extends EventBusImpl {
 }
 ```
 
-Inherits `listen`, `subscribe`, `currentData`, `haveHandler`, `haveListener`, `allEventStream`
-from `EventBusImpl`. `onInit` is a public field, but assigning it again restarts nothing (the
+Inherits `listen`, `subscribe`, `currentData`, `haveHandler`, `haveListener`, `isModelBus`,
+`allEventStream` from `EventBusImpl`. `isModelBus` reflects the constructor flag and applies to
+both sides of the bridge. `onInit` is a public field, but assigning it again restarts nothing (the
 isolate is already created in the constructor).
 
 `fire`/`request` on the isolate **are** the boundary calls: they build the DTO, send it through
@@ -439,12 +441,15 @@ class Layers {
   static Future<Layer> createLayers(
       List<(fnInitLayer, Object?, bool)> layers,      // (init function, data, isModelBus)
       {bool currentIsModelBus = true,                 // flag for the current (top) bus
+       bool bridgeIsModelBus = false,                 // flag for every isolate bridge
        Duration? timeout});                           // timeout for initializing the chain
 }
 ```
 
 Returns the top `Layer` when **all** layers of the chain are initialized; an init error
-in any layer and an empty list come as an `EventBusException`.
+in any layer and an empty list come as an `EventBusException`. `bridgeIsModelBus` applies to
+the `EventBusIsolate` bridges between layers; the tuple flag and `currentIsModelBus` apply to
+each layer's `current` bus.
 Details are in [03-isolate-and-layers.md](03-isolate-and-layers.md#layers--multi-layer-setups).
 
 ## FSM

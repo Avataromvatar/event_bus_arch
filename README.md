@@ -32,7 +32,7 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 
 ```yaml
 dependencies:
-  event_bus_arch: ^3.0.0
+  event_bus_arch: ^3.0.2
 ```
 
 ```bash
@@ -235,6 +235,8 @@ Good to know:
    `NoHandlerException`; a handler error is rethrown at the sender; an in-flight request fails with
    `EventBusException` if the isolate is disposed.
 4. `ping()` only checks liveness ("is the worker alive"), not readiness.
+5. `EventBusIsolate(isModelBus: true)` makes the bus a model bus on **both** sides of the bridge:
+   the main-side bus and the bus inside the worker. The default is a common bus.
 
 ### Layers
 
@@ -242,7 +244,7 @@ Good to know:
 final layer = await Layers.createLayers([
   (_initMiddle, null, true),   // (init function, initial data, isModelBus)
   (_initBottom, null, true),
-]);
+], bridgeIsModelBus: true);    // optional: model buses for the isolate bridges
 // main ↔ isolate[middle] ↔ isolate[bottom]
 
 // createLayers completes only when every layer in the chain is initialized,
@@ -253,8 +255,10 @@ await layer.close();
 ```
 
 Inside a layer, `layer.top` sends to the layer above, `layer.bottom` to the layer below, and
-`layer.current` is the layer's own bus. Init functions may be `async` and may live in any layer;
-`Layer.close()` works from any layer and is safe to call twice. See
+`layer.current` is the layer's own bus. The tuple's third element sets `layer.current.isModelBus`;
+`bridgeIsModelBus` (default `false`) sets `isModelBus` on every inter-layer `EventBusIsolate`
+bridge instead. Init functions may be `async` and may live in any layer; `Layer.close()` works
+from any layer and is safe to call twice. See
 [doc/03-isolate-and-layers.md](doc/03-isolate-and-layers.md#example-two-worker-layers)
 and [example/event_bus_layers_example.dart](example/event_bus_layers_example.dart).
 
@@ -315,10 +319,17 @@ Detailed guides live in [doc/](doc/README.md):
 | [04-fsm.md](doc/04-fsm.md) | State machine on top of the bus |
 | [05-scope-and-command.md](doc/05-scope-and-command.md) | State with history, command pattern |
 | [06-api-reference.md](doc/06-api-reference.md) | Every public type and member |
-| [07-caveats.md](doc/07-caveats.md) | What 3.0.0 changed, what remains by design, checklist |
+| [07-caveats.md](doc/07-caveats.md) | What changed in 3.0.x, what remains by design, checklist |
 | [08-transports.md](doc/08-transports.md) | Running the bus over NATS / Redis / NanoMQ: analysis |
 | [09-event-bus-nats.md](doc/09-event-bus-nats.md) | The implemented NATS transport: usage, architecture, limitations |
 | [10-event-bus-mqtt.md](doc/10-event-bus-mqtt.md) | The implemented MQTT 5 transport: usage, architecture, limitations |
+
+## Version 3.0.2 changes
+
+- `EventBusIsolate` accepts `isModelBus` (default `false`) and applies it to both the main-side
+  and the worker bus.
+- `Layers.createLayers` accepts `bridgeIsModelBus` (default `false`) for the `EventBusIsolate`
+  bridges between layers; each layer's `current` bus keeps its own flag.
 
 ## Version 3.0.0 changes
 

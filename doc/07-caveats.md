@@ -154,7 +154,9 @@ bus.currentData<String>();   // null — the node is gone
 
 For state, use `EventBus(isModelBus: true)` (nodes are not removed) or keep
 a handler — a node with a handler survives subscription cancellations. A transport node is
-pinned by `KeepAliveNode` while its broker subscription exists.
+pinned by `KeepAliveNode` while its broker subscription exists. The same flag on
+`EventBusIsolate(isModelBus: true)` keeps nodes on both sides of an isolate bridge, and
+`Layers.createLayers(bridgeIsModelBus: true)` does it for every inter-layer bridge.
 
 ### 3. Delivery to listeners is asynchronous
 

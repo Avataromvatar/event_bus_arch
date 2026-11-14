@@ -16,6 +16,7 @@ class EventBusIsolate extends EventBusImpl {
   EventBusIsolate({
     required FutureOr<void> Function(EventBus bus, Object? initialData) onInit,   // may be async
     Object? initialData,
+    bool isModelBus = false,   // model bus on both sides of the bridge
   });
 
   Future<bool> get waitInit;   // completes when onInit has finished
@@ -50,6 +51,19 @@ Future<void> _initWorker(EventBus bus, Object? initialData) async {
 
 `onInit` receives **the bus that lives inside the isolate** plus arbitrary initial data. Everything
 the worker needs is set up here: handlers, subscriptions, state. The function may be async.
+
+### Model bus on both sides
+
+`EventBusIsolate(isModelBus: true)` makes both buses of the bridge model buses: the
+`EventBusIsolate` in the main isolate and the `EventBus` handed to `onInit` in the worker. A model
+bus keeps the node of a topic, and its `currentData`, after the last listener cancels; a common bus
+removes them. The default is `false`, so an isolate bridge behaves like a plain transport.
+
+```dart
+final iso = EventBusIsolate(onInit: _initWorker, isModelBus: true);
+await iso.waitInit;
+// the worker bus is a model bus too: bus.isModelBus == true inside _initWorker
+```
 
 ### Worker readiness
 
@@ -133,7 +147,7 @@ the handler's return value or its exception.
 | `dispose` or worker death with a request in flight | The wait completes with an `EventBusException`; there are no forever-pending `await`s |
 | Only "sendable" objects can cross the isolate | Closures, `StreamController`s, open files and the like cannot be sent |
 | `await iso.request(...)` returns the handler's result, not event ordering | The result may arrive later than events fired by the worker inside the handler |
-| The worker does not know about `isModelBus` | The bus inside the worker is always common |
+| `isModelBus` applies to both sides | `EventBusIsolate(isModelBus: true)` keeps topics on the main-side bus and on the worker bus; the default is a common bus |
 | Wildcard paths are rejected | `fire`/`request` on the isolate address concrete topics, like everywhere else |
 
 ### Shutdown
@@ -157,7 +171,8 @@ typedef fnInitLayer = FutureOr<void> Function(Layer layer, Object? initialData);
 
 static Future<Layer> createLayers(
   List<(fnInitLayer, Object?, bool)> layers, {
-  bool currentIsModelBus = true,
+  bool currentIsModelBus = true,    // the main isolate's layer.current
+  bool bridgeIsModelBus = false,    // every EventBusIsolate between layers
   Duration? timeout,
 });
 ```
@@ -166,21 +181,25 @@ static Future<Layer> createLayers(
 
 ```text
 Main isolate (top)
-  layer.current == EventBus(isModelBus: currentIsModelBus)   ← the layer's local bus
-  layer.top     == null                                      ← nothing above
-  layer.bottom  == EventBusIsolate → first worker
+  layer.current == EventBus(isModelBus: currentIsModelBus)          ← the layer's local bus
+  layer.top     == null                                             ← nothing above
+  layer.bottom  == EventBusIsolate(isModelBus: bridgeIsModelBus)    ← bridge to the first worker
 
 Worker N (layers[N] ran exactly here)
-  layer.current == EventBus(isModelBus: layers[N].$3)        ← the layer's local bus
-  layer.top     == EventBus leading to the layer above       ← up the chain
-  layer.bottom  == EventBusIsolate → the next worker         ← or null if this is the last layer
+  layer.current == EventBus(isModelBus: layers[N].$3)               ← the layer's local bus
+  layer.top     == EventBus leading to the layer above              ← a bridge, isModelBus: bridgeIsModelBus
+  layer.bottom  == EventBusIsolate(isModelBus: bridgeIsModelBus)    ← bridge to the next worker,
+                                                                      or null if this is the last layer
 ```
 
 Rules:
 
 * `layer.top!.fire(...)` / `layer.top!.request(...)` — the event goes **up**;
 * `layer.bottom!.fire(...)` / `layer.bottom!.request(...)` — the event goes **down**;
-* `layer.current` — the layer's local bus for internal logic;
+* `layer.current` — the layer's local bus for internal logic; its `isModelBus` comes from the
+  tuple's third element (`currentIsModelBus` for the top layer), independently of the bridges;
+* `bridgeIsModelBus` applies **only** to the `EventBusIsolate` bridges (`top` / `bottom`), never
+  to `layer.current`; the default `false` keeps the bridges as plain transport pipes;
 * `fire` is one-way and returns whether the event was handed to the isolate; `request` crosses
   the isolate boundary and waits for the handler's result on the other side;
 * the init function runs **inside** the corresponding isolate and must be top-level/static (see

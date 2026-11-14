@@ -1,6 +1,6 @@
 # event_bus_arch documentation
 
-Detailed description of the `event_bus_arch` 3.0.0 package. The main README (in English) —
+Detailed description of the `event_bus_arch` 3.0.2 package. The main README (in English) —
 [../README.md](../README.md).
 
 ## Contents
@@ -62,9 +62,10 @@ What you need to know right away:
 
 ## Package status
 
-* Version: 3.0.0, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
-* Tests: 131 tests in `test/` (bus, nodes, isolates and layers, FSM, Scope/Command, Topic/EventDTO,
-  wildcards) — they pass. Transport suites: `packages/event_bus_arch_transport` (24),
+* Version: 3.0.2, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
+* Tests: 140 tests in `test/` (bus, nodes, isolates and layers, model-bus flags, FSM,
+  Scope/Command, Topic/EventDTO, wildcards) — they pass. Transport suites:
+  `packages/event_bus_arch_transport` (24),
   `packages/event_bus_arch_nats` (52 with a live server), `packages/event_bus_arch_mqtt` (39 with a live
   broker).
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
@@ -73,5 +74,6 @@ What you need to know right away:
   `packages/event_bus_arch_mqtt/example/event_bus_arch_mqtt_example.dart` (MQTT 5).
 * The fix history of version 2.3.0 is in [07-caveats.md](07-caveats.md#what-was-fixed-in-230).
 * What changed in 3.0.0 (the address) is in
-  [07-caveats.md](07-caveats.md#what-changed-in-300) and [CHANGELOG.md](../CHANGELOG.md).
+  [07-caveats.md](07-caveats.md#what-changed-in-300) and [CHANGELOG.md](../CHANGELOG.md);
+  3.0.2 adds the model-bus flags for isolate and layer bridges.
 * What remains unchanged (intentional design) — items 1–2 in [07-caveats.md](07-caveats.md#what-remains-by-design).

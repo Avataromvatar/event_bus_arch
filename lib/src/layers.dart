@@ -6,9 +6,14 @@ part of event_arch;
 typedef fnInitLayer = FutureOr<void> Function(Layer, Object? initialData);
 
 class _LayerInitDto {
+  ///(fnInitLayer, Object?, bool - current bus isModel)
   final List<(fnInitLayer, Object?, bool)> data;
   int index;
-  _LayerInitDto({required this.data, this.index = 0});
+
+  ///`isModelBus` for every isolate bridge between the layers
+  final bool bridgeIsModelBus;
+  _LayerInitDto(
+      {required this.data, this.index = 0, this.bridgeIsModelBus = false});
 }
 
 class Layer {
@@ -49,26 +54,42 @@ class Layer {
 }
 
 class Layers {
-  ///Layers create layer what split by isolate. Top layer have current and bottom eventbus, bottom eventbus this is EventBusIsolate,
-  /// middle layer have top eventbus for connect to top layer and bottom eventbus for cnnect bottom layer if they present
+  ///Builds a chain of layers, each running in its own isolate.
   ///
-  ///[(fnInitLayer,Object?,bool)] - init function, initial data, flag what create model current bus in isolate
+  ///The top layer has [Layer.current] and the [EventBusIsolate] to the first
+  ///worker in [Layer.bottom]. Every middle layer gets the [Layer.top] bus
+  ///leading to the layer above and the [Layer.bottom] bus leading to the layer
+  ///below, if it exists.
+  ///
+  ///Each entry of [layers] is `(init function, initial data, isModelBus)`,
+  ///where the flag applies to that layer's [Layer.current] bus.
+  ///
+  ///[currentIsModelBus] applies to the [Layer.current] bus of the main isolate.
+  ///[bridgeIsModelBus] applies to every [EventBusIsolate] that connects two
+  ///layers, so both the main-side and the worker-side bus of each bridge are
+  ///model buses.
   ///
   ///The future completes when EVERY layer of the chain is initialized, including
   ///async init functions. An init failure of any layer surfaces here as well.
   ///[timeout] limits the wait (unlimited by default).
   static Future<Layer> createLayers(List<(fnInitLayer, Object?, bool)> layers,
-      {bool currentIsModelBus = true, Duration? timeout}) async {
+      {bool currentIsModelBus = true,
+      bool bridgeIsModelBus = false,
+      Duration? timeout}) async {
     if (layers.isEmpty) {
       throw EventBusException(
           'Layers.createLayers: layers list must not be empty');
     }
 
-    _LayerInitDto storage = _LayerInitDto(data: layers, index: 0);
+    _LayerInitDto storage = _LayerInitDto(
+        data: layers, index: 0, bridgeIsModelBus: bridgeIsModelBus);
 
     Layer l = Layer(
         current: EventBus(isModelBus: currentIsModelBus),
-        bottom: EventBusIsolate(onInit: _initLayer, initialData: storage));
+        bottom: EventBusIsolate(
+            onInit: _initLayer,
+            initialData: storage,
+            isModelBus: bridgeIsModelBus));
     var waitInit = (l.bottom as EventBusIsolate).waitInit;
     if (timeout != null) {
       await waitInit.timeout(timeout, onTimeout: () {
@@ -96,7 +117,10 @@ Future<void> _initLayer(EventBus bus, Object? initData) async {
       current: EventBus(isModelBus: dto.data[index].$3),
       top: bus,
       bottom: dto.index < dto.data.length
-          ? EventBusIsolate(onInit: _initLayer, initialData: dto)
+          ? EventBusIsolate(
+              onInit: _initLayer,
+              initialData: dto,
+              isModelBus: dto.bridgeIsModelBus)
           : null);
   if (l.bottom != null) {
     // wait not only for the next isolate to start, but for it to be initialized

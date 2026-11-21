@@ -43,7 +43,7 @@ Future<void> _initWorker(EventBus bus, Object? initialData) async {
   final prefix = initialData as String;
   await _heavyInit();                       // async initialization is fine too
   bus.subscribe<String>(onData: (e) => bus.fire('$prefix: $e'));
-  bus.handlers.setHandler<int>(handler: (dto, lastData) async {
+  bus.subscribeEvents<int>(handler: (dto, lastData) async {
     return dto.data * 2;                    // the response for request()
   });
 }
@@ -107,12 +107,25 @@ final doubled = await iso.request<int>(21);           // 42
 
 // 1a. Before waitInit, fire/request throw a StateError — no silent no-ops
 
-// 2. A one-way event: returns true when it was handed to the worker
+// 2. A one-way event: returns true when the other side has known interest
 iso.fire<String>('ping');
 
 // 3. Receiving events sent FROM the worker
 iso.subscribe<String>(onData: (e) => print('from worker: $e'));
 ```
+
+The bridge is **directional**: local listeners receive events coming from the other side, and
+`fire` sends to the other side only. A fired event is never delivered back to the local listeners of
+the side that fired it. This is what makes a forwarding listener safe:
+
+```dart
+// inside a layer: receive from above, forward below; no self-echo
+layer.top!.subscribe<MyEvent>(onData: (e) => layer.bottom!.fire(e));
+```
+
+Use an ordinary `EventBus` for local pub/sub — `layer.current` inside `Layers`, or a separate bus
+next to a standalone `EventBusIsolate`. A model bridge keeps the values it *receives*; firing a
+value does not update the sending side's local model.
 
 On the main side, `fire` and `request` **do not look for a local node** — they always go to the
 isolate. Events and requests coming from the worker, in turn, are dispatched to the local nodes of

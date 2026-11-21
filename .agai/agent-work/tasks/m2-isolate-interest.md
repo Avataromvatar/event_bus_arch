@@ -12,15 +12,17 @@
 ## Scope
 
 - Interest registry: listener/handler, exact and pattern topics.
-- `fire`: local delivery plus remote only when the other side has listener
-  interest; return true on local acceptance, model storage, transport publish,
-  or known remote listener interest.
+- `fire`: outbound only on a bridge; a remote send happens only when the other
+  side has listener or model interest; no local echo, so a same-topic
+  forwarding listener cannot re-enter itself. Return true only for known remote
+  interest (a handler-only node does not count).
 - `request`: local handler first; remote only when handler interest is known;
   immediate `NoHandlerException` when neither side has a handler.
 - `_IsolateCancel` and queued-request removal across the bridge.
 - Interest snapshot exchange so `waitInit` sees `onInit` subscriptions.
-- Resync after worker death; clear stale remote interest.
-- Tests: local/remote/both/none, pattern, cancellation, restart/resync.
+- Worker death detection; clear stale remote interest.
+- Tests: remote/no-interest, outbound direction, same-topic echo, pattern,
+  cancellation, worker death.
 
 ## Acceptance
 
@@ -37,9 +39,14 @@
   `_RemoteInterest` with pattern matching; interest is sent on the first
   subscription and the last cancellation, on model-node creation, on topic
   removal, and as a snapshot on both handshake sides.
-- `fire` on `EventBusIsolate` and `_EventBusForIsolate`: local delivery first,
-  then a remote send only when the other side registered listener or model
-  interest (D14). A handler-only node never makes `fire` true.
+- `fire` on `EventBusIsolate` and `_EventBusForIsolate` is outbound only: local
+  listeners receive incoming events, a fired event is never delivered back to
+  the side that fired it. The event is sent only when the other side registered
+  listener or model interest (D14); a handler-only node never makes `fire` true.
+  Local pub/sub belongs to a local `EventBus` (`Layer.current` in Layers).
+  This is the 2026-11-22 revision of ADR-0005: the first M2 version delivered a
+  bridge fire locally too, which made a same-topic forwarding listener re-enter
+  itself endlessly.
 - `request`: a local handler is checked first; otherwise a known remote handler
   is required, and the absence of both throws `NoHandlerException` without a
   round trip.
@@ -50,12 +57,13 @@
   not fire `onDone` when the other isolate dies); pending requests fail with
   `EventBusException`, remote interest is cleared and `isolateDeath` is reported.
   Generation-based re-sync belongs to E3-06 because restart is M3.
-- Tests: `test/event_bus_isolate_interest_test.dart` (16 tests) covers the
-  local/remote/both/none matrix, local handler precedence, immediate
+- Tests: `test/event_bus_isolate_interest_test.dart` (16 tests) covers fire with
+  and without remote interest, outbound-only delivery, the same-topic echo that
+  must not re-enter its listener, local handler precedence, immediate
   `NoHandlerException`, handler withdrawal, queued cancellation and timeout,
   async-onInit snapshot, `removeTopic` withdrawal and worker death. The Layers
-  ping-pong test now uses `down`/`up` paths: with local delivery, a listener that
-  echoes on the same bus and the same topic is an infinite loop by construction.
+  ping-pong test uses the same topic in both directions as the regression for
+  the directional bridge.
 
 ## Verification
 
@@ -75,3 +83,9 @@
   session token attribution unavailable (single session, metrics not split by
   task); active time tracked approximately 2026-11-21 20:00 — 2026-11-22 00:00
   local.
+- 2026-11-22 (revision): the user rejected the local delivery of `fire` on a
+  bridge: a listener that fires the same topic re-enters itself. `fire` was
+  returned to the 3.x outbound-only port semantics, ADR-0005 was revised, and
+  the Layers ping-pong was restored to one topic. Re-run after the revision:
+  core 213 passed; transport 27, NATS 42 (+10 skipped), MQTT 32 (+7 skipped),
+  Chrome 3 passed; analyzer 14 infos (unchanged).

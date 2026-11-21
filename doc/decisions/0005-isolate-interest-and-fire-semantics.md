@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-21
+- Revised: 2026-11-22 — `fire` on a bridge is outbound only (see Revision)
 - Roadmap: E2-01..E2-07
 
 ## Context
@@ -33,12 +34,16 @@ The two sides can exchange that registry.
    Interest messages and events share the same port, so their order is FIFO. The registry is
    best-effort: a listener that cancels concurrently with a `fire` may still appear interested.
 
-3. `fire`:
+3. `fire` (revised 2026-11-22):
 
-   - delivers to local listener subscriptions first;
-   - sends to the other side only when the remote registry has a matching listener interest;
-   - returns `true` when the event was accepted by a local listener subscription, stored by a local
-     model bus, accepted by a transport for publishing, or a remote listener interest was known;
+   - on a bridge, `fire` targets only the other side: the bridge is a directional port, local
+     listeners receive incoming events and `fire` is outbound. The event is never delivered to the
+     local listeners of the same side, so a listener that fires the same topic cannot re-enter
+     itself through the bridge;
+   - sends to the other side only when the remote registry has a matching listener or model interest;
+   - returns `true` when the event was handed to a side with known remote listener/model interest;
+     the local side does not accept a bridge `fire`. Local pub/sub belongs to an ordinary `EventBus`
+     (`Layer.current` inside `Layers`);
    - a handler-only node does not make `fire` return `true` (ADR-0002, D14);
    - stale `true` is possible by design; `false` means "no known interest at the moment".
 
@@ -63,23 +68,47 @@ The two sides can exchange that registry.
 
 8. `removeTopic` propagates to the other side, so both registries forget the topic together.
 
-9. The old directional documentation remains partly true: the main side still uses
-   `EventBusIsolate.fire` to reach the worker. The change is that local listeners also receive the
-   event and the return value reflects real interest.
+9. The old directional documentation is true again: the main side uses `EventBusIsolate.fire` to
+   reach the worker, and local listeners on a side receive only events coming from the other side.
+   A bridge does not deliver a fired event back to its own listeners.
+
+## Revision 2026-11-22
+
+The first version of this ADR also delivered `fire` to the local listeners of the bridge. That
+creates an implicit return path: a listener that receives an inbound event and fires the same topic
+on the same bus receives its own fire and fires again — an infinite loop with `DeliveryMode.async`
+and immediate recursion with `DeliveryMode.sync`. The 3.x bridge did not have this path because its
+`fire` was outbound only, so the M2 change silently broke the forwarding pattern that `Layers` and
+worker middleware are built on.
+
+The bridge is a port: listeners are inbound, `fire` is outbound. Local delivery of a bridge `fire`
+is removed; local pub/sub uses a local `EventBus` (`Layer.current`). The remote-interest check and
+the return semantics of revision 1 stay: `fire` is `true` only when the other side has a matching
+listener or model interest. A model bridge still retains the values it *receives*; a fire does not
+update the sending side's local model, exactly as in 3.x.
+
+The regression is covered by `test/event_bus_isolate_protocol_test.dart` (the Layers ping-pong uses
+the same topic in both directions) and by the same-topic echo test in
+`test/event_bus_isolate_interest_test.dart`.
 
 ## Consequences
 
-- `EventBusIsolate` and `_EventBusForIsolate` gain local dispatch for `fire`, plus registry state
-  and sync messages.
+- `EventBusIsolate` and `_EventBusForIsolate` gain registry state and sync messages; `fire` stays
+  outbound only, so the bridge remains a directional port.
 - `_IsolateLink` gains a remote interest map and a generation counter.
-- Tests must cover: local only, remote only, both, none, pattern interest, model node, interest
-  removal, cancellation across the bridge, worker restart, `waitInit` ordering.
+- Tests must cover: fire with and without remote interest, handler-only interest, pattern interest,
+  model node, interest removal, cancellation across the bridge, worker death, `waitInit` ordering,
+  and the same-topic echo that must not re-enter its listener.
 - The protocol is versioned by the 4.0 major; mixed 3.x/4.x peers are unsupported.
 
 ## Alternatives considered
 
-- **Keep fire-and-forget with a `true` on port send.** Rejected: the return value lies and local
-  listeners are bypassed.
+- **Keep fire-and-forget with a `true` on port send.** Rejected: the return value lies; the event may
+  have no interested side. The revised decision keeps the outbound direction but gates the send and
+  the return value on known remote interest.
+- **Deliver `fire` to local listeners too (revision 1).** Rejected in the 2026-11-22 revision: it
+  makes the bridge create an implicit local echo and loops a listener that fires the same topic.
+  Local pub/sub belongs to a local bus.
 - **Synchronise actual `currentData` values between sides.** Rejected for 4.0.0: conflict
   resolution, ordering and ownership are a separate feature; only interest and node topics are
   synchronised.

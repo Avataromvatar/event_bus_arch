@@ -90,23 +90,16 @@ class LayerPing {
 Future<void> initMiddleLayer(Layer layer, Object? _) async {
   // if createLayers does not wait for initialization, the first event is lost
   await Future<void>.delayed(const Duration(milliseconds: 20));
-  // 'down' goes from the layer above to the layer below
   layer.top!.subscribe<LayerPing>(
-      paths: ['down'],
-      onData: (e) =>
-          layer.bottom!.fire(LayerPing(e.count + 1), paths: ['down']));
-  // 'up' goes back; a different path keeps the local delivery of a fire from
-  // being received by the subscriber that produced it
+      onData: (e) => layer.bottom!.fire(LayerPing(e.count + 1)));
   layer.bottom!.subscribe<LayerPing>(
-      paths: ['up'],
-      onData: (e) => layer.top!.fire(LayerPing(e.count + 1), paths: ['up']));
+      onData: (e) => layer.top!.fire(LayerPing(e.count + 1)));
 }
 
 Future<void> initBottomLayer(Layer layer, Object? _) async {
   await Future<void>.delayed(const Duration(milliseconds: 20));
   layer.top!.subscribe<LayerPing>(
-      paths: ['down'],
-      onData: (e) => layer.top!.fire(LayerPing(e.count + 1), paths: ['up']));
+      onData: (e) => layer.top!.fire(LayerPing(e.count + 1)));
 }
 
 void main() {
@@ -294,13 +287,15 @@ void main() {
         (initBottomLayer, null, true),
       ]);
 
-      // The chain: main -> middle (down) -> bottom -> middle -> main (up).
-      // Each hop increments the count, so the main listener sees 3.
+      // The chain: main -> middle -> bottom -> middle -> main. Each hop
+      // increments the count, so the main listener sees 3. The same topic is
+      // used in both directions on purpose: fire on a bridge is outbound only,
+      // so a listener cannot receive its own fire back.
       final answerFuture = layer.bottom!
-          .listen<LayerPing>(paths: ['up'])
+          .listen<LayerPing>()
           .firstWhere((p) => p.count == 3)
           .timeout(const Duration(seconds: 2));
-      layer.bottom!.fire(LayerPing(0), paths: ['down']);
+      layer.bottom!.fire(LayerPing(0));
       final answer = await answerFuture;
 
       expect(answer.count, 3);

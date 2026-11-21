@@ -226,9 +226,11 @@ Future<void> _worker(EventBus bus, Object? initialData) async {
 }
 ```
 
-`EventBusIsolate` behaves like a normal bus on both sides: events sent from the worker reach
-main-isolate listeners, and `request` from main returns the worker's handler result. Paths, separator
-and `arguments` cross the boundary with the event.
+`EventBusIsolate` is a directional bridge: events sent from the worker reach main-isolate
+listeners, and `request` from main returns the worker's handler result. `fire` goes only to the
+other side and is never delivered to the firing side's own listeners, so a listener that fires the
+same topic cannot re-enter itself. For local pub/sub use an ordinary `EventBus` (in `Layers` that is
+`Layer.current`). Paths, separator and `arguments` cross the boundary with the event.
 
 Good to know:
 

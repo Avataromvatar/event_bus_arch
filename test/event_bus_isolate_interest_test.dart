@@ -20,6 +20,14 @@ void listenerWorker(EventBus bus, Object? initialData) {
       onData: (e) => bus.fire<String>('seen: $e', paths: ['seen']));
 }
 
+///Echoes to the same path. With local delivery on the bridge this would be an
+///endless loop: the listener would receive its own echo and fire again.
+void sameTopicEchoWorker(EventBus bus, Object? initialData) {
+  bus.subscribe<String>(
+      paths: ['in'],
+      onData: (e) => bus.fire<String>('echo: $e', paths: ['in']));
+}
+
 ///The same listener, but created after an asynchronous onInit delay.
 Future<void> slowListenerWorker(EventBus bus, Object? initialData) async {
   await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -81,16 +89,18 @@ void main() {
       await iso.dispose();
     });
 
-    test('a local listener receives the fire and makes it true', () async {
+    test('a fire on a bridge is outbound and skips local listeners', () async {
       final iso = EventBusIsolate(onInit: silentWorker);
       await iso.waitInit;
       final local = <String>[];
       final sub = iso.subscribe<String>(paths: ['in'], onData: local.add);
 
-      expect(iso.fire<String>('hi', paths: ['in']), isTrue);
+      // there is a local listener, but it is an inbound listener: the worker
+      // has no interest, so the fire goes nowhere and returns false
+      expect(iso.fire<String>('hi', paths: ['in']), isFalse);
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
-      expect(local, ['hi']);
+      expect(local, isEmpty);
       await sub.cancel();
       await iso.dispose();
     });
@@ -133,23 +143,20 @@ void main() {
       await iso.dispose();
     });
 
-    test('a fire is delivered both locally and remotely', () async {
-      final iso = EventBusIsolate(onInit: listenerWorker);
+    test('a same-topic echo in the worker does not re-enter its listener',
+        () async {
+      final iso = EventBusIsolate(onInit: sameTopicEchoWorker);
       await iso.waitInit;
-      final local = <String>[];
       final seen = <String>[];
-      final localSub =
-          iso.subscribe<String>(paths: ['in'], onData: local.add);
-      final seenSub =
-          iso.subscribe<String>(paths: ['seen'], onData: seen.add);
+      final sub = iso.subscribe<String>(paths: ['in'], onData: seen.add);
 
       expect(iso.fire<String>('hi', paths: ['in']), isTrue);
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
-      expect(local, ['hi']);
-      expect(seen, ['seen: hi']);
-      await localSub.cancel();
-      await seenSub.cancel();
+      // only the worker's echo crossed back; the main-side fire itself was
+      // not delivered locally and the worker did not loop on its own echo
+      expect(seen, ['echo: hi']);
+      await sub.cancel();
       await iso.dispose();
     });
 

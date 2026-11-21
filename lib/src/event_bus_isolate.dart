@@ -389,6 +389,11 @@ class _IsolateLink {
 ///`waitInit` completes once the worker has run `onInit`; before that
 ///`send`/`listen`/`subscribe` throw StateError. Replies are correlated by
 ///request id, so concurrent requests of the same type never get swapped.
+///
+///The bridge is directional: subscriptions on this bus receive events coming
+///from the worker, and [fire] sends an event to the worker only. A fired event
+///is not delivered to this bus's own listeners; local pub/sub belongs to an
+///ordinary [EventBus] (inside [Layers] that is [Layer.current]).
 class EventBusIsolate extends EventBusImpl {
   ///Worker init function. May be async: `waitInit` waits for it to finish.
   ///Must be top-level/static - closures cannot be sent to another isolate.
@@ -442,11 +447,12 @@ class EventBusIsolate extends EventBusImpl {
     _rejectWildcardPaths(paths, 'fire');
     final topic = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    final local = super.fire<T>(data,
-        paths: paths, separator: separator, arguments: arguments);
-    final remote = _link.remoteInterest.hasListener(topic) &&
+    // A bridge is a directional port: local listeners receive incoming events,
+    // fire goes to the other side. Delivering the fire locally as well would
+    // feed a listener that fires the same topic straight back into itself.
+    // Local pub/sub belongs to an ordinary EventBus (Layer.current in Layers).
+    return _link.remoteInterest.hasListener(topic) &&
         _link.fire(EventDTO<T>(data, topic: topic, arguments: arguments));
-    return local || remote;
   }
 
   @override
@@ -689,6 +695,10 @@ void _worker(dynamic data) async {
 }
 
 ///In Worker Isolate
+///
+///Directional like the main side: subscriptions receive events from the main
+///isolate, [fire] sends to the main isolate only. Use `Layer.current` for
+///pub/sub inside the worker.
 class _EventBusForIsolate extends EventBusImpl {
   final Stream<dynamic> _receivePort;
   final SendPort _sendPort;
@@ -710,11 +720,12 @@ class _EventBusForIsolate extends EventBusImpl {
     _rejectWildcardPaths(paths, 'fire');
     final topic = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    final local = super.fire<T>(data,
-        paths: paths, separator: separator, arguments: arguments);
-    final remote = _link.remoteInterest.hasListener(topic) &&
+    // A bridge is a directional port: local listeners receive incoming events,
+    // fire goes to the other side. Delivering the fire locally as well would
+    // feed a listener that fires the same topic straight back into itself.
+    // Local pub/sub belongs to an ordinary EventBus (Layer.current in Layers).
+    return _link.remoteInterest.hasListener(topic) &&
         _link.fire(EventDTO<T>(data, topic: topic, arguments: arguments));
-    return local || remote;
   }
 
   @override

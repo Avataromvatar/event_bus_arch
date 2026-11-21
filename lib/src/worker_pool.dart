@@ -172,6 +172,7 @@ class WorkerPool {
     this.isModelBus = false,
     this.keySelector,
   }) {
+    _requireIsolates('WorkerPool');
     if (workers < 1) {
       throw ArgumentError.value(workers, 'workers', 'must be >= 1');
     }

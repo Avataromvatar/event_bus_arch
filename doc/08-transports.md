@@ -75,7 +75,7 @@ shape "hierarchical string, delimited, case-sensitive, wildcards in subscription
 | Persistence | JetStream (experimental in the Dart client) | retained messages, broker-dependent | none | yes, with `XACK` |
 | Delivery model | push | push | push, fire-and-forget | **pull** (`XREADGROUP`) |
 | Client maturity in Dart | `dart_nats` 1.6.1 — 39 likes, ~5k downloads, MIT, updated recently; JetStream flagged experimental | `mqtt_client` 10.13.0 / `mqtt5_client` 5.1.0 — 550 likes, ~87k downloads, verified publisher | `redis` 4.1.0 — 146 likes, ~277k downloads | same client; Streams are not documented, raw commands only |
-| Flutter Web | via WebSocket | via WebSocket | **not supported** (TCP only) | not supported |
+| Flutter Web | broker: WebSocket; the shipped `dart_nats` adapter is TCP-only (**VM-only**) | broker: WebSocket; `mqtt5_client` has a `MqttBrowserClient`, but the shipped adapter uses the VM server client (**VM-only**) | **not supported** (TCP only) | not supported |
 
 Read the table as a fit ranking for *this* bus:
 
@@ -352,9 +352,20 @@ runtime type name.
     `EventBusIsolate` workers cannot use it directly — they need a `SendPort`-based proxy, or the
     transport must be confined to one isolate. This is the same constraint that makes
     `onInit`/`fnInitLayer` have to be top-level functions.
-24. **Platform support differs per transport.** Flutter Web cannot open raw TCP: NATS and MQTT work
-    over WebSocket, the `redis` package does not support the web at all. Each transport package
-    therefore has its own platform constraints, and the core must not assume otherwise.
+24. **Platform support differs per transport.** Flutter Web cannot open raw TCP: NATS and MQTT
+    brokers work over WebSocket, but the *shipped* Dart adapters have their own limits. The
+    `event_bus_arch_transport` seam and `TransportEventBus` compile and run on the web; a concrete
+    `TransportConnection` decides the platform:
+    * `event_bus_arch_nats` uses `dart_nats`, which is TCP-only. The broker itself supports
+      WebSocket, but this adapter is **VM-only**; a web application implements
+      `TransportConnection` over a browser WebSocket and passes it to `TransportEventBus`.
+    * `event_bus_arch_mqtt` uses `mqtt5_client`'s VM `MqttServerClient`. The package also ships
+      `MqttBrowserClient`; a web application can wrap it in a `TransportConnection` (or inject a
+      custom `MqttConnection`) to use `ws://`/`wss://` from the browser. The shipped
+      `MqttServerConnection` is VM-only.
+    * The core isolate APIs are VM-only; see ADR-0008 and `EventBusCapabilities`. The local bus and
+      observability work in the browser.
+    The `redis` transport was never implemented and is out of scope for 4.0.0.
 
 ### F. Public API and compatibility
 

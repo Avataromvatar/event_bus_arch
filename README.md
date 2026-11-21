@@ -387,6 +387,32 @@ scope.disposeScope();
 `Command` keeps the call history (`maxLen`) and `undo()` sends the previous value back through the
 bus. `undo()` returns `null` when there is nothing to roll back to.
 
+## Web
+
+The core bus, model buses, `subscribeEvents`, observability and the broker-agnostic transport seam
+compile and run in the browser. The isolate APIs are VM-only:
+
+```dart
+if (EventBusCapabilities.isolateSupported) {
+  // EventBusIsolate, Layers, WorkerPool
+} else {
+  // local bus + a transport
+}
+```
+
+`EventBusIsolate`, `Layers.createLayers`, `Layers.supervise` and `WorkerPool` throw
+`UnsupportedError` on the web at construction, before touching `dart:isolate`.
+
+```bash
+dart test -p chrome test/web_smoke_test.dart
+dart compile js tool/web_compile_check.dart -o build/web_check.js
+```
+
+`event_bus_arch_transport` is platform-neutral. The shipped NATS and MQTT connections are VM-only:
+NATS (`dart_nats`) is TCP-only, and the MQTT adapter uses the VM `MqttServerClient`. On the web,
+implement `TransportConnection` over a browser WebSocket (MQTT has `MqttBrowserClient`) and pass it
+to `TransportEventBus`.
+
 ## Documentation
 
 Detailed guides live in [doc/](doc/README.md):

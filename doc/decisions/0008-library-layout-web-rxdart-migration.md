@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-21
+- Implementation notes: 2026-11-22 (Web guard and adapter versions are below)
 - Roadmap: E1-14, E5-01..E5-05, E6-01..E6-06, E0-09
 
 ## Context
@@ -75,6 +76,31 @@ a capability guard and a clear exception, not a `part`-to-library refactor.
      fallback if the regex approach proves unsafe.
 
 6. Versions: core `4.0.0`; transport/NATS/MQTT `0.2.0` with dependency `^4.0.0`.
+
+## Implementation notes (2026-11-22)
+
+- The capability flag is compile-time:
+  `EventBusCapabilities.isWeb = bool.fromEnvironment('dart.library.js_interop')`,
+  `isolateSupported = !isWeb`, `transportSupported = true`.
+- `EventBusIsolate`, `WorkerPool`, `Layers.createLayers` and `Layers.supervise` call the shared
+  guard and throw `UnsupportedError` at construction on the web, before any `dart:isolate` API is
+  touched. The single `part` layout is unchanged; no library split was needed.
+- Chrome smoke tests (`test/web_smoke_test.dart`, `dart test -p chrome`) now cover the local bus,
+  model retention, `subscribeEvents`, observability and the capability guard: 6 tests pass.
+  `dart compile js tool/web_compile_check.dart` compiles the core for the web (≈264 kB of JS in the
+  check). The `event_bus_arch_transport` package also compiles for the web; NATS and MQTT packages
+  compile, but their shipped connections are VM-only (see below).
+- Adapter versions are now `0.2.0` depending on `event_bus_arch: ^4.0.0` and
+  `event_bus_arch_transport: ^0.2.0`; the core is `4.0.0`. NATS moved from `1.0.0` to `0.2.0` to
+  follow D22/this ADR; this is a deliberate version reset for the 4.0 line.
+- Web transports: the seam (`TransportConnection`, `TransportEventBus`) is platform-neutral.
+  * `event_bus_arch_nats` uses `dart_nats`, which is TCP-only: the shipped adapter is VM-only even
+    though the NATS broker supports WebSocket.
+  * `event_bus_arch_mqtt` uses `mqtt5_client`'s VM `MqttServerClient`; `ws://`/`wss://` work on the
+    VM, and the package also ships `MqttBrowserClient`. A web application wraps that browser client
+    in a `TransportConnection` and injects it into `TransportEventBus`/`EventBusMqtt`.
+  This is documented in `doc/08-transports.md`; no browser broker adapter ships in 4.0.0.
+- rxdart was removed in M1; the migration guide and script remain E6-01/E6-02.
 
 ## Consequences
 

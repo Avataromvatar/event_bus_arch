@@ -465,6 +465,7 @@ class EventBusIsolate extends EventBusImpl {
   })  : _initialData = initialData,
         _workerIsModelBus = isModelBus,
         super(isModelBus, observability) {
+    _requireIsolates('EventBusIsolate');
     unawaited(_init());
   }
 

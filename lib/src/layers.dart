@@ -82,6 +82,7 @@ class Layers {
       {bool currentIsModelBus = true,
       bool bridgeIsModelBus = false,
       Duration? timeout}) async {
+    _requireIsolates('Layers.createLayers');
     if (layers.isEmpty) {
       throw EventBusException(
           'Layers.createLayers: layers list must not be empty');
@@ -123,6 +124,7 @@ class Layers {
     Duration? timeout,
     SupervisionPolicy policy = const SupervisionPolicy(),
   }) {
+    _requireIsolates('Layers.supervise');
     if (layers.isEmpty) {
       throw EventBusException(
           'Layers.supervise: layers list must not be empty');

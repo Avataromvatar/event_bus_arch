@@ -193,11 +193,11 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 
 | ID | Task | PD | Depends on | Status |
 |---|---|---:|---|---|
-| E5-01 | Web capability guard: detect web, throw `UnsupportedError` in isolate APIs; no library split unless a concrete failure appears (ADR-0008) | 2 | E0-09, E1-14 | todo |
-| E5-02 | `EventBusCapabilities.isolateSupported` capability flag | 1 | E5-01 | todo |
-| E5-03 | Core tests on Chrome (start with `test/web_smoke_test.dart`) and local check command | 2 | E5-01 | todo |
-| E5-04 | Adapters 0.2.0 against core `^4.0.0`; compile and tests | 3 | E1-12 | todo |
-| E5-05 | NATS/MQTT over WebSocket checks and documentation | 2 | E5-04 | todo |
+| E5-01 | Web capability guard: detect web, throw `UnsupportedError` in isolate APIs; no library split unless a concrete failure appears (ADR-0008) | 2 | E0-09, E1-14 | done |
+| E5-02 | `EventBusCapabilities.isolateSupported` capability flag | 1 | E5-01 | done |
+| E5-03 | Core tests on Chrome (start with `test/web_smoke_test.dart`) and local check command | 2 | E5-01 | done |
+| E5-04 | Adapters 0.2.0 against core `^4.0.0`; compile and tests | 3 | E1-12 | done |
+| E5-05 | NATS/MQTT over WebSocket checks and documentation | 2 | E5-04 | done |
 
 ### E6 — Documentation, migration, release (13–20 PD)
 
@@ -292,9 +292,16 @@ Parallelisable pairs:
 
 ### M5
 
-* Core package passes tests on VM and Chrome.
-* Isolate APIs on Web throw `UnsupportedError`; the capability flag reports `false`.
-* Adapters compile against core 4 and pass their suites.
+* Core package passes tests on VM (250) and Chrome (6: local bus, model, subscribeEvents,
+  observability, capability flag, isolate guard).
+* Isolate APIs on Web throw `UnsupportedError`; `EventBusCapabilities.isolateSupported` is `false`.
+* `dart compile js tool/web_compile_check.dart` compiles the core for the web; the transport
+  package also compiles there.
+* Adapters are 0.2.0 against core `^4.0.0`; their suites pass (transport 28, NATS 42+10 skipped,
+  MQTT 32+7 skipped) and both broker packages compile for the web.
+* NATS/MQTT over WebSocket are documented: NATS (`dart_nats`) and the shipped MQTT
+  `MqttServerConnection` are VM-only; the web seam is a custom `TransportConnection` (MQTT has
+  `MqttBrowserClient`). No browser broker adapter ships in 4.0.0.
 
 ### M6
 
@@ -360,7 +367,11 @@ dart pub get
 dart analyze
 dart test
 dart test -p chrome test/web_smoke_test.dart
+dart compile js tool/web_compile_check.dart -o build/web_check.js
 ```
+
+The web compile check writes into `build/`; remove it afterwards. The browser smoke suite covers
+the local bus, model retention, `subscribeEvents`, observability and the isolate capability guard.
 
 ### Packages
 

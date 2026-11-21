@@ -6,7 +6,7 @@
     "requirements_dir": "doc/artifacts/requirements",
     "base_branch": "master",
     "sync_on_start": true,
-    "auto_commit": true,
+    "auto_commit": false,
     "process_paths": "",
     "commit_language": "ru",
     "dashboard": {

@@ -35,9 +35,9 @@
 - `tool/web_compile_check.dart`: `dart compile js` of the core succeeds
   (264,556 characters of JS). The transport package also compiles for the web;
   NATS and MQTT packages compile as libraries.
-- Versions: core `4.0.0`; transport/NATS/MQTT `0.2.0` with
-  `event_bus_arch: ^4.0.0` and `event_bus_arch_transport: ^0.2.0`. NATS moved
-  from `1.0.0` to `0.2.0` per D22/ADR-0008 (deliberate reset for the 4.0 line).
+- Versions: core `4.0.0`; `event_bus_arch_transport` and `event_bus_arch_mqtt` `0.2.0`;
+  `event_bus_arch_nats` `1.1.0` (a minor bump from its `1.0.0` line). All depend on
+  `event_bus_arch: ^4.0.0`; the broker adapters also on `event_bus_arch_transport: ^0.2.0`.
 - Web transports documented (ADR-0008, doc/08, README): the seam is
   platform-neutral; the shipped NATS (`dart_nats`, TCP-only) and MQTT
   (`MqttServerClient`, VM sockets) connections are VM-only. A web app injects a

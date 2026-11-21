@@ -1,6 +1,6 @@
 name: event_bus_arch_nats
 description: NATS transport for event_bus_arch.
-version: 0.2.0
+version: 1.1.0
 repository: https://github.com/Avataromvatar/dart_event_bus
 
 resolution: workspace

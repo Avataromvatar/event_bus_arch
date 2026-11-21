@@ -75,7 +75,9 @@ a capability guard and a clear exception, not a `part`-to-library refactor.
    - the script is regex-based for the known public surface; an analyzer-based rewrite is a
      fallback if the regex approach proves unsafe.
 
-6. Versions: core `4.0.0`; transport/NATS/MQTT `0.2.0` with dependency `^4.0.0`.
+6. Versions: core `4.0.0`; `event_bus_arch_transport` and `event_bus_arch_mqtt` `0.2.0`,
+   `event_bus_arch_nats` `1.1.0` (a minor bump from its `1.0.0` line, not a reset); all depend on
+   core `^4.0.0`.
 
 ## Implementation notes (2026-11-22)
 
@@ -90,9 +92,10 @@ a capability guard and a clear exception, not a `part`-to-library refactor.
   `dart compile js tool/web_compile_check.dart` compiles the core for the web (≈264 kB of JS in the
   check). The `event_bus_arch_transport` package also compiles for the web; NATS and MQTT packages
   compile, but their shipped connections are VM-only (see below).
-- Adapter versions are now `0.2.0` depending on `event_bus_arch: ^4.0.0` and
-  `event_bus_arch_transport: ^0.2.0`; the core is `4.0.0`. NATS moved from `1.0.0` to `0.2.0` to
-  follow D22/this ADR; this is a deliberate version reset for the 4.0 line.
+- Adapter versions: `event_bus_arch_transport` and `event_bus_arch_mqtt` are `0.2.0`,
+  `event_bus_arch_nats` is `1.1.0` (a minor bump from `1.0.0`); all depend on
+  `event_bus_arch: ^4.0.0`, and the broker adapters also on
+  `event_bus_arch_transport: ^0.2.0`. The core is `4.0.0`.
 - Web transports: the seam (`TransportConnection`, `TransportEventBus`) is platform-neutral.
   * `event_bus_arch_nats` uses `dart_nats`, which is TCP-only: the shipped adapter is VM-only even
     though the NATS broker supports WebSocket.

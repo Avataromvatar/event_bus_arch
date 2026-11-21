@@ -58,7 +58,7 @@ The following decisions are settled and are not open for redesign in 4.0.0.
 | D19 | Supervision: a failed worker is restarted according to policy with backoff and max intensity. A failed layer tears down the whole `Layers` chain: every worker layer is restarted, the top layer (the one that called `Layers.createLayers`) survives. In-flight requests are failed, not retried. |
 | D20 | `rxdart` is removed completely: no dependency, no re-export. Users add it themselves if needed. |
 | D21 | Web: the local bus and transports must work; isolate APIs (`EventBusIsolate`, `Layers`, `WorkerPool`) are present but throw `UnsupportedError`, with a capability flag for compile-time-free checks. |
-| D22 | Versions: `event_bus_arch` 4.0.0; `event_bus_arch_transport`, `event_bus_arch_nats`, `event_bus_arch_mqtt` 0.2.0 with dependency `^4.0.0`. |
+| D22 | Versions: `event_bus_arch` 4.0.0; `event_bus_arch_transport` and `event_bus_arch_mqtt` 0.2.0, `event_bus_arch_nats` 1.1.0 (a minor bump from 1.0.0); all depend on core `^4.0.0`. |
 | D23 | `Scope` subscriptions default to `latest(1)`; `FSM` subscriptions default to `unbounded` (transitions must not be dropped). |
 
 ## 3. Target model
@@ -196,7 +196,7 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 | E5-01 | Web capability guard: detect web, throw `UnsupportedError` in isolate APIs; no library split unless a concrete failure appears (ADR-0008) | 2 | E0-09, E1-14 | done |
 | E5-02 | `EventBusCapabilities.isolateSupported` capability flag | 1 | E5-01 | done |
 | E5-03 | Core tests on Chrome (start with `test/web_smoke_test.dart`) and local check command | 2 | E5-01 | done |
-| E5-04 | Adapters 0.2.0 against core `^4.0.0`; compile and tests | 3 | E1-12 | done |
+| E5-04 | Adapters against core `^4.0.0`: transport/MQTT `0.2.0`, NATS `1.1.0`; compile and tests | 3 | E1-12 | done |
 | E5-05 | NATS/MQTT over WebSocket checks and documentation | 2 | E5-04 | done |
 
 ### E6 — Documentation, migration, release (13–20 PD)
@@ -297,8 +297,9 @@ Parallelisable pairs:
 * Isolate APIs on Web throw `UnsupportedError`; `EventBusCapabilities.isolateSupported` is `false`.
 * `dart compile js tool/web_compile_check.dart` compiles the core for the web; the transport
   package also compiles there.
-* Adapters are 0.2.0 against core `^4.0.0`; their suites pass (transport 28, NATS 42+10 skipped,
-  MQTT 32+7 skipped) and both broker packages compile for the web.
+* Adapters are built against core `^4.0.0` (`event_bus_arch_transport` and
+  `event_bus_arch_mqtt` `0.2.0`, `event_bus_arch_nats` `1.1.0`); their suites pass (transport 28,
+  NATS 42+10 skipped, MQTT 32+7 skipped) and both broker packages compile for the web.
 * NATS/MQTT over WebSocket are documented: NATS (`dart_nats`) and the shipped MQTT
   `MqttServerConnection` are VM-only; the web seam is a custom `TransportConnection` (MQTT has
   `MqttBrowserClient`). No browser broker adapter ships in 4.0.0.

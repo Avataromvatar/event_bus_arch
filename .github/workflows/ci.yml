@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze
+
+  test-core:
+    name: Core tests (VM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart test --coverage=coverage
+      - name: Format coverage
+        run: |
+          dart pub global activate coverage
+          dart pub global run coverage:format_coverage \
+            --lcov \
+            --in=coverage \
+            --out=coverage/lcov.info \
+            --packages=.dart_tool/package_config.json \
+            --report-on=lib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-core
+          path: coverage/lcov.info
+          if-no-files-found: error
+
+  test-web:
+    name: Core smoke tests (Chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart test -p chrome test/web_smoke_test.dart
+
+  test-packages:
+    name: Package tests (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - packages/event_bus_arch_transport
+          - packages/event_bus_arch_nats
+          - packages/event_bus_arch_mqtt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart test
+        working-directory: ${{ matrix.package }}
+
+  integration-nats:
+    name: NATS integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - name: Start NATS
+        run: |
+          docker run -d --name nats -p 4222:4222 nats:2.10
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/4222) >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          echo "NATS did not start" >&2
+          exit 1
+      - run: dart test
+        working-directory: packages/event_bus_arch_nats
+        env:
+          NATS_URL: nats://127.0.0.1:4222
+
+  integration-mqtt:
+    name: MQTT integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - name: Start Mosquitto
+        run: |
+          mkdir -p .ci/mosquitto
+          printf 'listener 1883 0.0.0.0\nallow_anonymous true\n' \
+            > .ci/mosquitto/mosquitto.conf
+          docker run -d --name mqtt \
+            -p 1883:1883 \
+            -v "$PWD/.ci/mosquitto:/mosquitto/config:ro" \
+            eclipse-mosquitto:2
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/1883) >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          echo "MQTT broker did not start" >&2
+          exit 1
+      - run: dart test
+        working-directory: packages/event_bus_arch_mqtt
+        env:
+          MQTT_URL: mqtt://127.0.0.1:1883
+
+  benchmark-smoke:
+    name: Benchmark smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart run benchmark/load_benchmark.dart --seconds=1 --rates=1000,10000 --warmup-ms=200

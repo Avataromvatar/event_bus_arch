@@ -5,6 +5,13 @@ decisions, tasks and estimates. Update the `Status` column as work progresses.
 
 Last updated: 2026-11-21.
 
+**M0 status: completed 2026-11-21.**
+ADRs: [doc/decisions/](doc/decisions/README.md). CI: [.github/workflows/ci.yml](.github/workflows/ci.yml).
+Web spike results: [ADR-0008](doc/decisions/0008-library-layout-web-rxdart-migration.md).
+Local equivalents of the CI jobs were run: core 152 tests, transport 26, NATS 42 (+10 integration
+skipped without a broker), MQTT 32 (+7 skipped), Chrome smoke 2 tests. The GitHub run itself needs a
+push.
+
 ## 1. Estimate method
 
 * Estimates are **ideal engineer-days (PD)** for one experienced Dart developer.
@@ -91,9 +98,9 @@ invoked. A model bus still stores the value.
 | M2 | Isolate interest sync, `fire`/`request` semantics, cancellation across the bridge | 15–22 | Isolate matrix passes; no stale-true `fire` |
 | M3 | WorkerPool and supervision (including whole-chain Layers restart) | 22–30 | Every pool strategy and restart scenario proven |
 | M4 | Observability, metrics, correlation, error monitor | 13–19 | Overhead budget met; metrics consistent |
-| M5 | Web compatibility and adapter 0.2.0 | 9–14 | Core tests on VM and Chrome pass; adapters compile |
+| M5 | Web compatibility and adapter 0.2.0 | 7–12 | Core tests on VM and Chrome pass; adapters compile |
 | M6 | Docs, migration guide/script, release | 13–20 | Migration path exercised; release checklist green |
-| **Total** | | **118–168** (midpoint ~143) | |
+| **Total** | | **116–166** (midpoint ~141) | |
 
 ## 5. Task list
 
@@ -103,16 +110,16 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 
 | ID | Task | PD | Depends on | Status |
 |---|---|---:|---|---|
-| E0-01 | ADR-1: listener subscription contract (buffer policies, async callback, timing, stream facade) | 2 | — | todo |
-| E0-02 | ADR-2: handler subscription (dual callbacks, per-subscription queue, concurrency, tier dispatch, pause/busy) | 2 | — | todo |
-| E0-03 | ADR-3: request lifecycle (timeout, `CancelToken`, queue removal, dispatched discard, exceptions) | 1 | — | todo |
-| E0-04 | ADR-4: `EventBusError`, error stream, `EventBusErrorMonitor` | 1 | — | todo |
-| E0-05 | ADR-5: isolate interest protocol, `fire`/`request` semantics, cancellation across the bridge | 2 | — | todo |
-| E0-06 | ADR-6: observability model, metrics, correlation ids | 1 | — | todo |
-| E0-07 | ADR-7: WorkerPool strategies, supervision, whole-chain Layers restart | 2 | — | todo |
-| E0-08 | ADR-8: library layout, Web, rxdart removal, migration policy | 1 | — | todo |
-| E0-09 | Web spike: confirm what breaks (`dart:isolate`, parts), pick conditional-import layout | 1 | — | todo |
-| E0-10 | CI scaffolding: analyze, VM tests, Chrome tests, NATS/MQTT docker, coverage, benchmark smoke | 2 | — | todo |
+| E0-01 | ADR-1: listener subscription contract (buffer policies, async callback, timing, stream facade) — [ADR-0001](doc/decisions/0001-listener-subscriptions-and-backpressure.md) | 2 | — | done |
+| E0-02 | ADR-2: handler subscription (dual callbacks, per-subscription queue, concurrency, tier dispatch, pause/busy) — [ADR-0002](doc/decisions/0002-handler-subscriptions-and-dispatch.md) | 2 | — | done |
+| E0-03 | ADR-3: request lifecycle (timeout, `CancelToken`, queue removal, dispatched discard, exceptions) — [ADR-0003](doc/decisions/0003-request-lifecycle.md) | 1 | — | done |
+| E0-04 | ADR-4: `EventBusError`, error stream, `EventBusErrorMonitor` — [ADR-0004](doc/decisions/0004-error-stream.md) | 1 | — | done |
+| E0-05 | ADR-5: isolate interest protocol, `fire`/`request` semantics, cancellation across the bridge — [ADR-0005](doc/decisions/0005-isolate-interest-and-fire-semantics.md) | 2 | — | done |
+| E0-06 | ADR-6: observability model, metrics, correlation ids — [ADR-0006](doc/decisions/0006-observability-and-metrics.md) | 1 | — | done |
+| E0-07 | ADR-7: WorkerPool strategies, supervision, whole-chain Layers restart — [ADR-0007](doc/decisions/0007-worker-pool-and-supervision.md) | 2 | — | done |
+| E0-08 | ADR-8: library layout, Web, rxdart removal, migration policy — [ADR-0008](doc/decisions/0008-library-layout-web-rxdart-migration.md) | 1 | — | done |
+| E0-09 | Web spike: `dart compile js` succeeds, local bus passes Chrome, isolate APIs fail at runtime — split not required; see ADR-0008 | 1 | — | done |
+| E0-10 | CI scaffolding: analyze, VM tests, Chrome tests, NATS/MQTT docker, coverage, benchmark smoke — [.github/workflows/ci.yml](.github/workflows/ci.yml) | 2 | — | done |
 
 ### E1 — Core subscription model (34–46 PD)
 
@@ -171,13 +178,13 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 | E4-06 | `EventBusErrorMonitor`: multi-bus aggregation, filters, rate limit, bounded recent buffer | 2 | E1-13 | todo |
 | E4-07 | Tests and overhead benchmark (on/off) | 2 | E4-03..E4-06 | todo |
 
-### E5 — Web and adapters (9–14 PD)
+### E5 — Web and adapters (7–12 PD)
 
 | ID | Task | PD | Depends on | Status |
 |---|---|---:|---|---|
-| E5-01 | Library split and conditional imports/stubs for isolate features | 4 | E0-09, E1-14 | todo |
-| E5-02 | Capability flag; isolate APIs throw `UnsupportedError` on Web | 1 | E5-01 | todo |
-| E5-03 | Core tests on Chrome and CI matrix | 2 | E5-01 | todo |
+| E5-01 | Web capability guard: detect web, throw `UnsupportedError` in isolate APIs; no library split unless a concrete failure appears (ADR-0008) | 2 | E0-09, E1-14 | todo |
+| E5-02 | `EventBusCapabilities.isolateSupported` capability flag | 1 | E5-01 | todo |
+| E5-03 | Core tests on Chrome (start with `test/web_smoke_test.dart`) and CI matrix | 2 | E5-01 | todo |
 | E5-04 | Adapters 0.2.0 against core `^4.0.0`; compile and tests | 3 | E1-12 | todo |
 | E5-05 | NATS/MQTT over WebSocket checks and documentation | 2 | E5-04 | todo |
 
@@ -274,7 +281,7 @@ Parallelisable pairs:
 | New `fire` semantics surprises users | High | Migration guide; explicit tests for local/remote/both/none; document the breaking change |
 | Per-subscription queues add complexity | Medium | Keep one queue per handler subscription; no shared node queue |
 | Whole-chain Layers restart is hard to get right | High | ADR-7 first; test bridge re-handshake and pending failure before implementing pool strategies |
-| Web library split touches the `part` layout | Medium | Spike in E0-09; do the split before E1-14 |
+| Web capability assumptions | Low | Spike in E0-09 proved JS compilation and local-bus runtime; split is deferred until a concrete failure appears |
 | Error storms | Medium | Rate limiting and bounded recent buffer in E1-13 |
 | Dynamic-topic metric cardinality | Medium | Cardinality limit in E4-05 before exposing metrics |
 | rxdart removal breaks consumers | Medium | No re-export; migration guide; replace only the one used method |

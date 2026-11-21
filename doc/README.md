@@ -84,12 +84,15 @@ What you need to know right away:
 * Core version `4.0.0`, SDK `>=3.6.0 <4.0.0`; rxdart is not a dependency.
 * Adapters: `event_bus_arch_transport` 0.2.0, `event_bus_arch_mqtt` 0.2.0,
   `event_bus_arch_nats` 1.1.0; all depend on core `^4.0.0`.
-* Tests: 250 on the VM and 6 in Chrome (`test/` plus `dart test -p chrome
+* Tests: 252 on the VM and 6 in Chrome (`test/` plus `dart test -p chrome
   test/web_smoke_test.dart`). Package suites: transport 28, NATS 42 (+10 skipped without a
   broker), MQTT 32 (+7 skipped without a broker).
 * Web: the core bus, subscriptions, observability and the transport seam work; isolate APIs throw
   `UnsupportedError` (see [14](14-web.md)).
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
   (FSM), `example/event_bus_layers_example.dart` (layers),
+  `example/event_bus_subscription_example.dart` (buffers, handler queue, cancellation, metrics),
+  `example/event_bus_pool_example.dart` (WorkerPool),
+  `example/event_bus_migration_target_example.dart` (the 4.0 form of the 3.x sample),
   `packages/event_bus_arch_nats/example/event_bus_arch_nats_example.dart`,
   `packages/event_bus_arch_mqtt/example/event_bus_arch_mqtt_example.dart`.

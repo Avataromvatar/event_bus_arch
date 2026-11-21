@@ -204,11 +204,11 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 | ID | Task | PD | Depends on | Status |
 |---|---|---:|---|---|
 | E6-01 | Migration guide 3.x -> 4.0 — [15-migration-3-to-4.md](doc/15-migration-3-to-4.md) | 3 | E1-15, E2-07, E3-07 | done |
-| E6-02 | Migration script for `setHandler`/`removeHandler`/imports | 3 | E6-01 | todo |
-| E6-03 | Update docs 01–10; add 00 (overview with UML-style Mermaid diagrams), 11 (backpressure), 12 (errors/observability), 13 (pool/supervision), 14 (Web), 15 (migration); Mermaid class/sequence/state/flow diagrams throughout | 5 | E1..E5 | doing |
-| E6-04 | Examples and benchmark updates | 2 | E1..E5 | todo |
-| E6-05 | CHANGELOG, versioning, publish dry-run, release checklist | 2 | E6-03 | todo |
-| E6-06 | Final regression, API freeze, tag | 2 | all | todo |
+| E6-02 | Migration script `tool/migrate_3_to_4.dart` (dry-run default; rewrites `setHandler`, reports the rest) + tests | 3 | E6-01 | done |
+| E6-03 | Docs 00–15 rewritten/added for 4.0, with Mermaid class/sequence/state/flow diagrams | 5 | E1..E5 | done |
+| E6-04 | Examples (subscriptions, pool, migration target) and benchmark updates | 2 | E1..E5 | done |
+| E6-05 | CHANGELOG (core + adapters), versions, publish dry-runs, [RELEASE.md](RELEASE.md); publishing is manual by the owner | 2 | E6-03 | done |
+| E6-06 | Final regression and API freeze done; commit/tag `v4.0.0` by the owner | 2 | all | doing |
 
 ## 6. Dependency order
 
@@ -306,10 +306,19 @@ Parallelisable pairs:
 
 ### M6
 
-* The migration guide is exercised on an example that uses `setHandler`, handler errors, `Scope`
-  and an isolate.
-* The migration script transforms that example mechanically.
-* All docs links resolve; CHANGELOG is complete; publish dry-run is clean.
+* The 4.0 form of the 3.x sample (handlers as subscriptions, a handler error, `Scope` and an
+  isolate) is `example/event_bus_migration_target_example.dart`; it runs on the VM.
+* The migration script is covered by `test/migration_script_test.dart`: it rewrites
+  `bus.handlers.setHandler` to `bus.subscribeEvents` and reports removals, cross-bus calls,
+  `EventBusHandlers` and rxdart. It is dry-run by default; `--write` applies the rewrite.
+* Docs 00–15 are present; every relative link resolves (checked locally).
+* `CHANGELOG.md` has the 4.0.0 entry; package changelogs cover 0.2.0/1.1.0.
+* Publish dry-runs pass for all four packages; the only warning is "checked-in files modified"
+  because the release state is not committed. **Publishing is manual by the project owner**
+  (`RELEASE.md`).
+* Final regression: core 252, Chrome 6, transport 28, NATS 42 (+10 skipped), MQTT 32 (+7 skipped),
+  analyzer 17 infos, examples and benchmark smoke pass.
+* The commit and `v4.0.0` tag are left to the owner; no auto-commit is enabled.
 
 ## 8. Risks and mitigations
 

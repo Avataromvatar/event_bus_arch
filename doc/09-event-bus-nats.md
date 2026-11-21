@@ -3,16 +3,16 @@
 [← 08. Transports](08-transports.md) · [Contents](README.md)
 
 This chapter describes the NATS transport implemented in
-[`packages/event_bus_arch_nats`](../packages/event_bus_arch_nats). The earlier analysis in
-[08-transports.md](08-transports.md) explains why the broker boundary looks the
-way it does and what the MQTT/Redis options would cost.
+[`packages/event_bus_arch_nats`](../packages/event_bus_arch_nats) 1.1.0 against core `^4.0.0` and
+`event_bus_arch_transport` 0.2.0. The seam itself is described in
+[08-transports.md](08-transports.md).
 
 ---
 
 ## 1. Scope
 
 `EventBusNats` is an `EventBus` that keeps the local API (`fire`, `request`,
-`listen`, `subscribe`, `setHandler`, `currentData`) and adds a NATS direction:
+`listen`, `subscribe`, `subscribeEvents`, `currentData`) and adds a NATS direction:
 
 * a **serializer** decides how an outgoing event becomes bytes;
 * a **deserializer** decides how incoming bytes become an `EventDTO`;
@@ -114,7 +114,8 @@ topic, a fire with no node still returns `false`, exactly like a local bus.
 2. calls the serializer (a failure becomes `NatsSerializationException`);
 3. uses the serializer's subject override or maps the topic; an override is
    validated as a full wire subject;
-4. publishes with the origin header and `X-EventBus-Arguments`;
+4. publishes with the origin header, `X-EventBus-Arguments` and
+   `X-EventBus-Correlation-Id` when the DTO has a correlation id;
 5. delivers the event to local listeners. Request handlers are invoked by
    `request`, not by `fire`.
 
@@ -134,8 +135,10 @@ On an incoming message the node:
 1. strips the prefix and parses the concrete subject into a local topic;
 2. calls the deserializer with the payload, the local topic and the arguments
    from the headers;
-3. checks that `dto.data is T`;
-4. delivers the event with `EventNodeImp.deliver` (or `deliverIncoming` when a
+3. attaches the wire correlation id to the decoded DTO (`copyWith`) when the
+   `X-EventBus-Correlation-Id` header is present;
+4. checks that `dto.data is T`;
+5. delivers the event with `EventNodeImp.deliver` (or `deliverIncoming` when a
    request handler dispatches it), **without** publishing it again.
 
 Deserialization failures and type mismatches are reported on `bus.errors`; the
@@ -157,8 +160,8 @@ subject with a NATS inbox (`_INBOX.…`) as the reply subject:
 2. `TransportConnection.request` subscribes to the inbox, publishes, and waits
    for the first response or the timeout;
 3. on the responder the node decodes the message, invokes the local handler
-   through `EventBusHandlersMixin.handleIncomingRequest`, and publishes the
-   encoded result back to `replyTo`;
+   through the bus's `handleIncomingRequest`, and publishes the encoded result
+   back to `replyTo` with the request's correlation id;
 4. the requester decodes the response with the deserializer registered for the
    request topic and returns `dto.data`.
 
@@ -199,7 +202,7 @@ and the merged `errors` stream.
 
 ---
 
-## 8. Self-echo and arguments
+## 8. Self-echo, arguments and correlation
 
 NATS delivers a published message to every matching subscription on the
 connection, including one owned by the publisher. Without a filter, a node that
@@ -213,8 +216,13 @@ send already delivered the event to local listeners, so they see it once.
 receives them as the named `arguments` parameter and decides whether to copy
 them into the DTO.
 
-Both features need NATS 2.2+. With `useHeaders: false` they are disabled, and
-the bus no longer filters its echo.
+`EventDTO.correlationId`, when present, is written to
+`X-EventBus-Correlation-Id`; the receiving node attaches it with `copyWith`.
+It crosses fire and request/reply alike.
+
+Both headers need NATS 2.2+. With `useHeaders: false` they are disabled, and
+the bus no longer filters its echo and carries neither arguments nor a
+correlation id.
 
 ---
 
@@ -263,12 +271,12 @@ skipped unless `NATS_URL` is set:
 NATS_URL=nats://127.0.0.1:4222 dart test
 ```
 
-They cover the adapter (publish, echo filter, arguments) and the bus (two buses
-exchanging events, wildcard delivery, arguments, publisher not receiving its own
-echo, remote request/reply and its timeout). The example
-`packages/event_bus_arch_nats/example/event_bus_arch_nats_example.dart` is a two-bus
-end-to-end demo. The shared layer has its own suite in
-`packages/event_bus_arch_transport/test`.
+They cover the adapter (publish, echo filter, arguments, correlation) and the bus (two buses
+exchanging events, wildcard delivery, arguments, publisher not receiving its own echo, remote
+request/reply and its timeout). The broker-backed integration tests are skipped without a server;
+the transport seam is covered by the fake in `packages/event_bus_arch_transport/test`. The example
+`packages/event_bus_arch_nats/example/event_bus_arch_nats_example.dart` is a two-bus end-to-end
+demo.
 
 ---
 

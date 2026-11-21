@@ -185,15 +185,24 @@ the transport metadata changed).
 
 ## 8. Migration script
 
-`tool/migrate_3_to_4.dart` performs the mechanical rewrites for the known public surface:
+`tool/migrate_3_to_4.dart` performs the mechanical rewrite of the known public surface:
 
-* `bus.handlers.setHandler<T>(paths: ..., handler: ...)` → a marked `subscribeEvents` call;
-* `bus.handlers.removeHandler<T>(...)` → a marked `cancel()` reminder;
-* `addAllHandlerFromOtherBus` / `removeAllHandlerPresentInOtherBus` → a report (manual work);
-* `import 'package:event_bus_arch/event_bus_arch.dart';` stays (the isolate API is still exported);
-* rxdart usage is reported, not rewritten.
+```bash
+# dry run — prints findings, writes nothing
+dart run tool/migrate_3_to_4.dart lib test
 
-The script is regex-based by design and prints a diff-style report; it never guesses handler
-variables. Run it on a clean working tree, review every change, then follow the checklist above.
+# apply the automatic rewrite
+dart run tool/migrate_3_to_4.dart --write lib test
+```
+
+* `bus.handlers.setHandler<T>(...)` → `bus.subscribeEvents<T>(...)` is the only automatic rewrite.
+  Store the returned `EventSubscription` if you will need to remove the handler later.
+* `removeHandler` is reported, not rewritten: cancelling the subscription replaces it.
+* `addAllHandlerFromOtherBus` / `removeAllHandlerPresentInOtherBus` are reported for manual work.
+* `EventBusHandlers` type references and `rxdart` usage are reported; add rxdart to your own
+  dependencies if you still need it.
+
+The script is regex-based by design and may match comments or strings. Run it on a clean working
+tree, review every finding, then follow the checklist above.
 
 [Back to the overview](00-overview.md)

@@ -1,3 +1,23 @@
+## 4.0.0
+-  breaking: the old handler API is removed — `EventBusHandlers`, `setHandler`, `removeHandler`, `addAllHandlerFromOtherBus` and `removeAllHandlerPresentInOtherBus` no longer exist; use `subscribeEvents(handler: ...)` and cancel the returned `EventSubscription`
+-  breaking: `fire` returns `true` only for a listener, a model store, a transport publish or a known remote listener/model interest; a handler-only subscription does not count (D14)
+-  breaking: an isolate bridge is directional — local listeners receive incoming events, `fire` goes out only and never echoes back to its own side
+-  add: `EventSubscription<T>` with a bounded listener buffer (`latest`/`dropOldest`/`dropNewest`/`reject`), `pause`/`resume`/`resize`, counters and an optional `.stream` view; `onEvent` and `handler` may share one subscription
+-  add: per-subscription handler queues — `handlerConcurrency`, `requestQueueCapacity`, round-robin inside the exact or pattern tier, `BusyException`; exact tiers never fall back to a pattern tier when busy
+-  add: request lifecycle — `timeout`, `CancelToken`, queued-request removal, dispatched-then-cancelled results discarded, `NoHandlerException`/`BusyException`/`RequestTimeoutException`/`RequestCanceledException`
+-  add: `EventBus.errors` as `EventBusError` data events with per-`(kind, topic)` rate limiting, bounded `recentErrors`, `suppressedErrors`; `EventBusErrorMonitor` with filters, a monitor-wide limit and `snapshot()`
+-  add: isolate interest registries, immediate `NoHandlerException`, cancellation across the bridge, `waitInit` after interest exchange, `EventBusIsolate.restart()` in place, worker parent watchdog
+-  add: `WorkerPool` with `broadcast`/`roundRobin`/`keyed`/`leastBusy`/`single`, request credits, `WorkerPoolMetrics`, restart supervision; `Layers.supervise` restarts the whole worker chain while the top layer and its subscriptions survive
+-  add: opt-in observability — `ObservabilityConfig`, per-topic/subscription metrics, latency histograms, `metrics.snapshot()`/`changes`, `EventBusMetricsExporter`, cardinality limiting, payload capture control; zero hot-path work when disabled
+-  add: `EventDTO.correlationId`, `fire`/`request(correlationId:)`, propagation through handlers, isolates and transport headers (`X-EventBus-Correlation-Id`); request errors carry it
+-  add: Web capability guard — `EventBusCapabilities.isWeb`/`isolateSupported`, `UnsupportedError` from `EventBusIsolate`/`WorkerPool`/`Layers` at construction; the local bus, observability and the transport seam work in the browser
+-  change: `Scope` uses `bufferCapacity: 1`, `BufferOverflow.latest` and `disposeScope()` no longer takes `removeHandler:`; `FSM` uses `allEventStream`
+-  change: legacy `listen`/`subscribe` remain as a compatibility facade over the raw node stream (no bounded buffer, overflow policy, counters or error routing); they will be removed in 5.0.0 — use `subscribeEvents`
+-  remove: rxdart dependency and re-export; add it to your own dependencies if needed
+-  change: package versions — core `4.0.0`; `event_bus_arch_transport` 0.2.0, `event_bus_arch_mqtt` 0.2.0, `event_bus_arch_nats` 1.1.0; a 3.x adapter is not wire-compatible with 4.0
+-  docs: new `00` overview, `11` backpressure, `12` errors/observability, `13` pool/supervision, `14` Web, `15` migration; rewritten `01`–`03`, `06`–`10`; Mermaid class/sequence/state/flow diagrams throughout
+-  tests: 252 core tests, 6 Chrome smoke tests; transport 28, NATS 42 (+10 skipped without a broker), MQTT 32 (+7 skipped without a broker)
+
 ## 3.1.0
 -  add: `EventBus.removeTopic<T>` — explicit per-topic eviction that works on a model bus and on a transport node (the broker subscription is cancelled); active listeners receive `done`, a registered handler stays
 -  add: `EventBusIsolate` forwards `removeTopic` to the other side of the bridge (fire-and-forget `_IsolateDelete`, applied in port order; the call requires a finished `waitInit`)

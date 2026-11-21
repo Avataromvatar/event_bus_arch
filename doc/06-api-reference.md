@@ -4,7 +4,8 @@
 
 The entire public API lives in a single library — `package:event_bus_arch/event_bus_arch.dart`
 (library name `event_arch`, assembled from `part` files). The package does not re-export `rxdart`;
-add it to your own dependencies if you need its operators.
+add it to your own dependencies if you need its operators. The isolation APIs are VM-only; see
+`EventBusCapabilities` below.
 
 ## Contents
 
@@ -14,21 +15,28 @@ add it to your own dependencies if you need its operators.
 * [EventNode](#eventnode) / [EventSubscription](#eventsubscription)
 * [EventBus](#eventbus) / [EventBusImpl](#eventbusimpl) / [EventBusMixin](#eventbusmixin)
 * [EventBusError](#eventbuserror) / [EventBusErrorMonitor](#eventbuserrormonitor)
+* [EventBusMetrics](#eventbusmetrics) / [ObservabilityConfig](#observabilityconfig)
 * [EventBusIsolate](#eventbusisolate)
-* [Layer](#layer) / [Layers](#layers)
+* [Layer](#layer) / [Layers](#layers) / [LayersSupervisor](#layerssupervisor)
+* [WorkerPool](#workerpool) / [SupervisionPolicy](#supervisionpolicy)
 * [FSM](#fsm)
 * [Scope](#scope) / [Command](#command)
 * [EventBusLogger](#eventbuslogger)
+* [EventBusCapabilities](#eventbuskapabilities)
 * [Errors](#errors)
 * [What is not exported](#what-is-not-exported)
 
 ## Typedefs
 
 ```dart
-///A request responder. The returned value is the response; an exception is an error.
-typedef Handler<T> = Future<dynamic> Function(EventDTO<T> dto, T? lastData);
-
+typedef EventCallback<T> = FutureOr<void> Function(T event);   // listener
+typedef Handler<T> = Future<dynamic> Function(EventDTO<T> dto, T? lastData); // responder
 typedef Node<T> = EventNode<T>;
+
+typedef WorkerInit = FutureOr<void> Function(EventBus bus, Object? initialData);
+typedef WorkerKeySelector = Object? Function(EventDTO dto);
+typedef MetricKeyBuilder = String Function(Topic topic);
+typedef EventBusErrorFilter = bool Function(EventBusError error);
 
 typedef FSMHandler<T, E> =
     Future<Object?> Function(T currentState, T lastState, E event, List<EventDTO> ignoredEvents);
@@ -132,12 +140,16 @@ abstract class EventDTO<T> {
   Topic get topic;
   T get data;
   Map<String, String>? get arguments;    // parameters of this call; not part of the address
+  String? get correlationId;             // optional cross-boundary correlation
+
+  EventDTO<T> copyWith({T? data, Topic? topic,
+      Map<String, String>? arguments, String? correlationId});
 
   static EventDTO<T> create<T>(T data, {List<String>? paths, String? separator,
-      Map<String, String>? arguments});
+      Map<String, String>? arguments, String? correlationId});
 
   factory EventDTO(T data, {Topic? topic, List<String>? paths, String? separator,
-      Map<String, String>? arguments});
+      Map<String, String>? arguments, String? correlationId});
 
   Map<String, dynamic> toJson();
 }
@@ -147,24 +159,24 @@ The factory creates `EventDTOImpl`. If `topic` is not passed, it is built from `
 `paths`/`separator` parameters; `separator` defaults to `'.'` when not given.
 
 There is no completer: a handler returns its result, `request` awaits it, and `fire` has no
-result channel. `arguments` reach the handler on the DTO it is given, including across an
-isolate.
+result channel. `arguments` and `correlationId` reach the handler on the DTO it is given, including
+across an isolate and a transport.
 
 ## EventDTOImpl
 
 ```dart
 class EventDTOImpl<T> implements EventDTO<T> {
-  EventDTOImpl(Topic topic, T data, {Map<String, String>? arguments});
-                                                       // topic and data are positional!
+  EventDTOImpl(Topic topic, T data, {Map<String, String>? arguments, String? correlationId});
 
   Topic topic;
   T data;
   Map<String, String>? arguments;
+  final String? correlationId;
 
   static EventDTO<T> fromJson<T>(Map<String, dynamic> json,
       {T Function(String topic, dynamic data)? dataConverter});
 
-  Map<String, dynamic> toJson();     // {'topic': topic.topic, 'data': data} — without encoding
+  Map<String, dynamic> toJson();     // {'topic': ..., 'data': ..., maybe 'correlationId'}
   bool operator ==(Object other);    // by (topic, data)
   int get hashCode;                  // Object.hashAll([topic, data])
   String toString();                 // 'EventDTO(<topic>, data: <data>)'
@@ -173,22 +185,23 @@ class EventDTOImpl<T> implements EventDTO<T> {
 
 `toJson` returns the data **as is**, without `jsonEncode`: encoding is the caller's
 job, so an arbitrary object in `data` no longer breaks either `toJson` or `toString`.
-`arguments` are **not** part of the JSON form, and `fromJson` does not restore them — carry them
-in your own envelope if a wire format has to preserve them.
+`arguments` are **not** part of the JSON form; `correlationId` is included when non-null and
+restored by `fromJson`. Carry `arguments` in your own envelope if a wire format has to preserve them.
 
 ## EventNode
 
-`abstract class EventNode<T>` — the topic cell: the current value and the listener stream.
-A handler is not stored here; it lives in the bus.
+`abstract class EventNode<T>` — the topic cell: the current value, the listener stream and the
+subscriptions of one topic. A handler is a capability of an `EventSubscription`, not a node-level
+registration.
 
 ```dart
 T? currentData;                                 // the last delivered value
 bool get isDisposed;
-StreamController<T> get streamControllerValue;
+StreamController<T> get streamControllerValue;  // legacy stream facade
 
-void deliver(EventDTO dto);                     // store the value, notify the stream
+bool deliver(EventDTO dto);                     // store the value, fan out to subscriptions
 EventNode<T> copy();                            // independent node with the same value
-Future<void> dispose();                         // close the value stream
+Future<void> dispose();                         // close the value stream and subscriptions
 
 factory EventNode.create({T? currentData});     // EventNodeImp
 ```
@@ -266,6 +279,8 @@ int get dropped;
 int get delivered;
 int get inFlight;                      // running handler invocations
 int get bufferedRequests;              // queued requests
+int get maxBufferedRequests;           // largest queue depth observed (metrics on)
+LatencySnapshot? get queueWaitLatency; // queue-wait histogram (metrics on)
 int get handlerConcurrency;
 int get requestQueueCapacity;
 bool get hasRequestCapacity;           // free slot or queue room, and not paused
@@ -284,8 +299,9 @@ Delivery:
   bus throws `BusyException`. `pause()` stops request dispatch; in-flight handlers continue.
 * `cancel()` clears the buffers, fails queued requests with `NoHandlerException`, and closes the
   `.stream` view. `onDone` is called only when the node is disposed (`dispose`, `removeTopic`).
-* Listener errors go to the subscription-level `onError`; `cancelOnError` also cancels the
-  subscription. The bus-level error stream is added by E1-13.
+* Listener errors go to the subscription-level `onError` and to `bus.errors` (kind `listener`);
+  `cancelOnError` also cancels the subscription. `capturePayloads` puts the event into the error
+  envelope.
 * `CancelToken` (below) and `timeout` remove a queued request; a dispatched handler keeps running
   and its response is discarded.
 
@@ -311,9 +327,11 @@ cancellation wins.
 The abstract bus interface. The factory always returns `EventBusImpl`.
 
 ```dart
-factory EventBus({bool isModelBus = false});
+factory EventBus({bool isModelBus = false, ObservabilityConfig? observability});
 
 bool get isModelBus;
+bool get isObservable;                         // observabilityConfig.enabled
+EventBusMetrics get metrics;                   // snapshot / changes
 String get defaultTopicPathSeparator;          // '.'; the fallback for every address parameter
 Future<void> dispose();                        // idempotent; after it the bus throws StateError
 bool get isDisposed;
@@ -323,10 +341,10 @@ List<EventBusError> get recentErrors;          // bounded (100)
 int get suppressedErrors;                      // rate-limited errors
 
 bool fire<T>(T data, {List<String>? paths, String? separator,
-                      Map<String, String>? arguments});
+                      Map<String, String>? arguments, String? correlationId});
 Future<dynamic> request<T>(T data, {List<String>? paths, String? separator,
                                     Map<String, String>? arguments, Duration? timeout,
-                                    CancelToken? cancelToken});
+                                    CancelToken? cancelToken, String? correlationId});
 
 Stream<T> listen<T>({List<String>? paths, String? separator});
 StreamSubscription<T> subscribe<T>({List<String>? paths, String? separator,
@@ -355,12 +373,15 @@ bool haveListener<T>({List<String>? paths, String? separator});
 ```
 
 `fire` returns true when at least one listener accepted the event, a model bus stored it, or a
-transport published it. A handler subscription alone does not make `fire` return true (D14).
+transport published it. On an `EventBusIsolate` the same call also reports a known remote
+listener/model interest; in both cases a handler subscription alone does not make `fire` return true
+(D14).
 
 `request` throws `NoHandlerException` when no handler matches, `BusyException` when handlers exist
 but none has capacity, `RequestTimeoutException` on timeout and `RequestCanceledException` when its
 `CancelToken` is cancelled. Wildcard paths are rejected with `EventBusException`.
 `currentData` reads the exact node, or the pattern node when the address contains wildcards.
+`correlationId` is optional; it reaches handlers and crosses isolates and transports.
 
 `removeTopic` removes the node and forgets `currentData` even on a model bus and even for a
 transport node with a `KeepAliveNode` pin (the broker subscription is cancelled). It returns
@@ -388,8 +409,10 @@ throw `StateError`.
 
 ```dart
 class EventBusImpl with EventBusMixin, /* internal dispatch mixin */ {
-  EventBusImpl(bool isModelBus);
+  EventBusImpl(bool isModelBus,
+      [ObservabilityConfig observability = ObservabilityConfig.disabled]);
   bool get isModelBus;
+  ObservabilityConfig get observabilityConfig;
 }
 ```
 
@@ -403,6 +426,9 @@ is private: request resolution, tier selection, round-robin and the request life
 ```dart
 String defaultTopicPathSeparator = '.';         // the address fallback, writable
 int requestQueueCapacity = 64;                  // default for handler subscriptions
+ObservabilityConfig get observabilityConfig;
+bool get isObservable;
+EventBusMetrics get metrics;                    // lazily created
 bool get isDisposed;
 Stream<EventBusError> get errors;
 List<EventBusError> get recentErrors;
@@ -455,6 +481,7 @@ class EventBusError {
     EventBusErrorSource source = EventBusErrorSource.core,
     String? topic,
     EventDTO? event,                  // null unless payload capture is enabled
+    String? correlationId,            // when the envelope came from a request DTO
     StackTrace? stackTrace,
     Map<String, String> context = const {},
     DateTime? timestamp,
@@ -471,14 +498,61 @@ errors for bus failures. Rate limit: 10 per `(kind, topic)` per second; the rest
 Aggregates the error streams of several buses; it is not a static global.
 
 ```dart
+EventBusErrorMonitor({
+  EventBusErrorFilter? filter,
+  int recentLimit = 100,
+  int? maxErrorsPerSecond = 200,   // null = unlimited
+});
+
 bool add(EventBus bus);
 bool remove(EventBus bus);
 Stream<EventBusError> get errors;
-List<EventBusError> get recentErrors;
+List<EventBusError> get recentErrors;      // bounded by recentLimit
 Map<EventBusErrorKind, int> get counts;
+int get suppressed;                       // dropped by the monitor-wide limit
+EventBusErrorSnapshot snapshot();         // total, suppressed, byKind, byTopic, recent
 void resetCounters();
 Future<void> dispose();
 ```
+
+`EventBusErrorSnapshot` exposes `total`, `suppressed`, `byKind`, `byTopic` (key `__none__` for an
+error without a topic) and `recent`. The monitor filters before counting; each bus keeps its own
+per-`(kind, topic)` limit from ADR-0004.
+
+## EventBusMetrics / ObservabilityConfig
+
+```dart
+class ObservabilityConfig {
+  const ObservabilityConfig({
+    bool enabled = false,
+    bool metrics = true,
+    bool tracing = false,
+    double sampleRate = 1.0,
+    int cardinalityLimit = 1000,
+    bool capturePayloads = false,
+    MetricKeyBuilder? metricKeyBuilder,
+  });
+  static const ObservabilityConfig disabled;
+}
+
+class EventBusMetrics {
+  Stream<EventBusMetricsSnapshot> get changes;
+  EventBusMetricsSnapshot snapshot();
+  // record... methods are for the bus and adapter implementers
+}
+
+abstract interface class EventBusMetricsExporter {
+  void export(EventBusMetricsSnapshot snapshot);
+}
+```
+
+`EventBusMetricsSnapshot` has `timestamp`, `fired`, `delivered`, `dropped`,
+`droppedMetricSeries`, `topics` (`TopicMetricsSnapshot`) and `subscriptions`
+(`SubscriptionMetricsSnapshot`). Each topic has event/request counters and dispatch/request
+latency; each subscription has buffer/queue depth, in-flight, concurrency and queue-wait latency.
+The metric key defaults to `Topic.type`; `cardinalityLimit` routes new keys to `__other__`.
+`sampleRate` controls histogram samples only; counters are exact. See
+[12](12-observability.md).
 
 ## EventBusIsolate
 
@@ -488,39 +562,41 @@ class EventBusIsolate extends EventBusImpl {
     required FutureOr<void> Function(EventBus bus, Object? initialData) onInit,  // can be async
     Object? initialData,
     bool isModelBus = false,   // model bus on both the main side and in the worker
+    ObservabilityConfig observability = ObservabilityConfig.disabled,
   });
 
   final FutureOr<void> Function(EventBus isolateBu, Object? initialData) onInit;
-  Future<bool> get waitInit;      // true — the worker completed onInit; an error — startup failed
-  bool get isInit;                // true after a successful onInit
+  Future<bool> get waitInit;      // true — onInit done AND interests exchanged; an error — startup failed
+  bool get isInit;
   bool get isDisposed;
 
   @override
   bool fire<T>(T data, {List<String>? paths, String? separator,
-                        Map<String, String>? arguments});   // throws StateError before waitInit
+                        Map<String, String>? arguments, String? correlationId}); // outbound only
 
   @override
   Future<dynamic> request<T>(T data, {List<String>? paths, String? separator,
-                                      Map<String, String>? arguments, Duration? timeout});
+                                      Map<String, String>? arguments, Duration? timeout,
+                                      CancelToken? cancelToken, String? correlationId});
 
-  Future<bool> ping({Duration timeout = const Duration(seconds: 2)});     // liveness check
+  Future<bool> restart();                                     // new worker, same main-side bus
+  Future<bool> ping({Duration timeout = const Duration(seconds: 2)}); // liveness check
 
   @override
-  Future<void> dispose();         // completes the waits, closes the port, kills the isolate
+  Future<void> dispose();
 }
 ```
 
-Inherits `listen`, `subscribe`, `currentData`, `haveHandler`, `haveListener`, `isModelBus`,
-`allEventStream` from `EventBusImpl`. `isModelBus` reflects the constructor flag and applies to
-both sides of the bridge. `onInit` is a public field, but assigning it again restarts nothing (the
-isolate is already created in the constructor).
+Inherits `listen`, `subscribe`, `subscribeEvents`, `currentData`, `haveHandler`, `haveListener`,
+`isModelBus`, `allEventStream`, `errors` and `metrics` from `EventBusImpl`; the worker side is not
+observable through this object.
 
-`fire`/`request` on the isolate **are** the boundary calls: they build the DTO, send it through
-the `SendPort` and (for `request`) wait for the reply. Paths, separator and arguments cross with
-it, so a worker handler addressed by paths answers on the same address. A request with no handler
-in the target returns an error (`NoHandlerException`), never `null`.
-
-Exchange specifics and limitations — [03-isolate-and-layers.md](03-isolate-and-layers.md#guarantees-and-limitations).
+The bridge is **directional**: local listeners receive incoming events, `fire` goes to the worker
+only and is never delivered to this side's listeners. `request` checks a local handler first and
+crosses only when the worker has a known handler; with neither it throws `NoHandlerException`
+immediately. `restart()` fails pending requests, keeps local nodes/listeners/model state, creates a
+new worker and re-handshakes interests; a generation counter ignores late messages. On the web the
+constructor throws `UnsupportedError` (see [14](14-web.md)).
 
 ## Layer
 
@@ -553,7 +629,94 @@ Returns the top `Layer` when **all** layers of the chain are initialized; an ini
 in any layer and an empty list come as an `EventBusException`. `bridgeIsModelBus` applies to
 the `EventBusIsolate` bridges between layers; the tuple flag and `currentIsModelBus` apply to
 each layer's `current` bus.
-Details are in [03-isolate-and-layers.md](03-isolate-and-layers.md#layers--multi-layer-setups).
+Details are in [03-isolate-and-layers.md](03-isolate-and-layers.md#2-layers).
+
+## LayersSupervisor
+
+```dart
+class Layers {
+  static LayersSupervisor supervise(
+      List<(fnInitLayer, Object?, bool)> layers, {
+      bool currentIsModelBus = true,
+      bool bridgeIsModelBus = false,
+      Duration? timeout,
+      SupervisionPolicy policy = const SupervisionPolicy()});
+}
+
+enum LayersState { starting, ready, restarting, failed, closed }
+
+class LayersSupervisor {
+  Layer get layer;
+  Future<void> get waitInit;
+  LayersState get state;
+  bool get isReady;
+  int get restarts;
+  Stream<EventBusError> get errors;
+  Future<void> waitReady();
+  Future<void> close();
+}
+```
+
+Any worker layer failure restarts the whole worker chain; the top `Layer`, its `current` bus and the
+subscriptions on `layer.bottom` survive (the bridge is restarted in place). Pending requests fail
+and are not retried; `fire`/`request` on the bridge throw `StateError` while restarting. On restart
+exhaustion the supervisor emits `EventBusErrorKind.supervision` and becomes `failed`. It is VM-only.
+See [13](13-pool-and-supervision.md#2-layers-supervision).
+
+## WorkerPool
+
+```dart
+class WorkerPool {
+  WorkerPool({
+    required WorkerInit onInit,
+    int workers = 1,
+    DispatchStrategy dispatch = DispatchStrategy.roundRobin,
+    SupervisionPolicy supervision = const SupervisionPolicy(),
+    int? maxInFlightPerWorker = 64,
+    Object? initialData,
+    Object? Function(int index)? initialDataFor,
+    bool isModelBus = false,
+    WorkerKeySelector? keySelector,
+  });
+
+  Future<void> get waitInit;
+  Future<void> waitReady();
+  bool get isReady;
+  bool get isUsable;
+  WorkerPoolState get state;
+  int get restarts;
+  Stream<EventBusError> get errors;
+  WorkerPoolMetrics get metrics;
+
+  bool fire<T>(T data, {List<String>? paths, String? separator,
+      Map<String, String>? arguments, String? correlationId});
+  Future<dynamic> request<T>(T data, {List<String>? paths, String? separator,
+      Map<String, String>? arguments, Duration? timeout,
+      CancelToken? cancelToken, String? correlationId});
+  Future<void> close();
+  Future<void> dispose();
+}
+
+enum DispatchStrategy { broadcast, roundRobin, keyed, leastBusy, single }
+enum WorkerPoolState { starting, ready, restarting, failed, closed }
+
+class SupervisionPolicy {
+  const SupervisionPolicy({
+    int maxRestarts = 5,
+    Duration window = const Duration(minutes: 1),
+    Duration initialBackoff = const Duration(milliseconds: 100),
+    Duration maxBackoff = const Duration(seconds: 10),
+    double multiplier = 2.0,
+  });
+  Duration delayFor(int attempt);
+}
+```
+
+`WorkerPoolMetrics` has `state`, `workers`, `readyWorkers`, `fired`, `accepted`, `dropped`,
+`requests`, `failedRequests`, `restarts` and `perWorker` (`WorkerMetrics` with index, ready,
+in-flight, fired, requests, restarts). `broadcast` requests throw `UnsupportedError`; `keyed`
+never reroutes a key. A dead worker restarts with backoff; pending requests fail and are not
+retried. VM-only; see [13](13-pool-and-supervision.md).
 
 ## FSM
 
@@ -598,13 +761,15 @@ mixin class Scope<T> {
       void Function(T newData)? onUpdate});
   Future<dynamic> call(T newData, {Map<String, String>? arguments});
   Future<dynamic> undo();                     // publishes the previous value from the history
-  void disposeScope({bool removeHandler = true});
+  void disposeScope();                        // cancels the scope's own subscription
 }
 ```
 
 `initScope` returns a `Future` that completes after the initial value has gone
-through the bus (a handler error is visible to the caller). A repeated call removes the handler
-of the previous topic itself. Details are in [05-scope-and-command.md](05-scope-and-command.md).
+through the bus (a handler error is visible to the caller). The scope subscribes with
+`bufferCapacity: 1`, `BufferOverflow.latest`. A repeated `initScope` cancels the previous
+subscription; `disposeScope()` cancels only the scope's own subscription (there is no
+`removeHandler:` parameter in 4.0). Details are in [05-scope-and-command.md](05-scope-and-command.md).
 
 ## Command
 
@@ -645,6 +810,19 @@ mixin class EventBusLogger {
 The default handler prints `Event:<topic> hasListeners <bool>`, where `<topic>` is the routing key
 and the boolean means "the event reached a node".
 
+## EventBusCapabilities
+
+```dart
+abstract final class EventBusCapabilities {
+  static const bool isWeb;               // true on JS/Wasm
+  static const bool isolateSupported;    // false on the web
+  static const bool transportSupported;  // true: the transport seam is platform-neutral
+}
+```
+
+`EventBusIsolate`, `WorkerPool`, `Layers.createLayers` and `Layers.supervise` throw
+`UnsupportedError` on the web at construction. See [14](14-web.md).
+
 ## Errors
 
 ```dart
@@ -658,18 +836,28 @@ class NoHandlerException extends EventBusException {
   NoHandlerException(String topic);   // 'no request handler for "<topic>"'
   final String topic;
 }
+
+class BusyException extends EventBusException;          // handlers exist, no capacity
+class RequestTimeoutException extends EventBusException; // topic + timeout
+class RequestCanceledException extends EventBusException; // topic
 ```
 
 `EventBusException` is used in `Topic` (an address that cannot be parsed or built),
 `Scope`/`Command` (access before initialization), `EventBusIsolate` (exchange problems), and for
 wildcard paths passed to `fire`/`request`. `NoHandlerException` is thrown by `request` when no
-handler accepts the value. `StateError` is thrown when a closed (`disposed`) bus is used — this
-is a usage error, not a domain error.
+handler accepts the value; `BusyException` when handlers exist but none has capacity;
+`RequestTimeoutException`/`RequestCanceledException` cover the two cancellation paths. All extend
+`EventBusException`. `StateError` is thrown when a closed (`disposed`) bus is used or an isolate API
+is unavailable — that is a usage error, not a domain error.
 
 ## What is not exported
 
-* Internal types: `_FSM`, `_FSMNode`, `_EventBusForIsolate`, `_IsolateLink`, `_LayerInitDto`,
-  `_worker`, `_initLayer`, and the service messages of the isolate protocol.
+* Internal types: `_FSM`, `_FSMNode`, `_EventBusForIsolate`, `_IsolateLink`, `_IsolateRequest`,
+  `_IsolateResponse`, `_IsolateInterest`, `_IsolateCancel`, `_IsolateFailure`, `_LayerInitDto`,
+  `_MetricEntry`, `_RequestEntry`, `_RequestOutcome` and the other protocol/service messages.
+* The 3.x handler API is gone: `EventBusHandlers`, `setHandler`, `removeHandler`,
+  `addAllHandlerFromOtherBus`, `removeAllHandlerPresentInOtherBus` do not exist. Use
+  `subscribeEvents(handler:)`.
 * Transport packages are separate: `packages/event_bus_arch_transport`, `packages/event_bus_arch_nats`,
   `packages/event_bus_arch_mqtt`.
 
@@ -677,8 +865,14 @@ is a usage error, not a domain error.
 
 * no wildcard paths in `fire`/`request` — only listeners, nodes and handlers may use patterns;
 * no regular expressions or partial-token wildcards: `*` and `>` are whole tokens;
-* no unsubscribe "by topic" without a subscription: only `cancel()` on a `StreamSubscription`;
-* no event replay for new subscribers (`replay`) — use `currentData` and the model bus for that;
-* no priorities for handlers and listeners; one handler per topic;
-* no buffering in `allEventStream` — the stream is broadcast, with no buffer;
-* no multiple handlers per topic (use subscriptions or different `paths`).
+* no event replay for new subscribers — use `currentData` and the model bus for that;
+* no handler priorities: subscriptions on the same tier compete round-robin; the exact tier never
+  falls back to a pattern tier when busy;
+* no blocking producer: `fire` is synchronous and cannot wait; use subscription buffers or
+  `WorkerPool.maxInFlightPerWorker` for flow control;
+* `allEventStream` is a broadcast stream with no buffer; attach a listener before publishing if you
+  need every event;
+* `listen`/`subscribe` are a compatibility facade over the raw node stream; they do not use
+  `EventSubscription` (no bounded buffer, overflow policy, counters or error routing). They are
+  removed in 5.0.0; use `subscribeEvents` for those controls;
+* isolate APIs are VM-only; the web has the local bus, observability and the transport seam.

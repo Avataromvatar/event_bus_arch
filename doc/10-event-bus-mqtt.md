@@ -3,24 +3,24 @@
 [← 09. event_bus_arch_nats](09-event-bus-nats.md) · [Contents](README.md)
 
 This chapter describes the MQTT 5 transport implemented in
-[`packages/event_bus_arch_mqtt`](../packages/event_bus_arch_mqtt). It builds on the shared
-layer in [`packages/event_bus_arch_transport`](../packages/event_bus_arch_transport), so
-the architecture is the same as in
-[09-event-bus-nats.md](09-event-bus-nats.md); this chapter covers what MQTT
-changes.
+[`packages/event_bus_arch_mqtt`](../packages/event_bus_arch_mqtt) 0.2.0 against core `^4.0.0` and
+`event_bus_arch_transport` 0.2.0. It builds on the shared layer, so the architecture is the same as
+in [09-event-bus-nats.md](09-event-bus-nats.md); this chapter covers what MQTT changes.
 
 ---
 
 ## 1. Scope
 
 `EventBusMqtt` keeps the local API (`fire`, `request`, `listen`, `subscribe`,
-`setHandler`, `currentData`) and adds an MQTT direction. The transport talks to
-an **MQTT 5** broker only: it relies on user properties (`arguments`, origin),
-the response topic (request/reply) and `noLocal` (echo suppression), none of
-which exist in MQTT 3.1.1.
+`subscribeEvents`, `currentData`) and adds an MQTT direction. The transport talks to
+an **MQTT 5** broker only: it relies on user properties (`arguments`, origin,
+correlation), the response topic (request/reply) and `noLocal` (echo suppression),
+none of which exist in MQTT 3.1.1.
 
 The Dart client is `mqtt5_client`; it is imported only by
-`mqtt5_client_connection.dart`.
+`mqtt5_client_connection.dart`. The shipped connection uses the VM
+`MqttServerClient`; `mqtt5_client` also provides `MqttBrowserClient` for a custom
+web connection (see [14](14-web.md)).
 
 ---
 
@@ -99,7 +99,8 @@ NATS, where `>` already requires one trailing token.
 3. uses the serializer's topic override or maps the topic; an override is
    validated as a full wire topic;
 4. publishes with QoS from `MqttConnectionOptions.qos`, the origin user
-   property and `X-EventBus-Arguments`;
+   property, `X-EventBus-Arguments` and `X-EventBus-Correlation-Id` when the
+   DTO has a correlation id;
 5. delivers the event to local listeners.
 
 Publishing before local delivery is deliberate: a failed transport send must
@@ -125,7 +126,8 @@ On an incoming message the adapter:
 3. the base applies the origin filter;
 4. the node strips the prefix, parses the concrete topic into a local topic,
    calls the deserializer, re-checks the core wildcard pattern (the `#` case),
-   checks `dto.data is T`, and delivers locally without publishing again.
+   attaches the correlation user property (`copyWith`), checks `dto.data is T`,
+   and delivers locally without publishing again.
 
 Every subscription gets a unique subscription identifier (the registration id
 plus one). This matters when filters overlap: an exact node and a pattern node
@@ -208,6 +210,11 @@ Asynchronous failures are reported on `errors`. Errors that happen before
 
 * **MQTT 5 only.** MQTT 3.1.1 lacks user properties, response topics and
   `noLocal`.
+* **User properties carry metadata.** `arguments`, the origin id and
+  `correlationId` travel as MQTT 5 user properties. With
+  `MqttConnectionOptions.useUserProperties: false` none of them are
+  transmitted: the origin filter is disabled and the receiver sees no arguments
+  or correlation id.
 * **At-most-once by default.** The default QoS is 0. QoS 1/2 are broker
   session features; the bus does not deduplicate redeliveries.
 * **Retained messages** are delivered on subscription and become
@@ -234,7 +241,9 @@ MQTT_URL=mqtt://127.0.0.1:1883 dart test
 ```
 
 They cover two buses exchanging events, wildcard delivery, echo suppression,
-arguments, request/reply and its timeout. The example
+arguments, correlation, request/reply and its timeout. Broker-backed integration
+tests are skipped without a broker; the transport seam is covered by the fake in
+`packages/event_bus_arch_transport/test`. The example
 `packages/event_bus_arch_mqtt/example/event_bus_arch_mqtt_example.dart` is a two-bus
 end-to-end demo.
 

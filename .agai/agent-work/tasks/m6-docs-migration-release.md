@@ -1,7 +1,8 @@
 # M6: documentation, migration, release
 
-- Status: in progress
+- Status: done (owner actions remain: commit, tag `v4.0.0`, publish)
 - Started: 2026-11-22
+- Finished: 2026-11-22
 - Estimate: 13–20 PD (ROADMAP M6)
 - Local work report: no task record exists, and `record_create.py` requires a
   parent Feature/User Story; per `agai-sdlc:task-sync`, this file is the allowed
@@ -60,10 +61,29 @@ nodes; diagrams live next to the text they explain and are linked from
     local-first requests, restart/watchdog, Layers/Supervisor.
   * `doc/11-backpressure.md`, `doc/12-observability.md`, `doc/13-pool-and-supervision.md`,
     `doc/14-web.md` — new, diagram-first.
-  * `doc/15-migration-3-to-4.md` — E6-01 migration guide.
+  * `doc/15-migration-3-to-4.md` — migration guide.
   * `doc/README.md` — 4.0 contents, diagram conventions, current test counts.
-- Remaining: rewrite 04–10, add `tool/migrate_3_to_4.dart` (E6-02), update examples/benchmarks
-  (E6-04), CHANGELOG/publish dry-run/release checklist (E6-05), final regression (E6-06).
+- 2026-11-22: second documentation batch: `doc/04` and `doc/05` verified/rewritten; `06` updated
+  for the 4.0 API (observability, error monitor, pool, capabilities, correlation); `07` rewritten
+  as the 4.0 pitfalls list; `08` rewritten around the transport seam; `09`/`10` updated for
+  correlation headers and 1.1.0/0.2.0.
+- 2026-11-22: migration script `tool/migrate_3_to_4.dart` (dry-run default, `--write`),
+  `test/migration_script_test.dart`; examples `event_bus_subscription_example.dart`,
+  `event_bus_pool_example.dart`, `event_bus_migration_target_example.dart`; `CHANGELOG.md` 4.0.0
+  and package changelogs; `RELEASE.md` release checklist. Publish dry-runs pass; the only warning
+  is the uncommitted release state. **Publishing, commit and tag are owner actions.**
+
+## Final verification
+
+- `dart test` — 252 passed (250 core + 2 migration-script tests).
+- `dart test -p chrome test/web_smoke_test.dart` — 6 passed.
+- `dart compile js tool/web_compile_check.dart` — 264,556 characters of JavaScript.
+- `dart analyze` — 17 infos (the known part-directive/style set); no errors or warnings.
+- transport 28, NATS 42 (+10 skipped), MQTT 32 (+7 skipped).
+- Relative documentation links resolve (local check).
+- Examples: subscription, pool, migration target, layers, isolate; load benchmark smoke.
+- Publish dry-runs: core 230 KB, transport 19 KB, NATS 23 KB, MQTT 14 KB; only the
+  "modified files" warning remains because nothing is committed.
 
 ## Agent work log
 
@@ -72,3 +92,5 @@ nodes; diagrams live next to the text they explain and are linked from
 - 2026-11-22: first documentation batch and the migration guide written; ROADMAP E6-01 marked
   done, E6-03 in progress. Agents/skills: `agai-sdlc:task-sync`, `agai-sdlc:records`; token
   attribution unavailable.
+- 2026-11-22: M6 completed except owner actions. E6-02..E6-05 done; E6-06 regression/API freeze
+  done, commit/tag left to the owner. Reports and docs updated; no commits made.

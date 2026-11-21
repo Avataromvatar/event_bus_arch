@@ -87,26 +87,29 @@ void main() {
       await bus.dispose();
     });
 
-    test('the handler stays and the next request rebuilds the node', () async {
+    test('removeTopic also cancels the handler subscription', () async {
       final bus = EventBus(isModelBus: true);
       final previous = <String?>[];
-      bus.handlers.setHandler<String>(
-          paths: ['state'],
-          handler: (dto, lastData) async {
-            previous.add(lastData);
-            return dto.data;
-          });
+      bus.subscribeEvents<String>(
+        paths: ['state'],
+        handler: (dto, lastData) async {
+          previous.add(lastData);
+          return dto.data;
+        },
+      );
 
       await bus.request<String>('a', paths: ['state']);
+      expect(bus.haveHandler<String>(paths: ['state']), isTrue);
+
       expect(bus.removeTopic<String>(paths: ['state']), isTrue);
       expect(bus.currentData<String>(paths: ['state']), isNull);
+      expect(bus.haveHandler<String>(paths: ['state']), isFalse);
 
-      await bus.request<String>('b', paths: ['state']);
-      expect(bus.haveHandler<String>(paths: ['state']), isTrue);
-      expect(bus.currentData<String>(paths: ['state']), 'b');
-
-      await bus.request<String>('c', paths: ['state']);
-      expect(previous, [null, null, 'b']);
+      await expectLater(
+        bus.request<String>('b', paths: ['state']),
+        throwsA(isA<NoHandlerException>()),
+      );
+      expect(previous, [null]);
       await bus.dispose();
     });
   });

@@ -14,10 +14,13 @@ coverage and benchmark smoke commands exercised. **This project has no CI**; eve
 verified locally with the commands in §12.
 
 **M1 status: in progress 2026-11-21.**
-Done: E1-01, E1-02, E1-03, E1-14 — listener subscriptions, buffer policies, async/sync delivery,
-node subscription registry, rxdart removal. Core suite 173 tests, transport 26, NATS 42 (+10
-integration skipped), MQTT 32 (+7 skipped), Chrome smoke 3. Benchmarks show no local regression.
-Next: E1-04/E1-05 handler subscriptions and per-subscription request queues.
+Done: E1-01, E1-02, E1-03, E1-04, E1-05, E1-06, E1-07, E1-08, E1-09, E1-12, E1-14 — listener
+and handler subscriptions, per-subscription request queues/concurrency, tier dispatch with
+round-robin, request timeout/cancellation, dual callbacks, transport single-answer resolution,
+rxdart removal. Core suite 187 tests, transport 27, NATS 42 (+10 integration skipped), MQTT 32
+(+7 skipped), Chrome smoke 3. Benchmarks show no local regression.
+Remaining in M1: E1-10 (remove the compatibility shim and migrate tests/docs), E1-11 (Scope/
+Command), E1-13 (EventBusError stream), E1-15 (full matrix), E1-16 (benchmarks).
 
 ## 1. Estimate method
 
@@ -136,15 +139,15 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 | E1-01 | Base `EventSubscription<T>`: pause/resume/cancel, `isPaused`, `isCanceled`, counters, error routing | 1.5 | E0-01 | done |
 | E1-02 | Listener side: sync/async `onEvent`, buffer, overflow policies, `resize`, `.stream` view | 4 | E1-01 | done |
 | E1-03 | Node refactor: subscription registry, fan-out, `currentData`, lifecycle, `removeTopic` | 4 | E1-01 | done |
-| E1-04 | Handler side: `handler`, `handlerConcurrency`, `isBusy`, `inFlight` | 2 | E1-01 | todo |
-| E1-05 | Per-subscription bounded FIFO request queue; bus default + override; capacity 0 | 3 | E1-04 | todo |
-| E1-06 | Dispatcher: exact/pattern tier, round-robin, paused/busy filtering, queue selection | 4 | E1-04, E1-05 | todo |
-| E1-07 | Dual-callback subscription: `onEvent` + `handler` semantics and tests | 1 | E1-02, E1-04 | todo |
-| E1-08 | Request lifecycle: timeout, `CancelToken`, queue removal, dispatched discard, `lastData` snapshot | 3 | E1-05, E1-06 | todo |
-| E1-09 | Exceptions and queries: `NoHandler`, `Busy`, `RequestTimeout`, `RequestCanceled`, `haveHandler`, `haveAvailableHandler` | 1 | E1-06 | todo |
+| E1-04 | Handler side: `handler`, `handlerConcurrency`, `isBusy`, `inFlight` | 2 | E1-01 | done |
+| E1-05 | Per-subscription bounded FIFO request queue; bus default + override; capacity 0 | 3 | E1-04 | done |
+| E1-06 | Dispatcher: exact/pattern tier, round-robin, paused/busy filtering, queue selection | 4 | E1-04, E1-05 | done |
+| E1-07 | Dual-callback subscription: `onEvent` + `handler` semantics and tests | 1 | E1-02, E1-04 | done |
+| E1-08 | Request lifecycle: timeout, `CancelToken`, queue removal, dispatched discard, `lastData` snapshot | 3 | E1-05, E1-06 | done |
+| E1-09 | Exceptions and queries: `NoHandler`, `Busy`, `RequestTimeout`, `RequestCanceled`, `haveHandler`, `haveAvailableHandler` | 1 | E1-06 | done |
 | E1-10 | Remove old handler API: `EventBusHandlers`, `setHandler`, `removeHandler`, `addAll...`, `removeAll...` | 1.5 | E1-04 | todo |
 | E1-11 | Migrate `Scope`/`Command`/`FSM`: `Scope` `latest(1)`, `FSM` `unbounded` | 2 | E1-10 | todo |
-| E1-12 | Transport adaptation: resolve handler subscription, single answer, busy without response | 4 | E1-06, E1-09 | todo |
+| E1-12 | Transport adaptation: resolve handler subscription, single answer, busy without response | 4 | E1-06, E1-09 | done |
 | E1-13 | `EventBusError` envelope, `EventBus.errors`, `EventBusErrorMonitor` skeleton | 3 | E0-04 | todo |
 | E1-14 | Remove rxdart: native `doOnCancel` replacement, export and dependency removal | 1 | E1-02 | done |
 | E1-15 | Test matrix: buffers, queues, tiers, pause, cancellation, dual callbacks, lifecycle | 5 | E1-01..E1-14 | todo |

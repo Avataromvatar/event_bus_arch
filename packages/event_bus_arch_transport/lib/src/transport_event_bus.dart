@@ -137,6 +137,7 @@ class TransportEventBus extends EventBusImpl {
     String? separator,
     Map<String, String>? arguments,
     Duration? timeout,
+    CancelToken? cancelToken,
   }) {
     if (isDisposed) {
       throw StateError('EventBus is disposed: $this');
@@ -154,8 +155,11 @@ class TransportEventBus extends EventBusImpl {
         separator: separator,
         arguments: arguments,
         timeout: timeout,
+        cancelToken: cancelToken,
       );
     }
+    // Broker-side cancellation is not part of the 4.0.0 transport contract
+    // (D15); the caller's timeout bounds the wait.
     return _requestTransport<T>(topic, data, arguments, timeout);
   }
 

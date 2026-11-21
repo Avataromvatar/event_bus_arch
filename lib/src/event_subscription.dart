@@ -39,6 +39,9 @@ class EventSubscription<T> {
   EventSubscription._({
     required this.topic,
     required this.onEvent,
+    required this.handler,
+    required this.handlerConcurrency,
+    required this.requestQueueCapacity,
     required this.deliveryMode,
     required this.cancelOnError,
     required this.onCancel,
@@ -53,6 +56,18 @@ class EventSubscription<T> {
       throw ArgumentError.value(
           bufferCapacity, 'bufferCapacity', 'must be null or >= 0');
     }
+    if (handlerConcurrency < 1) {
+      throw ArgumentError.value(
+          handlerConcurrency, 'handlerConcurrency', 'must be >= 1');
+    }
+    if (requestQueueCapacity < 0) {
+      throw ArgumentError.value(
+          requestQueueCapacity, 'requestQueueCapacity', 'must be >= 0');
+    }
+    if (onEvent == null && handler == null) {
+      throw ArgumentError(
+          'an EventSubscription needs onEvent, handler, or both');
+    }
   }
 
   ///The topic this subscription is attached to.
@@ -60,6 +75,15 @@ class EventSubscription<T> {
 
   ///The listener callback. Null means this subscription is not a listener.
   final EventCallback<T>? onEvent;
+
+  ///The request handler. Null means this subscription is not a responder.
+  final Handler<T>? handler;
+
+  ///How many handler invocations may run at the same time.
+  final int handlerConcurrency;
+
+  ///How many requests may wait in this subscription's FIFO queue.
+  final int requestQueueCapacity;
 
   ///Delivery timing; see [DeliveryMode].
   final DeliveryMode deliveryMode;
@@ -80,6 +104,7 @@ class EventSubscription<T> {
   final void Function()? onDone;
 
   final Queue<T> _buffer = Queue<T>();
+  final Queue<_RequestEntry> _requestQueue = Queue<_RequestEntry>();
   int? _bufferCapacity;
   BufferOverflow _bufferOverflow;
 
@@ -89,6 +114,7 @@ class EventSubscription<T> {
   bool _draining = false;
   bool _scheduled = false;
 
+  int _inFlight = 0;
   int _dropped = 0;
   int _delivered = 0;
 
@@ -98,7 +124,30 @@ class EventSubscription<T> {
   bool get isPaused => _paused;
 
   ///True while an asynchronous [onEvent] future is pending.
-  bool get isBusy => _busy;
+  bool get isListenerBusy => _busy;
+
+  ///True while the listener is busy or the handler has no free slot.
+  bool get isBusy => _busy || isHandlerBusy;
+
+  ///Whether this subscription can answer requests.
+  bool get hasHandler => handler != null;
+
+  ///Handler invocations currently running.
+  int get inFlight => _inFlight;
+
+  ///True when every handler slot is occupied.
+  bool get isHandlerBusy => hasHandler && _inFlight >= handlerConcurrency;
+
+  ///Requests waiting in this subscription's FIFO queue.
+  int get bufferedRequests => _requestQueue.length;
+
+  ///Whether a request can be accepted now: a free handler slot or queue room.
+  bool get hasRequestCapacity =>
+      !_canceled &&
+      !_paused &&
+      hasHandler &&
+      (_inFlight < handlerConcurrency ||
+          _requestQueue.length < requestQueueCapacity);
 
   ///True after [cancel] or node disposal.
   bool get isCanceled => _canceled;
@@ -121,6 +170,58 @@ class EventSubscription<T> {
   ///Whether this subscription can receive events right now.
   bool get hasListener =>
       onEvent != null || (_view != null && (_view?.hasListener ?? false));
+
+  ///Whether [data] is of the handler's type.
+  bool acceptsData(Object? data) => hasHandler && data is T;
+
+  ///Invokes the handler with a typed DTO and the previous value snapshot.
+  Future<dynamic> invokeRequest(EventDTO dto, Object? lastData) {
+    final typed = EventDTO<T>(dto.data as T,
+        topic: dto.topic, arguments: dto.arguments);
+    return handler!(typed, lastData as T?);
+  }
+
+  ///Accepts a request into a free handler slot or the queue.
+  ///
+  ///Returns false when the subscription is paused, cancelled, or full.
+  bool _enqueueRequest(_RequestEntry entry) {
+    if (entry.isFinished || !hasRequestCapacity) return false;
+    entry.owner = this;
+    if (_inFlight < handlerConcurrency) {
+      _startRequest(entry);
+    } else {
+      _requestQueue.addLast(entry);
+    }
+    return true;
+  }
+
+  ///Removes a queued request, for example after its timeout or cancellation.
+  bool _removeQueuedRequest(_RequestEntry entry) => _requestQueue.remove(entry);
+
+  void _startRequest(_RequestEntry entry) {
+    _inFlight++;
+    unawaited(entry.run().whenComplete(() {
+      _inFlight--;
+      _drainRequests();
+    }));
+  }
+
+  void _drainRequests() {
+    if (_canceled || _paused) return;
+    while (_inFlight < handlerConcurrency && _requestQueue.isNotEmpty) {
+      final entry = _requestQueue.removeFirst();
+      if (entry.isFinished) continue;
+      _startRequest(entry);
+    }
+  }
+
+  void _failQueuedRequests() {
+    final queued = List<_RequestEntry>.of(_requestQueue);
+    _requestQueue.clear();
+    for (final entry in queued) {
+      entry.fail(NoHandlerException(topic.topic));
+    }
+  }
 
   ///A broadcast view of the events delivered to this subscription.
   ///
@@ -180,6 +281,7 @@ class EventSubscription<T> {
     } else {
       _scheduleDrain();
     }
+    _drainRequests();
   }
 
   ///Changes the buffer size and/or policy at runtime.
@@ -211,6 +313,7 @@ class EventSubscription<T> {
     if (_canceled) return;
     _canceled = true;
     _buffer.clear();
+    _failQueuedRequests();
     final view = _view;
     _view = null;
     if (view != null && !view.isClosed) {
@@ -224,6 +327,7 @@ class EventSubscription<T> {
     if (_canceled) return;
     _canceled = true;
     _buffer.clear();
+    _failQueuedRequests();
     final view = _view;
     _view = null;
     if (view != null && !view.isClosed) {
@@ -327,5 +431,106 @@ class EventSubscription<T> {
   @override
   String toString() =>
       'EventSubscription<$T>(${topic.topic}, buffered=$buffered, '
-      'dropped=$dropped, delivered=$delivered)';
+      'dropped=$dropped, delivered=$delivered, inFlight=$inFlight)';
+}
+
+///A cooperative cancellation signal for [EventBus.request].
+class CancelToken {
+  final Completer<void> _cancelled = Completer<void>();
+  Object? _reason;
+
+  ///True once [cancel] was called.
+  bool get isCancelled => _cancelled.isCompleted;
+
+  ///Completes when [cancel] is called.
+  Future<void> get whenCancelled => _cancelled.future;
+
+  ///The reason passed to [cancel], when any.
+  Object? get reason => _reason;
+
+  ///Cancels the requests that listen to this token. Repeated calls are safe.
+  void cancel([Object? reason]) {
+    if (_cancelled.isCompleted) return;
+    _reason = reason;
+    _cancelled.complete();
+  }
+}
+
+///One request waiting for a handler slot or running in a handler subscription.
+///
+///The entry owns the caller's completer, the timeout timer and the cancellation
+///hook. The subscription only manages the queue and the in-flight count.
+class _RequestEntry {
+  _RequestEntry({required this.topic, required this.invoke});
+
+  final String topic;
+  final Future<dynamic> Function() invoke;
+  final Completer<dynamic> completer = Completer<dynamic>();
+
+  EventSubscription? owner;
+  Timer? _timer;
+  bool _finished = false;
+  bool _cancelled = false;
+
+  Future<dynamic> get future => completer.future;
+  bool get isFinished => _finished;
+  bool get isCancelled => _cancelled;
+
+  ///Starts the timeout and/or attaches the cancellation token.
+  void arm({Duration? timeout, CancelToken? cancelToken}) {
+    if (timeout != null) {
+      _timer = Timer(timeout, () {
+        cancel(RequestTimeoutException(topic, timeout));
+      });
+    }
+
+    final token = cancelToken;
+    if (token != null) {
+      if (token.isCancelled) {
+        cancel(RequestCanceledException(topic));
+      } else {
+        token.whenCancelled.then((_) {
+          cancel(RequestCanceledException(topic));
+        });
+      }
+    }
+  }
+
+  ///Completes the caller's future with [error] and removes the entry from its
+  ///queue. A dispatched handler keeps running; its result is ignored.
+  void cancel(Object error) {
+    if (_finished) return;
+    _cancelled = true;
+    _finished = true;
+    _timer?.cancel();
+    _timer = null;
+    owner?._removeQueuedRequest(this);
+    if (!completer.isCompleted) completer.completeError(error);
+  }
+
+  ///Fails a queued entry because its subscription was cancelled or disposed.
+  void fail(Object error) {
+    if (_finished) return;
+    _cancelled = true;
+    _finished = true;
+    _timer?.cancel();
+    _timer = null;
+    owner?._removeQueuedRequest(this);
+    if (!completer.isCompleted) completer.completeError(error);
+  }
+
+  ///Runs the handler. The future never throws: an error goes to the caller's
+  ///completer, so the subscription can always release the in-flight slot.
+  Future<void> run() async {
+    try {
+      final result = await invoke();
+      if (!completer.isCompleted) completer.complete(result);
+    } catch (error, stackTrace) {
+      if (!completer.isCompleted) completer.completeError(error, stackTrace);
+    } finally {
+      _finished = true;
+      _timer?.cancel();
+      _timer = null;
+    }
+  }
 }

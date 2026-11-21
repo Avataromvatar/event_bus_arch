@@ -237,9 +237,9 @@ Every built-in node implements it; a custom `EventNode` must implement it to wor
 
 ## EventSubscription
 
-`class EventSubscription<T>` — a listener registration created by
-`bus.subscribeEvents<T>(...)`. Unlike `listen`/`subscribe`, it owns its buffer and delivery
-state, and can be paused, resumed, resized and cancelled.
+`class EventSubscription<T>` — a listener and/or handler registration created by
+`bus.subscribeEvents<T>(...)`. Unlike `listen`/`subscribe`, it owns its buffer, its request queue
+and its delivery state, and can be paused, resumed, resized and cancelled.
 
 ```dart
 typedef EventCallback<T> = FutureOr<void> Function(T event);
@@ -248,19 +248,27 @@ enum BufferOverflow { latest, dropOldest, dropNewest, reject }
 enum DeliveryMode { async, sync }
 
 Future<void> cancel();                 // remove the subscription; does not call onDone
-void pause();                          // stop delivering; buffered events stay
-void resume();                         // resume delivery from the buffer
+void pause();                          // stop listener delivery and request dispatch
+void resume();                         // resume both
 void resize(int? capacity, {BufferOverflow? overflow});
 
 bool get isPaused;
-bool get isBusy;                       // an async onEvent future is pending
+bool get isBusy;                       // listener busy or handler at capacity
+bool get isListenerBusy;               // an async onEvent future is pending
+bool get isHandlerBusy;                // every handler slot is occupied
 bool get isCanceled;
+bool get hasHandler;
+bool get hasListener;
 int? get bufferCapacity;               // null = unbounded
 BufferOverflow get bufferOverflow;
 int get buffered;
 int get dropped;
 int get delivered;
-bool get hasListener;
+int get inFlight;                      // running handler invocations
+int get bufferedRequests;              // queued requests
+int get handlerConcurrency;
+int get requestQueueCapacity;
+bool get hasRequestCapacity;           // free slot or queue room, and not paused
 Stream<T> get stream;                  // broadcast view for UI
 ```
 
@@ -268,19 +276,45 @@ Delivery:
 
 * `DeliveryMode.async` (default) delivers in a microtask and preserves the stream timing of
   `listen`; `DeliveryMode.sync` invokes `onEvent` inside `fire` and is reentrancy-sensitive.
-* While an asynchronous `onEvent` is running the subscription is `isBusy`; incoming events go
-  through the buffer policy. A full buffer drops or rejects according to `bufferOverflow`; a
-  rejected event is counted in `dropped`.
-* `cancel()` clears the buffer and closes the `.stream` view; `onDone` is called only when the
-  node is disposed (`dispose`, `removeTopic`), matching stream semantics.
+* While an asynchronous `onEvent` is running the subscription is `isListenerBusy`; incoming
+  events go through the buffer policy. A full buffer drops or rejects according to
+  `bufferOverflow`; a rejected event is counted in `dropped`.
+* A handler subscription owns a FIFO request queue and `handlerConcurrency` slots (default 1).
+  Requests are dispatched to a free slot or queued up to `requestQueueCapacity`; beyond that the
+  bus throws `BusyException`. `pause()` stops request dispatch; in-flight handlers continue.
+* `cancel()` clears the buffers, fails queued requests with `NoHandlerException`, and closes the
+  `.stream` view. `onDone` is called only when the node is disposed (`dispose`, `removeTopic`).
 * Listener errors go to the subscription-level `onError`; `cancelOnError` also cancels the
   subscription. The bus-level error stream is added by E1-13.
+* `CancelToken` (below) and `timeout` remove a queued request; a dispatched handler keeps running
+  and its response is discarded.
+
+### CancelToken and request errors
+
+```dart
+class CancelToken {
+  bool get isCancelled;
+  Future<void> get whenCancelled;
+  void cancel([Object? reason]);
+}
+
+class BusyException extends EventBusException;          // no slot / queue room / all paused
+class RequestTimeoutException extends EventBusException; // topic + timeout
+class RequestCanceledException extends EventBusException;
+```
+
+`request(..., timeout: ..., cancelToken: ...)` uses both; the first of response, timeout and
+cancellation wins.
 
 ## RequestHandler
 
 `class RequestHandler` — a type-erased responder registration stored by the bus. Its closures
 allow `request` and incoming isolate/transport requests to be dispatched without knowing `T`
 statically.
+
+> **4.0 transition:** the dispatcher now uses `EventSubscription` handler capabilities. This
+> class, `EventBusHandlers` and `setHandler` remain only as a temporary compatibility shim and
+> are removed by task E1-10; use `subscribeEvents(handler: ...)`.
 
 ```dart
 RequestHandler({
@@ -311,7 +345,8 @@ Stream<(EventDTO, bool)> get allEventStream;   // (event, whether it reached a n
 bool fire<T>(T data, {List<String>? paths, String? separator,
                       Map<String, String>? arguments});
 Future<dynamic> request<T>(T data, {List<String>? paths, String? separator,
-                                    Map<String, String>? arguments, Duration? timeout});
+                                    Map<String, String>? arguments, Duration? timeout,
+                                    CancelToken? cancelToken});
 
 Stream<T> listen<T>({List<String>? paths, String? separator});
 StreamSubscription<T> subscribe<T>({List<String>? paths, String? separator,
@@ -319,8 +354,11 @@ StreamSubscription<T> subscribe<T>({List<String>? paths, String? separator,
                                     void Function()? onDone, bool? cancelOnError});
 EventSubscription<T> subscribeEvents<T>({
   List<String>? paths, String? separator,
-  required EventCallback<T> onEvent,
-  int? bufferCapacity,                 // null = unbounded
+  EventCallback<T>? onEvent,            // listener
+  Handler<T>? handler,                  // request responder
+  int handlerConcurrency = 1,
+  int? requestQueueCapacity,            // default: bus.requestQueueCapacity (64)
+  int? bufferCapacity,                  // null = unbounded
   BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
   DeliveryMode deliveryMode = DeliveryMode.async,
   void Function(Object error, StackTrace? stackTrace)? onError,
@@ -331,6 +369,7 @@ T? currentData<T>({List<String>? paths, String? separator});
 bool removeTopic<T>({List<String>? paths, String? separator});
 
 bool haveHandler<T>({List<String>? paths, String? separator});
+bool haveAvailableHandler<T>({List<String>? paths, String? separator});
 bool haveListener<T>({List<String>? paths, String? separator});
 ```
 
@@ -438,7 +477,8 @@ void setHandler<T>({T? initialData, List<String>? paths, String? separator,
 void removeHandler<T>({List<String>? paths, String? separator});
 bool haveHandler<T>({List<String>? paths, String? separator});
 Future<dynamic> request<T>(T data, {List<String>? paths, String? separator,
-                                    Map<String, String>? arguments, Duration? timeout});
+                                    Map<String, String>? arguments, Duration? timeout,
+                                    CancelToken? cancelToken});
 void addAllHandlerFromOtherBus(EventBus fromBus);
 void removeAllHandlerPresentInOtherBus(EventBus otherBus);
 

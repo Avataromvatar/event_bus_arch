@@ -104,6 +104,9 @@ class TransportEventNode<T>
   StreamController<T> get streamControllerValue => _local.streamControllerValue;
 
   @override
+  Iterable<EventSubscription<T>> get subscriptions => _local.subscriptions;
+
+  @override
   void addSubscription(EventSubscription<T> subscription) =>
       _local.addSubscription(subscription);
 

@@ -283,7 +283,8 @@ class EventBusIsolate extends EventBusImpl {
       {List<String>? paths,
       String? separator,
       Map<String, String>? arguments,
-      Duration? timeout}) async {
+      Duration? timeout,
+      CancelToken? cancelToken}) async {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
     }
@@ -459,7 +460,8 @@ class _EventBusForIsolate extends EventBusImpl {
       {List<String>? paths,
       String? separator,
       Map<String, String>? arguments,
-      Duration? timeout}) async {
+      Duration? timeout,
+      CancelToken? cancelToken}) async {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }

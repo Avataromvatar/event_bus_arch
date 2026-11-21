@@ -15,7 +15,7 @@ verified locally with the commands in §12.
 
 **M1 status: in progress 2026-11-21.**
 Done: E1-01, E1-02, E1-03, E1-14 — listener subscriptions, buffer policies, async/sync delivery,
-node subscription registry, rxdart removal. Core suite 170 tests, transport 26, NATS 42 (+10
+node subscription registry, rxdart removal. Core suite 173 tests, transport 26, NATS 42 (+10
 integration skipped), MQTT 32 (+7 skipped), Chrome smoke 3. Benchmarks show no local regression.
 Next: E1-04/E1-05 handler subscriptions and per-subscription request queues.
 

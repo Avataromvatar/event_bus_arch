@@ -328,6 +328,65 @@ void main() {
     });
   });
 
+  group('legacy stream facade', () {
+    test('listen delivers asynchronously', () async {
+      final bus = EventBus();
+      final order = <String>[];
+      final sub = bus.subscribe<int>(
+          paths: ['x'], onData: (_) => order.add('event'));
+
+      order.add('before');
+      bus.fire<int>(1, paths: ['x']);
+      order.add('after');
+      expect(order, ['before', 'after']);
+
+      await pump();
+      expect(order, ['before', 'after', 'event']);
+
+      await sub.cancel();
+      await bus.dispose();
+    });
+
+    test('pause and resume propagate to the node stream', () async {
+      final bus = EventBus();
+      final received = <int>[];
+      final sub = bus.subscribe<int>(paths: ['x'], onData: received.add);
+
+      sub.pause();
+      bus.fire<int>(1, paths: ['x']);
+      await pump();
+      expect(received, isEmpty);
+
+      sub.resume();
+      await pump();
+      expect(received, [1]);
+
+      await sub.cancel();
+      await bus.dispose();
+    });
+
+    test('a node stream view supports several listeners', () async {
+      final bus = EventBus();
+      final first = <int>[];
+      final second = <int>[];
+      final stream = bus.listen<int>(paths: ['x']);
+      final sub1 = stream.listen(first.add);
+      final sub2 = stream.listen(second.add);
+
+      bus.fire<int>(1, paths: ['x']);
+      await pump();
+      expect(first, [1]);
+      expect(second, [1]);
+
+      await sub1.cancel();
+      expect(bus.haveListener<int>(paths: ['x']), isTrue);
+      await sub2.cancel();
+      expect(bus.haveListener<int>(paths: ['x']), isFalse);
+
+      await bus.dispose();
+    });
+  });
+
   group('EventSubscription: errors', () {
     test('a synchronous callback error reaches onError and delivery continues',
         () async {

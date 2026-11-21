@@ -376,30 +376,15 @@ mixin EventBusMixin implements EventBus {
 
   /// Value stream of a topic; the node may be removed when the last subscription is cancelled.
   ///
-  ///The per-listener controller propagates pause/resume to the node's
-  ///broadcast stream and removes the node when the listener cancels. It
-  ///replaces the former rxdart `doOnCancel` extension.
+  ///The source stays an ordinary asynchronous broadcast stream. The wrapper
+  ///only adds the cancellation hook (the former rxdart `doOnCancel`) and
+  ///delegates pause/resume, so no extra microtask hop is introduced.
   Stream<T> _valueStream<T>(Topic topic) {
     var node = _nodeFor<T>(topic);
-    late StreamSubscription<T> inner;
-    late final StreamController<T> controller;
-    controller = StreamController<T>(
-      sync: true,
-      onListen: () {
-        inner = node.streamControllerValue.stream.listen(
-          controller.add,
-          onError: controller.addError,
-          onDone: controller.close,
-        );
-      },
-      onPause: () => inner.pause(),
-      onResume: () => inner.resume(),
-      onCancel: () async {
-        await inner.cancel();
-        _removeNode(topic, node);
-      },
+    return _NodeStream<T>(
+      node.streamControllerValue.stream,
+      () => _removeNode(topic, node),
     );
-    return controller.stream;
   }
 
   /// Listens to events on a specific topic.
@@ -875,6 +860,120 @@ void _rejectWildcardPaths(List<String>? paths, String operation) {
     if (path.contains('*') || path.contains('>')) {
       throw EventBusException(
           '$operation does not support wildcard paths ("$path")');
+    }
+  }
+}
+
+///A stream view of a node that runs [onCancel] when its subscription is
+///cancelled.
+///
+///It replaces the former rxdart `doOnCancel` without a controller and without
+///an extra microtask: the source stays an ordinary asynchronous broadcast
+///stream, and `listen` only wraps the subscription.
+class _NodeStream<T> extends Stream<T> {
+  _NodeStream(this._source, this._onCancel);
+
+  final Stream<T> _source;
+  final void Function() _onCancel;
+
+  @override
+  bool get isBroadcast => _source.isBroadcast;
+
+  @override
+  StreamSubscription<T> listen(
+    void Function(T)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    final inner = _source.listen(null, cancelOnError: false);
+    return _NodeSubscription<T>(
+      inner,
+      onData,
+      onError,
+      onDone,
+      cancelOnError ?? false,
+      _onCancel,
+    );
+  }
+}
+
+///A subscription wrapper: forwards data/error/done to the current callbacks,
+///delegates pause/resume, and calls [_onCancel] once when cancelled.
+class _NodeSubscription<T> implements StreamSubscription<T> {
+  _NodeSubscription(
+    this._inner,
+    this._onData,
+    this._onError,
+    this._onDone,
+    this._cancelOnError,
+    this._onCancel,
+  ) {
+    _inner.onData((event) => _onData?.call(event));
+    _inner.onError(_handleError);
+    _inner.onDone(() => _onDone?.call());
+  }
+
+  final StreamSubscription<T> _inner;
+  final void Function() _onCancel;
+  final bool _cancelOnError;
+
+  void Function(T event)? _onData;
+  Function? _onError;
+  void Function()? _onDone;
+  bool _canceled = false;
+
+  @override
+  void onData(void Function(T data)? handleData) {
+    _onData = handleData;
+  }
+
+  @override
+  void onError(Function? handleError) {
+    _onError = handleError;
+  }
+
+  @override
+  void onDone(void Function()? handleDone) {
+    _onDone = handleDone;
+  }
+
+  @override
+  void pause([Future<void>? resumeSignal]) => _inner.pause(resumeSignal);
+
+  @override
+  void resume() => _inner.resume();
+
+  @override
+  bool get isPaused => _inner.isPaused;
+
+  @override
+  Future<E> asFuture<E>([E? futureValue]) => _inner.asFuture<E>(futureValue);
+
+  @override
+  Future<void> cancel() async {
+    if (_canceled) return;
+    _canceled = true;
+    try {
+      await _inner.cancel();
+    } finally {
+      _onCancel();
+    }
+  }
+
+  void _handleError(Object error, StackTrace stackTrace) {
+    final handler = _onError;
+    if (handler == null) {
+      Zone.current.handleUncaughtError(error, stackTrace);
+    } else if (handler is void Function(Object, StackTrace)) {
+      handler(error, stackTrace);
+    } else if (handler is void Function(Object)) {
+      handler(error);
+    } else {
+      Function.apply(handler, [error, stackTrace]);
+    }
+    if (_cancelOnError) {
+      unawaited(cancel());
     }
   }
 }

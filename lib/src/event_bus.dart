@@ -165,6 +165,18 @@ abstract class EventBus {
   /// Gets the last data sent to a specific topic.
   T? currentData<T>({List<String>? paths, String? separator});
 
+  /// Removes the node of a topic and forgets its value, even on a model bus.
+  ///
+  /// Unlike the automatic cleanup after the last subscription, this ignores
+  /// [isModelBus] and a `KeepAliveNode` pin: a transport node cancels its
+  /// broker subscription. Active listeners receive `done`. A registered
+  /// handler is kept; remove it with [EventBusHandlers.removeHandler] when the
+  /// whole topic has to be forgotten. A model bus creates the node again on
+  /// the next `fire`, `request` or `listen`.
+  ///
+  /// Returns true when a node was removed.
+  bool removeTopic<T>({List<String>? paths, String? separator});
+
   /// Factory constructor for EventBus.
   /// Creates an EventBusImpl instance.
   factory EventBus({bool isModelBus = false}) {
@@ -427,12 +439,54 @@ mixin EventBusMixin implements EventBus {
         !isModelBus &&
         !_hasHandlerFor(topic) &&
         !pinned) {
-      unawaited(node.dispose());
-      _eventsMap.remove(topic);
-      _patternMap.remove(topic);
-      return true;
+      return _detachNode(topic, node);
     }
     return false;
+  }
+
+  /// Removes the node of a topic and forgets its value, even on a model bus.
+  ///
+  /// The model-bus rule and a `KeepAliveNode` pin are ignored on purpose: this
+  /// is the explicit "forget this topic" operation. A transport node cancels
+  /// its broker subscription on [EventNode.dispose]. Active listeners receive
+  /// `done`; a registered handler stays and a model bus creates the node again
+  /// on the next event.
+  @override
+  bool removeTopic<T>({List<String>? paths, String? separator}) {
+    _checkNotDisposed();
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    if (TopicPattern.isPattern(topic)) {
+      TopicPattern.validate(topic);
+    }
+    return _removeTopicLocally(topic);
+  }
+
+  /// Removes a topic without any guard. Also used by the isolate link when a
+  /// delete arrives from the other side: it must not forward anything back.
+  bool _removeTopicLocally(Topic topic) {
+    final node = _nodeByTopic(topic);
+    if (node == null) return false;
+    return _detachNode(topic, node);
+  }
+
+  /// Unlinks [node] and disposes it, but only when the map still holds this
+  /// very node. A late `doOnCancel` of an already removed node must not delete
+  /// a node created later for the same topic.
+  bool _detachNode(Topic topic, EventNode node) {
+    var removed = false;
+    if (identical(_eventsMap[topic], node)) {
+      _eventsMap.remove(topic);
+      removed = true;
+    }
+    if (identical(_patternMap[topic], node)) {
+      _patternMap.remove(topic);
+      removed = true;
+    }
+    if (removed) {
+      unawaited(node.dispose());
+    }
+    return removed;
   }
 
   /// Checks if the bus contains a listener for the specified topic.
@@ -581,6 +635,9 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
     final handlerNode = _nodeByTopic(registration.topic);
     final previous = handlerNode?.currentData;
     final dto = EventDTO<T>(data, topic: topic, arguments: arguments);
+    // A model or transport bus stores every accepted event, exactly like fire:
+    // after removeTopic the next request must rebuild the node and its value.
+    _sendNode<T>(topic);
     final matched = _dispatchToListeners(dto);
     _addAllEvent(dto, matched);
 

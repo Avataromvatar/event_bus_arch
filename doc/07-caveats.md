@@ -158,6 +158,17 @@ pinned by `KeepAliveNode` while its broker subscription exists. The same flag on
 `EventBusIsolate(isModelBus: true)` keeps nodes on both sides of an isolate bridge, and
 `Layers.createLayers(bridgeIsModelBus: true)` does it for every inter-layer bridge.
 
+A model bus keeps every node until `dispose`, which grows without bound for dynamic topics
+(`session.<id>`, `order.<uuid>`). Forget one topic explicitly with `removeTopic`:
+
+```dart
+bus.removeTopic<int>(paths: ['session', id]);   // true if the node existed
+```
+
+The call removes the node even on a model bus, completes its listeners with `done` and cancels a
+transport subscription. A handler registered for the topic stays; a later `fire`/`request`
+recreates the node.
+
 ### 3. Delivery to listeners is asynchronous
 
 `fire` adds the value to a broadcast stream and returns immediately. Listener callbacks run in a

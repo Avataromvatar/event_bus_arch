@@ -186,9 +186,12 @@ last matching value; `currentData(concrete)` reads only the exact node.
 | Keeps `currentData` after the last listener unsubscribes | no | yes |
 | `fire` to a topic with no node | returns `false`, event goes to `allEventStream` with flag `false` | returns `true`, node is created |
 | `request` without a handler | throws `NoHandlerException` | throws `NoHandlerException` |
+| Forgetting one topic | automatic after the last listener | explicit `removeTopic<T>(paths: [...])` |
 
 A handler registered with `setHandler` is a request responder: `request` invokes it, while
-`fire` only notifies listeners.
+`fire` only notifies listeners. `removeTopic` works on both flavours, closes the listeners of the
+topic and, on a transport bus, cancels the broker subscription; a later `fire` recreates the
+node.
 
 Use the model bus when the bus is a store of current state, and the common bus when it is a
 message pipe.

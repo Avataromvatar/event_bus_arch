@@ -302,13 +302,22 @@ value is the response; a thrown error becomes the error of the request future.
   `setHandler` replaces the handler for the same topic.
 * `cancel` of the last subscription calls `removeNode`. `removeNode` removes and disposes the
   node **only if** it has no listeners, no handler, no `KeepAliveNode` pin, and the bus is not
-  model. Both maps are checked.
+  model. Both maps are checked, and a map entry is removed only when it still holds the same node
+  instance: a late cancellation callback of an already removed node cannot delete a node created
+  later for the same topic.
+* `removeTopic` is the explicit eviction. It removes and disposes the node and forgets
+  `currentData` **even on a model bus and even when a `KeepAliveNode` pin exists** (a transport
+  node cancels its broker subscription). Active listeners receive `done`; a registered handler
+  stays. A model bus creates the node again on the next `fire`, `request` or `listen`.
 * `removeHandler` removes the registration; it removes the node only when that leaves the node
   without listeners (a shared topic with listeners keeps the node and its `currentData`).
 * `fire` on a model bus or a transport bus may create the exact node (`shouldCreateNodeOnSend`).
+  `request` does the same after it has resolved a handler, so a model bus keeps recording values
+  after `removeTopic`.
 
 So on the common bus `currentData` lives exactly until the last subscription is cancelled and
-no handler is left. If you need to keep state, use `isModelBus: true` or a handler.
+no handler is left. If you need to keep state, use `isModelBus: true` or a handler. A model bus
+keeps the value until `removeTopic` or `dispose`.
 
 A detailed walkthrough of the practical consequences is in [02-event-bus.md](02-event-bus.md),
 and the full list of pitfalls is in [07-caveats.md](07-caveats.md).

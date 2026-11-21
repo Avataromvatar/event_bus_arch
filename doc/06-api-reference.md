@@ -264,6 +264,7 @@ StreamSubscription<T> subscribe<T>({List<String>? paths, String? separator,
                                     void Function(T e)? onData, Function? onError,
                                     void Function()? onDone, bool? cancelOnError});
 T? currentData<T>({List<String>? paths, String? separator});
+bool removeTopic<T>({List<String>? paths, String? separator});
 
 bool haveHandler<T>({List<String>? paths, String? separator});
 bool haveListener<T>({List<String>? paths, String? separator});
@@ -273,6 +274,11 @@ bool haveListener<T>({List<String>? paths, String? separator});
 handler accepts the data and rejects wildcard paths with `EventBusException`; `timeout` bounds the
 wait for the handler. `currentData` reads the exact node, or the pattern node when the address
 contains wildcards.
+
+`removeTopic` removes the node and forgets `currentData` even on a model bus and even for a
+transport node with a `KeepAliveNode` pin (the broker subscription is cancelled). It returns
+whether a node was removed. Active listeners receive `done`; a registered handler is kept, and a
+model bus recreates the node on the next `fire`, `request` or `listen`.
 
 Every method that takes an address resolves `separator ?? defaultTopicPathSeparator`, so changing
 the field on an `EventBusImpl` changes the fallback for all of them at once:
@@ -287,7 +293,8 @@ bus.fire<int>(1, paths: ['a', 'b']);                             // int/a/b — 
 `defaultTopicPathSeparator` is a **field** on `EventBusMixin`, not a setter on the interface, so a
 variable of type `EventBus` has to be cast (`(bus as EventBusImpl).defaultTopicPathSeparator = '/'`).
 
-After `dispose` the `fire`/`request`/`listen`/`subscribe`/`setHandler` methods throw `StateError`.
+After `dispose` the `fire`/`request`/`listen`/`subscribe`/`setHandler`/`removeTopic` methods throw
+`StateError`.
 
 ## EventBusHandlers
 
@@ -336,13 +343,20 @@ EventNode<T> createNode<T>({required Topic topic, T? currentData});
 bool shouldCreateNodeOnSend(Topic topic);       // default: isModelBus
 
 bool removeNode(Topic topic, EventNode node);   // true if removed
+bool removeTopic<T>({List<String>? paths, String? separator});   // explicit eviction
 Future<void> dispose();                         // idempotent; closes allEventStream and the nodes
 ```
 
 Inside there are `_eventsMap` (concrete topics), `_patternMap` (topics with `*`/`>`), and a
 broadcast `_allEventStream`. `removeNode` removes the node from both maps and disposes it only if
 it has no listeners, no handler, no `KeepAliveNode` pin, and the bus is not model. It is called
-automatically when the last subscription is cancelled.
+automatically when the last subscription is cancelled. A map entry is removed only when it still
+holds the same node instance, so a late cancellation of an already removed node cannot delete its
+replacement.
+
+`removeTopic` is the explicit counterpart: it bypasses the model-bus rule and the `KeepAliveNode`
+pin, removes the node from whichever map holds it, and disposes it. `EventBusIsolate` forwards the
+call to the other side of the bridge.
 
 `createNode` and `shouldCreateNodeOnSend` are the transport seam: a transport bus overrides them
 to create a broker-backed node for topics it knows and to create one on `fire` when a serializer

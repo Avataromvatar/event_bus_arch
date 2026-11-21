@@ -69,7 +69,12 @@ when a deserializer does. Resolution order is exact topic → type token →
 
 Nodes are created lazily and with a type: `listen<T>`, `setHandler<T>` and
 `fire<T>`/`request<T>` call `createNode<T>`, so the node can check incoming
-payload types. A node with a deserializer is a `KeepAliveNode`.
+payload types. A node with a deserializer is a `KeepAliveNode`, so the core
+keeps it after its last listener unsubscribes.
+
+The explicit eviction `bus.removeTopic<T>(...)` bypasses that pin: the node is
+disposed and its broker subscription is cancelled. The next `listen`/`fire` for
+the topic creates a new node and subscribes again.
 
 ## Requests
 

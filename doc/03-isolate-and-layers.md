@@ -65,6 +65,18 @@ await iso.waitInit;
 // the worker bus is a model bus too: bus.isModelBus == true inside _initWorker
 ```
 
+### Forgetting a topic across the bridge
+
+`removeTopic` acts on the bus it is called on and is forwarded to the other side of the bridge.
+`iso.removeTopic<T>()` removes the node in the main isolate and sends a fire-and-forget delete to
+the worker; a worker-side `removeTopic` does the reverse. Deletes travel through the same port as
+events, so a `fire` sent after the delete is applied after it. A handler registered on the other
+side stays — call `removeHandler` there for a full forget. The call requires a finished
+`waitInit` and throws `StateError` before it and after `dispose`.
+
+`Layer` is different: `layer.current`, `layer.top` and `layer.bottom` are separate buses (and the
+bridges lead to separate isolates), so a delete on one of them is not propagated to the others.
+
 ### Worker readiness
 
 > **`waitInit` completes only after `onInit` has finished** (including all `await`s inside it). An

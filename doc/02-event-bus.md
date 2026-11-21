@@ -327,7 +327,25 @@ await bus.dispose();        // a repeated call is safe
 ```
 
 The method is declared in the `EventBus` interface and is idempotent. After `dispose` the bus is
-unusable: `fire`, `request`, `listen`, `subscribe`, and `setHandler` throw `StateError`.
+unusable: `fire`, `request`, `listen`, `subscribe`, `setHandler` and `removeTopic` throw
+`StateError`.
+
+A single topic can be forgotten without disposing the bus:
+
+```dart
+final store = EventBus(isModelBus: true);
+store.fire<int>(1, paths: ['session', '42']);
+store.currentData<int>(paths: ['session', '42']);   // 1
+
+store.removeTopic<int>(paths: ['session', '42']);   // true — even on a model bus
+store.currentData<int>(paths: ['session', '42']);   // null
+
+store.fire<int>(2, paths: ['session', '42']);       // the node is created again
+```
+
+`removeTopic` ignores the model-bus retention rule and a transport `KeepAliveNode` pin, so on a
+`TransportEventBus` it also cancels the broker subscription. Active listeners are completed with
+`done`. A registered handler is not removed — call `removeHandler` for a full forget.
 
 ## Recipes
 

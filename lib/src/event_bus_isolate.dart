@@ -10,6 +10,7 @@ part of event_arch;
 //    _IsolateErrorResponse, including the case when there is no node (then null);
 //  * a reply always carries the request id, so the order of replies is irrelevant;
 //  * an unknown id (a late or duplicate reply) is silently ignored;
+//  * a _IsolateDelete is fire-and-forget like a _IsolateFire: no reply;
 //  * the port listener never throws.
 //---------------------------------------------------------------------------
 
@@ -36,6 +37,13 @@ class _IsolateRequest {
 class _IsolateFire {
   final EventDTO dto;
   const _IsolateFire(this.dto);
+}
+
+///A manual topic removal. The sender removes its own node before sending; the
+///receiver removes its node and does not reply.
+class _IsolateDelete {
+  final Topic topic;
+  const _IsolateDelete(this.topic);
 }
 
 ///A reply to a specific request. value == null means "handled without a result"
@@ -118,6 +126,18 @@ class _IsolateLink {
     return true;
   }
 
+  ///Sends a manual topic removal without waiting for a reply. Returns false
+  ///when the other side is not reachable; the local removal has already
+  ///happened in that case.
+  bool removeTopic(Topic topic) {
+    var port = sendPort;
+    if (port == null || _closed) {
+      return false;
+    }
+    port.send(_IsolateDelete(topic));
+    return true;
+  }
+
   ///Checks that the worker is alive and responds.
   Future<bool> ping(Duration timeout) {
     var port = sendPort;
@@ -152,6 +172,9 @@ class _IsolateLink {
       unawaited(_answer(message));
     } else if (message is _IsolateFire) {
       _host._dispatchIncoming(message.dto, request: false);
+    } else if (message is _IsolateDelete) {
+      // Local only: forwarding here would bounce the delete between the sides.
+      _host._removeTopicLocally(message.topic);
     }
     // any other message (including late replies) is ignored
   }
@@ -273,6 +296,31 @@ class EventBusIsolate extends EventBusImpl {
         paths: paths, arguments: arguments, separator: separator);
     final future = _link.request(dto);
     return timeout == null ? await future : await future.timeout(timeout);
+  }
+
+  ///Removes the topic on this side and asks the worker to remove it too.
+  ///
+  ///The call is synchronous for the main-side bus; the worker applies the
+  ///delete in message order before the next event sent to it. A handler
+  ///registered in the worker for this topic stays; use
+  ///[EventBusHandlers.removeHandler] on the worker bus for a full forget.
+  @override
+  bool removeTopic<T>({List<String>? paths, String? separator}) {
+    if (isDisposed) {
+      throw StateError('EventBusIsolate is disposed');
+    }
+    if (!_ready) {
+      throw StateError(
+          'EventBusIsolate is not initialized: await waitInit before removeTopic');
+    }
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    if (TopicPattern.isPattern(topic)) {
+      TopicPattern.validate(topic);
+    }
+    final removed = _removeTopicLocally(topic);
+    _link.removeTopic(topic);
+    return removed;
   }
 
   ///Liveness check: true if the worker replied within [timeout].
@@ -420,5 +468,21 @@ class _EventBusForIsolate extends EventBusImpl {
         paths: paths, arguments: arguments, separator: separator);
     final future = _link.request(dto);
     return timeout == null ? await future : await future.timeout(timeout);
+  }
+
+  ///Removes the topic on this side and asks the main isolate to remove it too.
+  @override
+  bool removeTopic<T>({List<String>? paths, String? separator}) {
+    if (isDisposed) {
+      throw StateError('EventBus is disposed');
+    }
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    if (TopicPattern.isPattern(topic)) {
+      TopicPattern.validate(topic);
+    }
+    final removed = _removeTopicLocally(topic);
+    _link.removeTopic(topic);
+    return removed;
   }
 }

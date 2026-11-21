@@ -345,8 +345,9 @@ runtime type name.
 21. **Connection ownership.** Two buses sharing one connection means disposing one kills the
     other. A shared connection manager with reference counting is needed, or one connection per
     bus declared explicitly.
-22. **Cancelling the last local listener should unsubscribe from the broker.** `removeNode` runs on
-    `doOnCancel`; without a matching broker unsubscribe, traffic keeps arriving and is dropped.
+22. **Cancelling the last local listener should unsubscribe from the broker.** The internal
+    `_removeNode` runs on `doOnCancel`; without a matching broker unsubscribe, traffic keeps
+    arriving and is dropped.
 23. **Sockets cannot cross an isolate boundary.** If the transport lives on the main isolate,
     `EventBusIsolate` workers cannot use it directly — they need a `SendPort`-based proxy, or the
     transport must be confined to one isolate. This is the same constraint that makes

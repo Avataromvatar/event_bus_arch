@@ -2,7 +2,8 @@
 -  add: `EventBus.removeTopic<T>` — explicit per-topic eviction that works on a model bus and on a transport node (the broker subscription is cancelled); active listeners receive `done`, a registered handler stays
 -  add: `EventBusIsolate` forwards `removeTopic` to the other side of the bridge (fire-and-forget `_IsolateDelete`, applied in port order; the call requires a finished `waitInit`)
 -  fix: `request` creates the topic node on a model or transport bus, like `fire`, so `currentData` keeps being recorded after a manual removal
--  fix: a late `doOnCancel` of an already removed node no longer deletes a node created later for the same topic (`removeNode` now matches the node instance)
+-  fix: a late `doOnCancel` of an already removed node no longer deletes a node created later for the same topic (automatic removal now matches the node instance)
+-  change: `EventBusMixin.removeNode` is now the private `_removeNode`; `removeTopic` is the public removal
 -  note: custom implementations of the `EventBus` interface must add `removeTopic`; the factory and all built-in buses are unaffected
 ## 3.0.2
 -  add: `isModelBus` flag for the `EventBusIsolate` constructor — applies to both the main-side and the worker bus

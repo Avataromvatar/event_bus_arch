@@ -342,16 +342,16 @@ bool get isDisposed;
 EventNode<T> createNode<T>({required Topic topic, T? currentData});
 bool shouldCreateNodeOnSend(Topic topic);       // default: isModelBus
 
-bool removeNode(Topic topic, EventNode node);   // true if removed
 bool removeTopic<T>({List<String>? paths, String? separator});   // explicit eviction
 Future<void> dispose();                         // idempotent; closes allEventStream and the nodes
 ```
 
 Inside there are `_eventsMap` (concrete topics), `_patternMap` (topics with `*`/`>`), and a
-broadcast `_allEventStream`. `removeNode` removes the node from both maps and disposes it only if
-it has no listeners, no handler, no `KeepAliveNode` pin, and the bus is not model. It is called
-automatically when the last subscription is cancelled. A map entry is removed only when it still
-holds the same node instance, so a late cancellation of an already removed node cannot delete its
+broadcast `_allEventStream`. Automatic cleanup is private: `_removeNode` removes the node from
+both maps and disposes it only if it has no listeners, no handler, no `KeepAliveNode` pin, and
+the bus is not model. It is called when the last subscription is cancelled, on `removeHandler`
+and on `removeAllHandlerPresentInOtherBus`. A map entry is removed only when it still holds the
+same node instance, so a late cancellation of an already removed node cannot delete its
 replacement.
 
 `removeTopic` is the explicit counterpart: it bypasses the model-bus rule and the `KeepAliveNode`

@@ -300,7 +300,7 @@ value is the response; a thrown error becomes the error of the request future.
 * `listen` / `subscribe` create a node if it did not exist (exact or pattern).
 * `setHandler` also creates a node and stores the registration in `_requestHandlers`. A repeated
   `setHandler` replaces the handler for the same topic.
-* `cancel` of the last subscription calls `removeNode`. `removeNode` removes and disposes the
+* `cancel` of the last subscription calls the private `_removeNode`. It removes and disposes the
   node **only if** it has no listeners, no handler, no `KeepAliveNode` pin, and the bus is not
   model. Both maps are checked, and a map entry is removed only when it still holds the same node
   instance: a late cancellation callback of an already removed node cannot delete a node created

@@ -317,7 +317,7 @@ mixin EventBusMixin implements EventBus {
   Stream<T> _valueStream<T>(Topic topic) {
     var node = _nodeFor<T>(topic);
     return node.streamControllerValue.stream.doOnCancel(() {
-      removeNode(topic, node);
+      _removeNode(topic, node);
     });
   }
 
@@ -433,7 +433,7 @@ mixin EventBusMixin implements EventBus {
   /// This method is called every time a listener closes the stream.
   /// The node is kept when it has listeners, a request handler, a pin from a
   /// transport, or when this is a model bus.
-  bool removeNode(Topic topic, EventNode node) {
+  bool _removeNode(Topic topic, EventNode node) {
     final pinned = node is KeepAliveNode && (node as KeepAliveNode).keepAlive;
     if (!node.streamControllerValue.hasListener &&
         !isModelBus &&
@@ -570,7 +570,7 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
     _requestHandlers.remove(topic);
     final node = _nodeByTopic(topic);
     if (node != null) {
-      removeNode(topic, node);
+      _removeNode(topic, node);
     }
   }
 
@@ -717,7 +717,7 @@ mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
         _requestHandlers.remove(topic);
         final node = _nodeByTopic(topic);
         if (node != null) {
-          removeNode(topic, node);
+          _removeNode(topic, node);
         }
       }
     }

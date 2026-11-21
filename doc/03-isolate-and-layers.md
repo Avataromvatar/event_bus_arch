@@ -225,8 +225,10 @@ Rules:
   tuple's third element (`currentIsModelBus` for the top layer), independently of the bridges;
 * `bridgeIsModelBus` applies **only** to the `EventBusIsolate` bridges (`top` / `bottom`), never
   to `layer.current`; the default `false` keeps the bridges as plain transport pipes;
-* `fire` is one-way and returns whether the event was handed to the isolate; `request` crosses
-  the isolate boundary and waits for the handler's result on the other side;
+* `fire` is one-way and returns true when the other side has a known listener or model interest; it
+  is never delivered back to the firing side's own listeners (the bridge is directional, see
+  [Publishing](#publishing)). `request` crosses the isolate boundary and waits for the handler's
+  result on the other side;
 * the init function runs **inside** the corresponding isolate and must be top-level/static (see
   below).
 
@@ -303,6 +305,40 @@ await layer.close();     // close the layer's bottom and top isolate bridges
 `close()` closes `top`, `bottom` and `current` — that is, it shuts down the isolate branches and the
 layer's local bus. It works in any layer (including inside a worker) and is safe to call again: the
 `top`/`bottom` fields are set to null, and `dispose` is idempotent.
+
+### Supervision
+
+`Layers.createLayers` is a factory with no recovery. For recovery use `Layers.supervise`, which
+returns a `LayersSupervisor`:
+
+```dart
+final supervisor = Layers.supervise(
+  [(_initMiddle, null, true), (_initBottom, null, true)],
+  policy: const SupervisionPolicy(
+    maxRestarts: 3,
+    window: Duration(minutes: 1),
+    initialBackoff: Duration(milliseconds: 100),
+  ),
+);
+await supervisor.waitInit;              // the first chain is ready
+supervisor.errors.listen(print);        // isolate failures and supervision errors
+...
+await supervisor.close();
+```
+
+* Any worker layer failure — a direct death or a failure forwarded from a deeper layer — tears down
+  every worker layer and runs every `onInit` again. The top layer (the isolate that called
+  `supervise`) survives.
+* The top `Layer` object, `layer.current` and the subscriptions on `layer.bottom` survive: the
+  bridge is restarted in place and re-sends its interest registry in both directions.
+* Pending requests fail with `EventBusException` and are not retried. While the chain is restarting,
+  `fire`/`request` on the bridge throw `StateError`; `await supervisor.waitReady()` before calling.
+* A worker that loses its parent kills itself within about a second (parent watchdog), so the layers
+  below a dead parent are not left orphaned.
+* After `SupervisionPolicy.maxRestarts` attempts inside the window the supervisor reports
+  `EventBusErrorKind.supervision`, moves to `LayersState.failed` and disposes the bridge.
+* `supervisor.restarts` counts completed whole-chain restarts; `state` is `starting`, `ready`,
+  `restarting`, `failed` or `closed`.
 
 ### Requirements for init functions
 

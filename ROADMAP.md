@@ -169,13 +169,13 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 
 | ID | Task | PD | Depends on | Status |
 |---|---|---:|---|---|
-| E3-01 | Pool core: N `EventBusIsolate`, lifecycle, readiness, dispose | 3 | E2-07 | todo |
-| E3-02 | Dispatch strategies: `broadcast`, `roundRobin`, `keyed`, `leastBusy`, `single` | 5 | E3-01 | todo |
-| E3-03 | Request routing in the pool; `broadcast` forbidden for requests; busy/queues | 2 | E3-02 | todo |
-| E3-04 | Pool backpressure: credit windows, bounded queues, metrics | 2 | E3-02 | todo |
-| E3-05 | Worker supervision: crash detection, backoff, max intensity, give-up error | 4 | E3-01 | todo |
-| E3-06 | Layers supervisor: whole worker-chain restart except top, bridge re-handshake, unavailable state, pending failure | 6 | E3-05 | todo |
-| E3-07 | Tests: strategies, worker crash, whole-chain restart, pending requests, no retry | 4 | E3-02, E3-06 | todo |
+| E3-01 | Pool core: N `EventBusIsolate`, lifecycle, readiness, dispose | 3 | E2-07 | done |
+| E3-02 | Dispatch strategies: `broadcast`, `roundRobin`, `keyed`, `leastBusy`, `single` | 5 | E3-01 | done |
+| E3-03 | Request routing in the pool; `broadcast` forbidden for requests; busy/queues | 2 | E3-02 | done |
+| E3-04 | Pool backpressure: per-worker request credit, fail-fast busy, metrics (no pool-level queue in 4.0.0) | 2 | E3-02 | done |
+| E3-05 | Worker supervision: crash detection, backoff, max intensity, give-up error | 4 | E3-01 | done |
+| E3-06 | Layers supervisor: whole worker-chain restart except top, bridge re-handshake, unavailable state, pending failure | 6 | E3-05 | done |
+| E3-07 | Tests: strategies, worker crash, whole-chain restart, pending requests, no retry | 4 | E3-02, E3-06 | done |
 
 ### E4 — Observability (13–19 PD)
 
@@ -266,7 +266,13 @@ Parallelisable pairs:
 * A worker crash restarts it with backoff; after max restarts the pool emits a supervision error.
 * A failed layer restarts every worker layer except the top one; bridges re-handshake; pending
   requests fail and are not retried.
-* `broadcast` request is rejected with a documented exception.
+* The top `Layer` object, its `current` bus and the subscriptions on `layer.bottom` survive a
+  restart: the bridge is restarted in place (same object) with a generation counter; calls fail fast
+  with `StateError` while the chain is restarting.
+* Orphaned workers are torn down by the parent watchdog instead of staying alive after a parent dies.
+* Backpressure is a per-worker request credit: saturated workers are skipped, and with no credit
+  `fire` is false and `request` throws `BusyException`.
+* `broadcast` request is rejected with `UnsupportedError`.
 
 ### M4
 

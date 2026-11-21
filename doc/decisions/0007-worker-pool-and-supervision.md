@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-21
+- Implementation notes: 2026-11-22 (the settled API and mechanisms are below)
 - Roadmap: E3-01..E3-07
 
 ## Context
@@ -74,6 +75,40 @@ competition between isolates.
    `close()`.
 
 8. Web: `WorkerPool` throws `UnsupportedError` on web (ADR-0008).
+
+## Implementation notes (2026-11-22)
+
+Settled API and the mechanisms chosen where the decision left room:
+
+- `WorkerPool({onInit, workers, dispatch, supervision, maxInFlightPerWorker, initialData,
+  initialDataFor, isModelBus, keySelector})`. `initialDataFor(index)` supplies per-worker data;
+  `maxInFlightPerWorker` (default 64, null = unlimited) is the request credit of one worker.
+  Exposes `fire`, `request`, `close`/`dispose`, `waitInit`, `waitReady`, `isReady`, `isUsable`,
+  `state` (`WorkerPoolState`), `restarts`, `errors`, `metrics` (`WorkerPoolMetrics` with per-worker
+  counters).
+- `broadcast` requests throw `UnsupportedError` at call time. `keyed` uses `key.hashCode` (default
+  key: the topic path) and never reroutes a key to another worker, so per-key order survives a
+  temporarily unavailable worker as a `false`/`BusyException`, not as an out-of-order delivery.
+- Backpressure is the per-worker request credit. When no worker has a free credit, `fire` returns
+  `false` and `request` throws `BusyException`. 4.0.0 has no pool-level dispatch queue: callers fail
+  fast instead of waiting. `leastBusy` therefore has a real counter to compare.
+- `EventBusIsolate.restart()` restarts a worker **in place**: the main-side bus, its local nodes,
+  listeners and model state survive; pending requests fail through `_link.failAllPending`; a fresh
+  link re-handshakes and both sides re-send their interest snapshots. A generation counter ignores
+  every late message and callback of the previous worker.
+- A worker-side watchdog pings its parent every second and kills itself when no pong comes. A dead
+  parent therefore tears down the rest of the chain instead of leaving orphaned isolates.
+- A failure of a deeper layer is forwarded up the chain as `_IsolateFailure` (a message String only:
+  the original error object is not guaranteed to be sendable). The top bridge reports it as an
+  `isolateDeath`; the supervisor reacts to any `isolateDeath` on the top bridge.
+- `Layers.supervise(...)` returns `LayersSupervisor` with `layer`, `waitInit`, `waitReady`, `state`
+  (`LayersState`), `restarts`, `errors`, `close`. The top `Layer` object, its `current` bus and the
+  subscriptions on `layer.bottom` survive: the bridge is the same object, restarted in place. Calls
+  on the bridge fail fast with `StateError` during a restart. The whole worker chain is recreated,
+  every `onInit` runs again, and pending requests fail without a retry.
+- On restart exhaustion the supervisor emits `EventBusError(kind: supervision)`, moves to
+  `failed` and disposes the top bridge while keeping `layer.current` until `close()`.
+- The web guard (`UnsupportedError` on web) remains E5-01; on the VM the pool is available.
 
 ## Consequences
 

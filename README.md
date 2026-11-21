@@ -25,6 +25,8 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 - Topic-based routing: event type + `paths`, plus `arguments` as call parameters
 - `EventBusIsolate` — the same API, but the events are processed in a worker isolate
 - `Layers` — chains of isolates: `main ↔ isolate₂ ↔ isolate₁ ↔ isolate₀`
+- `WorkerPool` — N workers with `broadcast`/`roundRobin`/`keyed`/`leastBusy`/`single` dispatch,
+  request credits and restart supervision; `Layers.supervise` restarts a whole worker chain
 - `FSM` — finite state machine driven by bus events
 - `Scope` / `Command` — stateful value with call history
 - `EventBusLogger` — trace every event that crosses the bus
@@ -269,6 +271,45 @@ bridge instead. Init functions may be `async` and may live in any layer; `Layer.
 from any layer and is safe to call twice. See
 [doc/03-isolate-and-layers.md](doc/03-isolate-and-layers.md#example-two-worker-layers)
 and [example/event_bus_layers_example.dart](example/event_bus_layers_example.dart).
+
+### WorkerPool and supervision
+
+```dart
+final pool = WorkerPool(
+  onInit: _worker,                 // top-level/static; runs in every worker
+  workers: 4,
+  dispatch: DispatchStrategy.leastBusy,
+  initialDataFor: (index) => index,
+  supervision: const SupervisionPolicy(maxRestarts: 3),
+);
+await pool.waitInit;
+
+final answer = await pool.request<int>(21);   // routed to one worker
+pool.fire('refresh');                         // routed by the same strategy
+await pool.close();
+```
+
+Strategies: `broadcast` (fire only; requests throw `UnsupportedError`),
+`roundRobin`, `keyed` (the topic path by default, a `keySelector` overrides;
+per-key order is preserved), `leastBusy`, `single` (one active worker with a
+standby). A dead worker is restarted with backoff; restart exhaustion emits
+`EventBusErrorKind.supervision` and fails the pool. `maxInFlightPerWorker`
+bounds in-flight requests per worker; with no free credit `fire` returns false
+and `request` throws `BusyException`. Pending requests of a dead worker fail
+and are never retried.
+
+`Layers.supervise(...)` builds a chain with the same guarantees: any worker
+layer failure restarts the whole worker chain, while the top layer, its
+`current` bus and the subscriptions on `layer.bottom` survive. Pending requests
+fail, and calls on the bridge throw `StateError` while the chain is restarting.
+
+```dart
+final supervisor = Layers.supervise(
+    [(_initMiddle, null, true), (_initBottom, null, true)]);
+await supervisor.waitInit;
+supervisor.errors.listen((error) => print(error));
+await supervisor.close();
+```
 
 ### Finite state machine
 

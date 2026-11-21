@@ -3,6 +3,7 @@ library event_arch;
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:collection';
+import 'dart:math' as math;
 
 // import 'package:async/async.dart';
 
@@ -20,6 +21,7 @@ part 'src/event_bus_isolate.dart';
 part 'src/event_bus.dart';
 part 'src/event_subscription.dart';
 part 'src/event_bus_error.dart';
+part 'src/worker_pool.dart';
 // export 'src/event_controller.dart'
 //     show
 //         EventBus,

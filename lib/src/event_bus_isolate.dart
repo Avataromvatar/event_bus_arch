@@ -34,6 +34,16 @@ class _IsolateInitError {
 ///never sends a bare String to this port.
 const String _isolateExitMessage = 'event_bus_arch.isolate.exit';
 
+///A failure of a layer below the receiver, forwarded up the chain.
+///
+///Only a message String crosses the boundary: the original error object is not
+///guaranteed to be sendable, and the top only needs to know that the chain
+///must be restarted.
+class _IsolateFailure {
+  final String message;
+  const _IsolateFailure(this.message);
+}
+
 ///A bus event sent to the other side. [id] is unique per sender.
 class _IsolateRequest {
   final int id;
@@ -283,6 +293,14 @@ class _IsolateLink {
     return true;
   }
 
+  ///Sends a layer failure further up the chain. Fire-and-forget.
+  bool sendFailure(String message) {
+    var port = sendPort;
+    if (port == null || _closed) return false;
+    port.send(_IsolateFailure(message));
+    return true;
+  }
+
   ///Checks that the worker is alive and responds.
   Future<bool> ping(Duration timeout) {
     var port = sendPort;
@@ -324,6 +342,13 @@ class _IsolateLink {
           present: message.present);
     } else if (message is _IsolateCancel) {
       _incomingCancellations.remove(message.id)?.cancel();
+    } else if (message is _IsolateFailure) {
+      final host = _host;
+      if (host is EventBusIsolate) {
+        host._reportRemoteFailure(message.message);
+      } else if (host is _EventBusForIsolate) {
+        host._reportRemoteFailure(message.message);
+      }
     } else if (message is _IsolateDelete) {
       // Local only: forwarding here would bounce the delete between the sides.
       _host._removeTopicLocally(message.topic);
@@ -399,14 +424,22 @@ class EventBusIsolate extends EventBusImpl {
   ///Must be top-level/static - closures cannot be sent to another isolate.
   final FutureOr<void> Function(EventBus isolateBu, Object? initialData) onInit;
 
-  late final _IsolateLink _link = _IsolateLink(this);
+  late _IsolateLink _link = _IsolateLink(this);
 
   Isolate? _isolate;
 
   /// this port listen data from isolate
   ReceivePort? _receivePort;
 
-  final Completer<bool> _completerInit = Completer();
+  Completer<bool> _completerInit = Completer();
+
+  ///Stored so [restart] can spawn an identical worker.
+  final Object? _initialData;
+  final bool _workerIsModelBus;
+
+  ///Every callback of the receive port captures the generation it was created
+  ///for; a callback of an older worker after a restart is ignored.
+  int _generation = 0;
 
   ///true once the worker has run onInit
   bool _ready = false;
@@ -428,8 +461,44 @@ class EventBusIsolate extends EventBusImpl {
     required this.onInit,
     Object? initialData,
     bool isModelBus = false,
-  }) : super(isModelBus) {
-    _init(initialData: initialData, isModelBus: isModelBus);
+  })  : _initialData = initialData,
+        _workerIsModelBus = isModelBus,
+        super(isModelBus) {
+    unawaited(_init());
+  }
+
+  ///Replaces the worker with a fresh one while keeping this bus object.
+  ///
+  ///Local nodes, listeners and model state of this side survive, so application
+  ///subscriptions keep working across a restart. Pending requests fail with
+  ///[EventBusException] and are not retried. The returned future is the new
+  ///worker's [waitInit]; `fire`/`request` throw `StateError` until it completes.
+  ///
+  ///A worker that dies while this method is running is invalidated by the
+  ///generation counter, so its late messages cannot affect the new worker.
+  Future<bool> restart() async {
+    if (isDisposed) {
+      throw StateError('EventBusIsolate is disposed');
+    }
+    if (!_completerInit.isCompleted) {
+      _completerInit.completeError(
+          EventBusException('EventBusIsolate restart was superseded'));
+    }
+    // Invalidate every callback of the old generation before killing it.
+    _generation++;
+    final oldPort = _receivePort;
+    _receivePort = null;
+    oldPort?.close();
+    final oldIsolate = _isolate;
+    _isolate = null;
+    _link.failAllPending('EventBusIsolate is restarting');
+    _link = _IsolateLink(this);
+    _ready = false;
+    _workerGone = false;
+    _completerInit = Completer();
+    oldIsolate?.kill(priority: Isolate.immediate);
+    unawaited(_init());
+    return waitInit;
   }
 
   @override
@@ -563,6 +632,7 @@ class EventBusIsolate extends EventBusImpl {
       return;
     }
     // fail the pending replies first, then kill the isolate: otherwise a pending await hangs
+    _generation++; // invalidate every callback of the current worker
     _completeInitResult(false);
     _link.failAllPending('EventBusIsolate is disposed');
     await super.dispose();
@@ -584,15 +654,28 @@ class EventBusIsolate extends EventBusImpl {
     }
   }
 
-  void _init({
-    Object? initialData,
-    bool isModelBus = false,
-  }) async {
-    _receivePort = ReceivePort();
+  Future<void> _init() async {
+    if (isDisposed) return;
+    final generation = ++_generation;
+    final receivePort = ReceivePort();
+    _receivePort = receivePort;
     try {
-      _isolate = await Isolate.spawn(
-          _worker, [_receivePort!.sendPort, onInit, initialData, isModelBus]);
+      final isolate = await Isolate.spawn(_worker,
+          [receivePort.sendPort, onInit, _initialData, _workerIsModelBus]);
+      if (generation != _generation || isDisposed) {
+        // superseded by a restart or by dispose
+        isolate.kill(priority: Isolate.immediate);
+        return;
+      }
+      _isolate = isolate;
+      // A ReceivePort stays open when the isolate dies: the port's onDone fires
+      // only when we close it ourselves, so the death is reported explicitly.
+      isolate.addOnExitListener(receivePort.sendPort,
+          response: _isolateExitMessage);
     } catch (error, stackTrace) {
+      if (generation != _generation) return;
+      receivePort.close();
+      if (identical(_receivePort, receivePort)) _receivePort = null;
       reportError(EventBusError(
         kind: EventBusErrorKind.isolateInit,
         source: EventBusErrorSource.isolate,
@@ -604,13 +687,9 @@ class EventBusIsolate extends EventBusImpl {
       return;
     }
 
-    // A ReceivePort stays open when the isolate dies: the port's onDone fires
-    // only when we close it ourselves, so the death is reported explicitly.
-    _isolate!.addOnExitListener(_receivePort!.sendPort,
-        response: _isolateExitMessage);
-
-    _receivePort!.listen(
+    receivePort.listen(
       (message) {
+        if (generation != _generation) return;
         if (message is SendPort) {
           _link.sendPort = message;
           _sendInterestSnapshot();
@@ -628,19 +707,30 @@ class EventBusIsolate extends EventBusImpl {
           _completeInitError(
               EventBusException('worker onInit failed: ${message.error}'),
               message.stackTrace);
-          // a broken isolate is useless: release its resources
-          unawaited(dispose());
+          // Kill the idle worker but keep this bus usable for a restart. The
+          // owner (pool, Layers supervisor, or the user) decides whether to
+          // retry; a plain user should dispose the bus.
+          _workerGone = true;
+          final port = _receivePort;
+          _receivePort = null;
+          port?.close();
+          final isolate = _isolate;
+          _isolate = null;
+          isolate?.kill(priority: Isolate.immediate);
         } else if (message == _isolateExitMessage) {
           _onWorkerGone();
-          // the port is useless now; closing it releases the listener
-          _receivePort?.close();
+          if (identical(_receivePort, receivePort)) {
+            _receivePort = null;
+            receivePort.close();
+          }
         } else {
           _link.handleMessage(message);
         }
       },
       onDone: () {
+        if (generation != _generation) return;
         _onWorkerGone();
-        _receivePort = null;
+        if (identical(_receivePort, receivePort)) _receivePort = null;
       },
     );
   }
@@ -664,6 +754,16 @@ class EventBusIsolate extends EventBusImpl {
       _completeInitError(EventBusException('worker isolate has died'));
     }
   }
+
+  ///A failure of a layer below this bridge, forwarded by the worker chain.
+  void _reportRemoteFailure(String message) {
+    _ready = false;
+    reportError(EventBusError(
+      kind: EventBusErrorKind.isolateDeath,
+      source: EventBusErrorSource.isolate,
+      error: EventBusException(message),
+    ));
+  }
 }
 
 void _worker(dynamic data) async {
@@ -677,6 +777,7 @@ void _worker(dynamic data) async {
   // the bus is created before the handshake: its listener subscribes to the port
   // right away, so no message from main can be lost
   var eventBus = _EventBusForIsolate(isModelBus, s, sendPort);
+  eventBus._startParentWatchdog();
   sendPort.send(innerReceivePort.sendPort);
 
   try {
@@ -703,10 +804,38 @@ class _EventBusForIsolate extends EventBusImpl {
   final Stream<dynamic> _receivePort;
   final SendPort _sendPort;
   late final _IsolateLink _link = _IsolateLink(this);
+  Timer? _watchdog;
 
   _EventBusForIsolate(super._isModelBus, this._receivePort, this._sendPort) {
     _link.sendPort = _sendPort;
     _receivePort.listen(_link.handleMessage);
+  }
+
+  ///A worker cannot be notified when its parent isolate dies. It pings the
+  ///parent and kills itself when no pong comes; its own child then does the
+  ///same, so a dead parent tears the whole subtree down.
+  void _startParentWatchdog() {
+    _watchdog = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (await _link.ping(const Duration(milliseconds: 500))) return;
+      _watchdog?.cancel();
+      _watchdog = null;
+      Isolate.current.kill(priority: Isolate.immediate);
+    });
+  }
+
+  ///Reports a failure of a lower layer locally and forwards it up the chain.
+  void _reportRemoteFailure(String message) {
+    reportError(EventBusError(
+      kind: EventBusErrorKind.isolateDeath,
+      source: EventBusErrorSource.isolate,
+      error: EventBusException(message),
+    ));
+    _link.sendFailure(message);
+  }
+
+  ///Sends a failure of this worker's child to the parent.
+  void _sendFailure(String message) {
+    _link.sendFailure(message);
   }
 
   @override

@@ -203,9 +203,9 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 
 | ID | Task | PD | Depends on | Status |
 |---|---|---:|---|---|
-| E6-01 | Migration guide 3.x -> 4.0 | 3 | E1-15, E2-07, E3-07 | todo |
+| E6-01 | Migration guide 3.x -> 4.0 — [15-migration-3-to-4.md](doc/15-migration-3-to-4.md) | 3 | E1-15, E2-07, E3-07 | done |
 | E6-02 | Migration script for `setHandler`/`removeHandler`/imports | 3 | E6-01 | todo |
-| E6-03 | Update docs 01–10; add 11 (backpressure), 12 (errors/observability), 13 (pool/supervision), 14 (Web) | 5 | E1..E5 | todo |
+| E6-03 | Update docs 01–10; add 00 (overview with UML-style Mermaid diagrams), 11 (backpressure), 12 (errors/observability), 13 (pool/supervision), 14 (Web), 15 (migration); Mermaid class/sequence/state/flow diagrams throughout | 5 | E1..E5 | doing |
 | E6-04 | Examples and benchmark updates | 2 | E1..E5 | todo |
 | E6-05 | CHANGELOG, versioning, publish dry-run, release checklist | 2 | E6-03 | todo |
 | E6-06 | Final regression, API freeze, tag | 2 | all | todo |

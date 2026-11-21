@@ -1,366 +1,218 @@
-# 03. Isolates and Layers: EventBusIsolate and Layers
+# 03. Isolates and layers
 
-[← 02. EventBus](02-event-bus.md) · [Contents](README.md) · [Next: FSM →](04-fsm.md)
+[← 02. EventBus in practice](02-event-bus.md) · [Contents](README.md) · [Next: FSM →](04-fsm.md)
 
-## Why
+`EventBusIsolate` gives a bus that looks familiar but runs its worker in another isolate. `Layers`
+builds chains of such bridges: `main ↔ isolate₂ ↔ isolate₁ ↔ isolate₀`. The bridge is a
+**directional port**: local listeners receive events coming from the other side, `fire` goes out.
 
-An isolate is the only way to take a second core in Dart. `EventBusIsolate` gives a bus that looks
-like a regular one, but events go to a worker isolate and requests come back from it. On top of it,
-`Layers` builds chains of layers: `main ↔ isolate₂ ↔ isolate₁ ↔ isolate₀`, where each isolate is a
-separate "floor" of the application with its own bus.
+Isolate APIs are VM-only. On the web they throw `UnsupportedError` at construction; see
+[14](14-web.md).
 
-## EventBusIsolate
+## 1. EventBusIsolate
 
 ```dart
 class EventBusIsolate extends EventBusImpl {
   EventBusIsolate({
-    required FutureOr<void> Function(EventBus bus, Object? initialData) onInit,   // may be async
+    required FutureOr<void> Function(EventBus bus, Object? initialData) onInit,
     Object? initialData,
-    bool isModelBus = false,   // model bus on both sides of the bridge
+    bool isModelBus = false,
+    ObservabilityConfig observability = ObservabilityConfig.disabled,
   });
 
-  Future<bool> get waitInit;   // completes when onInit has finished
-  bool get isInit;             // true if the worker is ready
-  Future<void> dispose();      // close the streams, the port, and kill the isolate
+  Future<bool> get waitInit;   // onInit finished AND interests exchanged
+  bool get isInit;             // true after waitInit
+  Future<bool> restart();      // restart the worker in place
+  Future<bool> ping({Duration timeout});
+  Future<void> dispose();
 }
 ```
 
 ### Initialization
 
 ```dart
-import 'dart:isolate';
-import 'package:event_bus_arch/event_bus_arch.dart';
-
-Future<void> main() async {
-  final iso = EventBusIsolate(onInit: _initWorker, initialData: 'prefix');
-  await iso.waitInit;                       // must wait for it
-  ...
-}
-
-// WARNING: this runs IN A DIFFERENT ISOLATE.
-// The function must be top-level / static — closures cannot cross the isolate boundary.
-Future<void> _initWorker(EventBus bus, Object? initialData) async {
-  final prefix = initialData as String;
-  await _heavyInit();                       // async initialization is fine too
-  bus.subscribe<String>(onData: (e) => bus.fire('$prefix: $e'));
-  bus.subscribeEvents<int>(handler: (dto, lastData) async {
-    return dto.data * 2;                    // the response for request()
-  });
-}
-```
-
-`onInit` receives **the bus that lives inside the isolate** plus arbitrary initial data. Everything
-the worker needs is set up here: handlers, subscriptions, state. The function may be async.
-
-### Model bus on both sides
-
-`EventBusIsolate(isModelBus: true)` makes both buses of the bridge model buses: the
-`EventBusIsolate` in the main isolate and the `EventBus` handed to `onInit` in the worker. A model
-bus keeps the node of a topic, and its `currentData`, after the last listener cancels; a common bus
-removes them. The default is `false`, so an isolate bridge behaves like a plain transport.
-
-```dart
-final iso = EventBusIsolate(onInit: _initWorker, isModelBus: true);
+final iso = EventBusIsolate(onInit: _worker, initialData: 'prefix');
 await iso.waitInit;
-// the worker bus is a model bus too: bus.isModelBus == true inside _initWorker
 ```
 
-### Forgetting a topic across the bridge
+`onInit` runs **inside** the worker and must be top-level/static. It may be async: `waitInit`
+completes after it finishes and after both sides exchange their interest registries, so a
+`fire`/`request` immediately after `await waitInit` sees the subscriptions made in `onInit`.
 
-`removeTopic` acts on the bus it is called on and is forwarded to the other side of the bridge.
-`iso.removeTopic<T>()` removes the node in the main isolate and sends a fire-and-forget delete to
-the worker; a worker-side `removeTopic` does the reverse. Deletes travel through the same port as
-events, so a `fire` sent after the delete is applied after it. A handler registered on the other
-side stays — call `removeHandler` there for a full forget. The call requires a finished
-`waitInit` and throws `StateError` before it and after `dispose`.
-
-`Layer` is different: `layer.current`, `layer.top` and `layer.bottom` are separate buses (and the
-bridges lead to separate isolates), so a delete on one of them is not propagated to the others.
-
-### Worker readiness
-
-> **`waitInit` completes only after `onInit` has finished** (including all `await`s inside it). An
-> event sent right after `await iso.waitInit` is guaranteed to reach the worker's handlers — no
-> separate handshake is needed.
-
-* `iso.isInit` — a synchronous check: `true` if the worker has already been initialized;
-* if the isolate failed to start or `onInit` threw, `waitInit` completes with an **error**
-  (`EventBusException`), and the isolate is released;
-* `ping()` only checks worker liveness ("does it answer"), not readiness: messages are read by an
-  internal listener that is alive even before `onInit`.
-
-```dart
-final iso = EventBusIsolate(onInit: _initWorker);
-await iso.waitInit;               // ready
-iso.isInit;                       // true
-await iso.ping();                 // true — the worker is alive (for example, before reusing it)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant M as Main isolate
+    participant W as Worker isolate
+    M->>W: Isolate.spawn(onInit, initialData)
+    W->>M: worker SendPort
+    M->>W: interest snapshot (local listeners/handlers/model topics)
+    W->>W: run onInit (subscribe, handlers)
+    W->>M: interest snapshot
+    W->>M: _IsolateReady
+    Note over M: waitInit completes
+    M->>W: fire / request (DTO + correlation id)
 ```
 
-### Publishing
+### Publishing and request semantics
+
+* `fire` is **outbound only**. A main-side listener does not receive a main-side fire; a worker-side
+  listener does not receive its own fire. This prevents a forwarding listener from re-entering
+  itself. Use a local `EventBus` (in `Layers`, `layer.current`) for local pub/sub.
+* `fire` sends only when the other side has a known listener or model interest, and returns
+  `true` in that case. A handler-only node does not count (D14).
+* `request` checks the local side first. If a local handler exists, the request never crosses the
+  bridge. Otherwise it crosses only when the worker has a known handler; with neither it throws
+  `NoHandlerException` immediately. `timeout` and `CancelToken` are supported; cancelling removes a
+  queued request on the worker if it was not dispatched, and a late answer is discarded.
+* Incoming events are dispatched to local nodes: `fire` to listeners, `request` to the local handler.
 
 ```dart
-final iso = EventBusIsolate(onInit: _initWorker);
+final iso = EventBusIsolate(onInit: _worker);
 await iso.waitInit;
 
-// 1. Request-response: the worker handler's returned value comes back
-final doubled = await iso.request<int>(21);           // 42
-
-// 1a. Before waitInit, fire/request throw a StateError — no silent no-ops
-
-// 2. A one-way event: returns true when the other side has known interest
-iso.fire<String>('ping');
-
-// 3. Receiving events sent FROM the worker
-iso.subscribe<String>(onData: (e) => print('from worker: $e'));
+iso.subscribe<String>(onData: (e) => print('from worker: $e')); // inbound listener
+iso.fire<String>('ping');                                        // outbound
+final doubled = await iso.request<int>(21);                      // worker handler
 ```
 
-The bridge is **directional**: local listeners receive events coming from the other side, and
-`fire` sends to the other side only. A fired event is never delivered back to the local listeners of
-the side that fired it. This is what makes a forwarding listener safe:
+### Model bus
+
+`EventBusIsolate(isModelBus: true)` makes **both** buses of the bridge model buses: the main-side
+bus and the bus inside the worker. A model bus keeps the node and `currentData` after its last
+listener cancels. Model interest is exchanged too, so the other side knows the topic is retained
+even without a listener. Firing a value does not update the sender's local model; the receiving
+side stores what it receives.
+
+### Forgetting a topic
+
+`removeTopic` removes the node on this side, cancels its subscriptions and forwards a delete to the
+other side; both sides forget the topic. A handler registered on the other side stays. A model bus
+recreates the node on the next `fire`, `request` or `listen`.
+
+### Shutdown, liveness and restart
 
 ```dart
-// inside a layer: receive from above, forward below; no self-echo
-layer.top!.subscribe<MyEvent>(onData: (e) => layer.bottom!.fire(e));
+await iso.ping();      // liveness only, not readiness
+await iso.restart();   // new worker, same bus object and local subscriptions
+await iso.dispose();   // cancel pending, close ports, kill the worker
 ```
 
-Use an ordinary `EventBus` for local pub/sub — `layer.current` inside `Layers`, or a separate bus
-next to a standalone `EventBusIsolate`. A model bridge keeps the values it *receives*; firing a
-value does not update the sending side's local model.
+`restart()` keeps this side's local nodes, listeners and model state, fails pending requests and
+re-handshakes interests with a new worker. A generation counter ignores late messages from the old
+worker. `EventBusIsolate` also starts a parent watchdog inside the worker: if the parent disappears,
+the worker kills itself within about a second, so a dead parent does not leave an orphaned subtree.
+See [13](13-pool-and-supervision.md) for supervised pools and chains.
 
-On the main side, `fire` and `request` **do not look for a local node** — they always go to the
-isolate. Events and requests coming from the worker, in turn, are dispatched to the local nodes of
-the main isolate: `fire` to listeners, `request` to the local handler. The worker bus works the
-same way in the other direction.
+### Exchange limits
 
-`fire` never waits for a handler and sends no reply. `request` waits for exactly one response:
-the handler's return value or its exception.
+* Only sendable objects can cross the isolate boundary; DTOs carry `arguments` and `correlationId`.
+* A request id correlates answers; concurrent requests of the same type each get their own result.
+* A handler error is rethrown at the caller; an in-flight request fails with `EventBusException` if
+  the worker dies or the bridge is disposed.
+* `waitInit` surfaces a spawn or `onInit` error as `EventBusException`; the bus remains usable for
+  `restart()` (a plain user should `dispose()` it).
 
-### How it works internally
+## 2. Layers
 
-```text
-   MAIN ISOLATE                                   WORKER ISOLATE
- ┌────────────────────────┐                     ┌────────────────────────────┐
- │ EventBusIsolate        │  SendPort ────────► │ ReceivePort                │
- │  _toEBSender ──────────┼─────────────────────┼─► _EventBusForIsolate      │
- │                        │  _IsolateRequest    │     _eventsMap, handlers   │
- │                        │  _IsolateFire       │                            │
- │  _receivePort ◄────────┼─────────────────────┼── SendPort                 │
- │  _link._pending:       │  _IsolateResponse   │   _link._pending:          │
- │    id → Completer      │  _IsolateError…     │     id → Completer         │
- └────────────────────────┘                     └────────────────────────────┘
-```
-
-* A `Completer` is **never passed across the isolate boundary**. The sender keeps its completer
-  in a local map under a request id, and the other side sends a response with the same id; the
-  response pulls the right completer, so the order of responses does not matter.
-* `EventDTO` has no completer at all in 3.0.0 — the result travels as a separate protocol message
-  (`_IsolateResponse` or `_IsolateErrorResponse`).
-* `_IsolateFire` has no reply. The receiver dispatches it to listeners only (`request: false`);
-  request handlers are not invoked.
-* `_IsolateRequest` is dispatched by resolving a handler on the receiving bus, notifying its
-  listeners and invoking the handler. Its returned future is sent back; an exception is sent as
-  `_IsolateErrorResponse`.
-
-### Guarantees and limitations
-
-| Rule | Consequence |
-|---|---|
-| Exactly one response per request, correlated by `id` | Concurrent requests of the same type each get their own result; the order of responses does not matter |
-| No handler for the topic in the target isolate | `request` fails with `NoHandlerException` (it does not hang and does not return null) |
-| An exception in a worker handler | Reaches the sender as an error from `await iso.request(...)` |
-| `fire` has no response | A worker listener sees it; a worker handler does not run |
-| `dispose` or worker death with a request in flight | The wait completes with an `EventBusException`; there are no forever-pending `await`s |
-| Only "sendable" objects can cross the isolate | Closures, `StreamController`s, open files and the like cannot be sent |
-| `await iso.request(...)` returns the handler's result, not event ordering | The result may arrive later than events fired by the worker inside the handler |
-| `isModelBus` applies to both sides | `EventBusIsolate(isModelBus: true)` keeps topics on the main-side bus and on the worker bus; the default is a common bus |
-| Wildcard paths are rejected | `fire`/`request` on the isolate address concrete topics, like everywhere else |
-
-### Shutdown
+`Layers.createLayers` builds a chain of worker layers and returns the top `Layer`:
 
 ```dart
-await iso.dispose();
+final layer = await Layers.createLayers([
+  (_initMiddle, null, true),   // (init function, initial data, isModelBus)
+  (_initBottom, null, true),
+], bridgeIsModelBus: false);
+
+layer.bottom!.subscribe<Ping>(onData: (e) => print(e.count));
+layer.bottom!.fire(Ping(0));
+await layer.close();
 ```
-
-`dispose` is idempotent: it completes all pending requests with an error, closes `allEventStream`,
-the main-bus nodes and the `ReceivePort`, then kills the isolate. After it is closed, `fire` and
-`request` throw a `StateError` and `ping()` returns `false`. If the worker dies on its own,
-pending waits also complete with an error.
-
-## Layers — multi-layer setups
-
-`Layers.createLayers` builds a chain of isolates. Each element of the list is a tuple
-`(init function, initial data, isModelBus)`:
-
-```dart
-typedef fnInitLayer = FutureOr<void> Function(Layer layer, Object? initialData);
-
-static Future<Layer> createLayers(
-  List<(fnInitLayer, Object?, bool)> layers, {
-  bool currentIsModelBus = true,    // the main isolate's layer.current
-  bool bridgeIsModelBus = false,    // every EventBusIsolate between layers
-  Duration? timeout,
-});
-```
-
-### What each layer gets
 
 ```text
 Main isolate (top)
-  layer.current == EventBus(isModelBus: currentIsModelBus)          ← the layer's local bus
-  layer.top     == null                                             ← nothing above
-  layer.bottom  == EventBusIsolate(isModelBus: bridgeIsModelBus)    ← bridge to the first worker
+  layer.current == EventBus(isModelBus: currentIsModelBus)
+  layer.top     == null
+  layer.bottom  == EventBusIsolate to the first worker
 
-Worker N (layers[N] ran exactly here)
-  layer.current == EventBus(isModelBus: layers[N].$3)               ← the layer's local bus
-  layer.top     == EventBus leading to the layer above              ← a bridge, isModelBus: bridgeIsModelBus
-  layer.bottom  == EventBusIsolate(isModelBus: bridgeIsModelBus)    ← bridge to the next worker,
-                                                                      or null if this is the last layer
+Worker N (layers[N] ran here)
+  layer.current == EventBus(isModelBus: layers[N].$3)
+  layer.top     == bridge to the layer above
+  layer.bottom  == EventBusIsolate to the next worker, or null for the last layer
 ```
 
 Rules:
 
-* `layer.top!.fire(...)` / `layer.top!.request(...)` — the event goes **up**;
-* `layer.bottom!.fire(...)` / `layer.bottom!.request(...)` — the event goes **down**;
-* `layer.current` — the layer's local bus for internal logic; its `isModelBus` comes from the
-  tuple's third element (`currentIsModelBus` for the top layer), independently of the bridges;
-* `bridgeIsModelBus` applies **only** to the `EventBusIsolate` bridges (`top` / `bottom`), never
-  to `layer.current`; the default `false` keeps the bridges as plain transport pipes;
-* `fire` is one-way and returns true when the other side has a known listener or model interest; it
-  is never delivered back to the firing side's own listeners (the bridge is directional, see
-  [Publishing](#publishing)). `request` crosses the isolate boundary and waits for the handler's
-  result on the other side;
-* the init function runs **inside** the corresponding isolate and must be top-level/static (see
-  below).
+* `layer.top!.fire/request` goes **up**; `layer.bottom!.fire/request` goes **down**;
+* `layer.current` is the layer's local bus; use it for pub/sub inside the layer, never a bridge;
+* `bridgeIsModelBus` applies to every inter-layer `EventBusIsolate`, not to `layer.current`;
+* init functions run inside their isolate, may be async, and must be top-level/static;
+* a bridge is directional: a listener on `layer.top` receives events from above and its `fire` goes
+  above; it does not see its own fire locally.
 
-### Example: two worker layers
+### Example: a two-worker ping-pong
 
 ```dart
-import 'dart:isolate';
-import 'package:event_bus_arch/event_bus_arch.dart';
-
 class Ping { final int count; Ping(this.count); }
 
 Future<void> main() async {
-  // main ↔ isolate[A] ↔ isolate[B]
-  // createLayers completes when ALL layers in the chain are initialized,
-  // so events can be sent right away
   final layer = await Layers.createLayers([
     (_initMiddle, null, true),
     (_initBottom, null, true),
   ]);
 
-  // create the subscription for the final event BEFORE sending, or you may miss it:
-  // node streams are broadcast and unbuffered
-  final answerFuture = layer.bottom!.listen<Ping>().first;
-  layer.bottom!.subscribe<Ping>(onData: (e) => print('back to top: ${e.count}'));
+  final answer = await layer.bottom!
+      .listen<Ping>()
+      .firstWhere((p) => p.count == 3);
 
   layer.bottom!.fire(Ping(0));
-
-  final answer = await answerFuture;
-  print('result: ${answer.count}');       // 3
-
+  print('result: ${answer.count}'); // 3
   await layer.close();
 }
 
-// runs in the MIDDLE isolate (may be async — createLayers waits for it)
 Future<void> _initMiddle(Layer layer, Object? _) async {
-  layer.top!.subscribe<Ping>(onData: (e) => layer.bottom!.fire(Ping(e.count + 1)));
-  layer.bottom!.subscribe<Ping>(onData: (e) => layer.top!.fire(Ping(e.count + 1)));
+  await Future<void>.delayed(const Duration(milliseconds: 20));
+  layer.top!.subscribe<Ping>(
+      onData: (e) => layer.bottom!.fire(Ping(e.count + 1)));
+  layer.bottom!.subscribe<Ping>(
+      onData: (e) => layer.top!.fire(Ping(e.count + 1)));
 }
 
-// runs in the BOTTOM isolate
-void _initBottom(Layer layer, Object? _) {
-  layer.top!.subscribe<Ping>(onData: (e) => layer.top!.fire(Ping(e.count + 1)));
+Future<void> _initBottom(Layer layer, Object? _) async {
+  await Future<void>.delayed(const Duration(milliseconds: 20));
+  layer.top!.subscribe<Ping>(
+      onData: (e) => layer.top!.fire(Ping(e.count + 1)));
 }
 ```
 
-An error in any init function (including one thrown from an `await`) comes out of
-`Layers.createLayers` as an `EventBusException`; if needed, bound the wait with the `timeout`
-parameter.
-
-Data flow in this example:
-
-```text
-main  fire(Ping(0))
-        │  layer.bottom!.fire
-        ▼
-isolate[A]  top receives 0 → bottom!.fire(Ping(1))
-        ▼
-isolate[B]  top receives 1 → top!.fire(Ping(2))
-        ▲
-isolate[A]  bottom receives 2 → top!.fire(Ping(3))
-        ▲
-main  receives 3
-```
-
-For a value that must be computed in a lower layer, use `request` instead — the future resolves
-with the handler's return value from that layer.
-
-### Shutdown
-
-```dart
-await layer.close();     // close the layer's bottom and top isolate bridges
-```
-
-`close()` closes `top`, `bottom` and `current` — that is, it shuts down the isolate branches and the
-layer's local bus. It works in any layer (including inside a worker) and is safe to call again: the
-`top`/`bottom` fields are set to null, and `dispose` is idempotent.
+The same topic is used in both directions on purpose: because a bridge `fire` is outbound only, a
+listener cannot receive its own fire, so the chain terminates at the test listener instead of
+looping.
 
 ### Supervision
 
-`Layers.createLayers` is a factory with no recovery. For recovery use `Layers.supervise`, which
-returns a `LayersSupervisor`:
+`Layers.createLayers` is a factory with no recovery. `Layers.supervise` returns a
+`LayersSupervisor` that restarts the whole worker chain when any worker fails while the top layer,
+its `current` bus and the subscriptions on `layer.bottom` survive. Pending requests fail and are
+not retried; calls on the bridge throw `StateError` while the chain is restarting. See
+[13](13-pool-and-supervision.md#2-layers-supervision).
 
 ```dart
-final supervisor = Layers.supervise(
-  [(_initMiddle, null, true), (_initBottom, null, true)],
-  policy: const SupervisionPolicy(
-    maxRestarts: 3,
-    window: Duration(minutes: 1),
-    initialBackoff: Duration(milliseconds: 100),
-  ),
-);
-await supervisor.waitInit;              // the first chain is ready
-supervisor.errors.listen(print);        // isolate failures and supervision errors
-...
+final supervisor = Layers.supervise([
+  (_initMiddle, null, true),
+  (_initBottom, null, true),
+]);
+await supervisor.waitInit;
+supervisor.errors.listen(print);
 await supervisor.close();
 ```
 
-* Any worker layer failure — a direct death or a failure forwarded from a deeper layer — tears down
-  every worker layer and runs every `onInit` again. The top layer (the isolate that called
-  `supervise`) survives.
-* The top `Layer` object, `layer.current` and the subscriptions on `layer.bottom` survive: the
-  bridge is restarted in place and re-sends its interest registry in both directions.
-* Pending requests fail with `EventBusException` and are not retried. While the chain is restarting,
-  `fire`/`request` on the bridge throw `StateError`; `await supervisor.waitReady()` before calling.
-* A worker that loses its parent kills itself within about a second (parent watchdog), so the layers
-  below a dead parent are not left orphaned.
-* After `SupervisionPolicy.maxRestarts` attempts inside the window the supervisor reports
-  `EventBusErrorKind.supervision`, moves to `LayersState.failed` and disposes the bridge.
-* `supervisor.restarts` counts completed whole-chain restarts; `state` is `starting`, `ready`,
-  `restarting`, `failed` or `closed`.
-
 ### Requirements for init functions
 
-* Top-level or `static` functions only: closures and bound methods cannot cross the isolate
-  boundary.
-* Everything that goes into the isolate (`Layer`, `EventDTO`, event data) must be sendable. Your own
-  classes — yes (they are copied); closures and system resources — no.
-* The function is called asynchronously, after the isolate has handed over the `SendPort`; the
-  neighboring layer's `waitInit` is guaranteed to be complete by the time of the call only for the
-  layer below.
+* Top-level or `static` functions: closures and bound methods cannot cross the isolate boundary.
+* Everything sent into the isolate (`Layer`, `EventDTO`, event data, initial data) must be sendable.
+* The function is called after the isolate has handed over its `SendPort`; the layer below is
+  initialized before the current layer's init function runs.
+* A worker that cannot reach its parent kills itself (watchdog); `LayersSupervisor` restarts the
+  chain when the top bridge reports the failure.
 
-## Full example
-
-Working examples in the package:
-
-* `example/event_bus_arch_exmple.dart` — EventBusIsolate: subscriptions, a handler with `arguments`,
-  events in both directions;
-* `example/event_bus_layers_example.dart` — two worker layers with an event chain
-  (output: `SEND 0 → FROM MIDDLE TO BOTTOM 0->1 → FROM BOTTOM TO MIDDLE 1->2 →
-  FROM MIDDLE TO TOP 2->3 → GET 3`).
-
-## What's next
-
-* [04-fsm.md](04-fsm.md) — a state machine on top of the bus.
-* [07-caveats.md](07-caveats.md) — pitfalls of the isolate bus.
+[Next: FSM →](04-fsm.md)

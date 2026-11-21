@@ -1,7 +1,7 @@
 # M6: documentation, migration, release
 
-- Status: planned
-- Started: —
+- Status: in progress
+- Started: 2026-11-22
 - Estimate: 13–20 PD (ROADMAP M6)
 - Local work report: no task record exists, and `record_create.py` requires a
   parent Feature/User Story; per `agai-sdlc:task-sync`, this file is the allowed
@@ -47,7 +47,28 @@ what to notice; split public and internal views; keep each diagram under ~15
 nodes; diagrams live next to the text they explain and are linked from
 `doc/README.md`.
 
+## Progress
+
+- 2026-11-22: documentation first batch done:
+  * `doc/00-overview.md` — new start page with the API class diagram, component flowchart,
+    reading paths, 4.0 changes and versions.
+  * `doc/01-architecture.md` — rewritten for 4.0 with fire/request sequence diagrams, handler
+    resolution flowchart and the module map.
+  * `doc/02-event-bus.md` — rewritten: subscriptions, dual callbacks, request lifecycle,
+    currentData/removeTopic, recipes.
+  * `doc/03-isolate-and-layers.md` — rewritten: directional bridge, interest handshake sequence,
+    local-first requests, restart/watchdog, Layers/Supervisor.
+  * `doc/11-backpressure.md`, `doc/12-observability.md`, `doc/13-pool-and-supervision.md`,
+    `doc/14-web.md` — new, diagram-first.
+  * `doc/15-migration-3-to-4.md` — E6-01 migration guide.
+  * `doc/README.md` — 4.0 contents, diagram conventions, current test counts.
+- Remaining: rewrite 04–10, add `tool/migrate_3_to_4.dart` (E6-02), update examples/benchmarks
+  (E6-04), CHANGELOG/publish dry-run/release checklist (E6-05), final regression (E6-06).
+
 ## Agent work log
 
 - 2026-11-22: task-sync invoked; M6 planned with the UML diagram set requested
   by the user. M5 is complete; M2–M5 work reports are in this directory.
+- 2026-11-22: first documentation batch and the migration guide written; ROADMAP E6-01 marked
+  done, E6-03 in progress. Agents/skills: `agai-sdlc:task-sync`, `agai-sdlc:records`; token
+  attribution unavailable.

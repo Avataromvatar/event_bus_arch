@@ -36,9 +36,12 @@ void throwingWorker(EventBus bus, Object? initialData) {
   });
 }
 
-///An event from the worker to main.
+///An event from the worker to main. The trigger and the echo use different
+///paths so the worker does not receive its own echo.
 void echoWorker(EventBus bus, Object? initialData) {
-  bus.subscribe<String>(onData: (e) => bus.fire<String>('echo: $e'));
+  bus.subscribe<String>(
+      paths: ['in'],
+      onData: (e) => bus.fire<String>('echo: $e', paths: ['out']));
 }
 
 Future<void> failingInitWorker(EventBus bus, Object? initialData) async {
@@ -87,16 +90,23 @@ class LayerPing {
 Future<void> initMiddleLayer(Layer layer, Object? _) async {
   // if createLayers does not wait for initialization, the first event is lost
   await Future<void>.delayed(const Duration(milliseconds: 20));
+  // 'down' goes from the layer above to the layer below
   layer.top!.subscribe<LayerPing>(
-      onData: (e) => layer.bottom!.fire(LayerPing(e.count + 1)));
+      paths: ['down'],
+      onData: (e) =>
+          layer.bottom!.fire(LayerPing(e.count + 1), paths: ['down']));
+  // 'up' goes back; a different path keeps the local delivery of a fire from
+  // being received by the subscriber that produced it
   layer.bottom!.subscribe<LayerPing>(
-      onData: (e) => layer.top!.fire(LayerPing(e.count + 1)));
+      paths: ['up'],
+      onData: (e) => layer.top!.fire(LayerPing(e.count + 1), paths: ['up']));
 }
 
 Future<void> initBottomLayer(Layer layer, Object? _) async {
   await Future<void>.delayed(const Duration(milliseconds: 20));
   layer.top!.subscribe<LayerPing>(
-      onData: (e) => layer.top!.fire(LayerPing(e.count + 1)));
+      paths: ['down'],
+      onData: (e) => layer.top!.fire(LayerPing(e.count + 1), paths: ['up']));
 }
 
 void main() {
@@ -185,9 +195,9 @@ void main() {
       final iso = EventBusIsolate(onInit: echoWorker);
       await iso.waitInit;
       final received = <String>[];
-      final sub = iso.subscribe<String>(onData: received.add);
+      final sub = iso.subscribe<String>(paths: ['out'], onData: received.add);
 
-      iso.fire<String>('hi');
+      iso.fire<String>('hi', paths: ['in']);
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
       expect(received, ['echo: hi']);
@@ -284,8 +294,13 @@ void main() {
         (initBottomLayer, null, true),
       ]);
 
-      final answerFuture = layer.bottom!.listen<LayerPing>().first;
-      layer.bottom!.fire(LayerPing(0));
+      // The chain: main -> middle (down) -> bottom -> middle -> main (up).
+      // Each hop increments the count, so the main listener sees 3.
+      final answerFuture = layer.bottom!
+          .listen<LayerPing>(paths: ['up'])
+          .firstWhere((p) => p.count == 3)
+          .timeout(const Duration(seconds: 2));
+      layer.bottom!.fire(LayerPing(0), paths: ['down']);
       final answer = await answerFuture;
 
       expect(answer.count, 3);

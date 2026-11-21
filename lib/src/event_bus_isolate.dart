@@ -26,6 +26,14 @@ class _IsolateInitError {
   const _IsolateInitError(this.error, this.stackTrace);
 }
 
+///The worker isolate has terminated (killed, crashed or exited on its own).
+///
+///A ReceivePort does not close when the isolate on the other side dies, so the
+///death is delivered by `Isolate.addOnExitListener` instead of `onDone`. The
+///exit response must be a simple sendable value, and the protocol otherwise
+///never sends a bare String to this port.
+const String _isolateExitMessage = 'event_bus_arch.isolate.exit';
+
 ///A bus event sent to the other side. [id] is unique per sender.
 class _IsolateRequest {
   final int id;
@@ -44,6 +52,35 @@ class _IsolateFire {
 class _IsolateDelete {
   final Topic topic;
   const _IsolateDelete(this.topic);
+}
+
+///A change of listener or handler interest for one topic.
+///
+///It is fire-and-forget: the receiver updates its remote-interest registry and
+///does not reply. [present] false withdraws only the flags carried by this
+///message.
+class _IsolateInterest {
+  final Topic topic;
+  final bool listener;
+  final bool handler;
+
+  ///A model bus stores the topic value even without a listener.
+  final bool model;
+  final bool present;
+
+  const _IsolateInterest(this.topic,
+      {required this.listener,
+      required this.handler,
+      this.model = false,
+      required this.present});
+}
+
+///A caller-side cancellation of an in-flight request. The receiver removes the
+///request from its queue if it has not been dispatched and ignores a later
+///response.
+class _IsolateCancel {
+  final int id;
+  const _IsolateCancel(this.id);
 }
 
 ///A reply to a specific request. value == null means "handled without a result"
@@ -80,7 +117,57 @@ class _PendingRequest {
 
   ///The topic is only needed for the error message when the link is closed.
   final String topic;
+  Timer? timer;
   _PendingRequest(this.completer, this.topic);
+}
+
+///Interest of the other side, split by kind and exact/pattern topic.
+class _RemoteInterest {
+  final Map<Topic, bool> _listeners = {};
+  final Map<Topic, bool> _handlers = {};
+  final Map<Topic, bool> _models = {};
+
+  void apply(Topic topic,
+      {required bool listener,
+      required bool handler,
+      bool model = false,
+      required bool present}) {
+    void applyOne(Map<Topic, bool> map, bool flag) {
+      if (!flag) return;
+      if (present) {
+        map[topic] = true;
+      } else {
+        map.remove(topic);
+      }
+    }
+
+    applyOne(_listeners, listener);
+    applyOne(_handlers, handler);
+    applyOne(_models, model);
+  }
+
+  bool hasListener(Topic topic) =>
+      _matches(_listeners, topic) || _matches(_models, topic);
+  bool hasHandler(Topic topic) => _matches(_handlers, topic);
+
+  bool _matches(Map<Topic, bool> topics, Topic topic) {
+    if (topics[topic] == true) return true;
+    if (TopicPattern.isPattern(topic)) return false;
+    for (final pattern in topics.keys) {
+      if (TopicPattern.matches(pattern, topic)) return true;
+    }
+    return false;
+  }
+
+  Iterable<Topic> get listenerTopics => _listeners.keys;
+  Iterable<Topic> get handlerTopics => _handlers.keys;
+  Iterable<Topic> get modelTopics => _models.keys;
+
+  void clear() {
+    _listeners.clear();
+    _handlers.clear();
+    _models.clear();
+  }
 }
 
 ///Shared part of the exchange for both sides: id counter, pending replies, dispatch.
@@ -96,6 +183,8 @@ class _IsolateLink {
   int _nextId = 0;
   final Map<int, _PendingRequest> _pending = {};
   final Map<int, Completer<bool>> _pings = {};
+  final Map<int, CancelToken> _incomingCancellations = {};
+  final _RemoteInterest remoteInterest = _RemoteInterest();
   bool _closed = false;
 
   bool get isClosed => _closed;
@@ -103,17 +192,73 @@ class _IsolateLink {
   int _newId() => _nextId++;
 
   ///Sends an event to the other side and waits for the handler result.
-  Future<dynamic> request(EventDTO dto) {
+  ///
+  ///[timeout] and [cancelToken] remove the pending entry and send
+  ///[_IsolateCancel], so a late response is ignored and the map does not grow.
+  Future<dynamic> request(EventDTO dto,
+      {Duration? timeout, CancelToken? cancelToken}) {
     var port = sendPort;
     if (port == null || _closed) {
       return Future.error(EventBusException(
           'EventBusIsolate is not available (ready=${port != null}, closed=$_closed)'));
     }
+    if (cancelToken?.isCancelled ?? false) {
+      return Future.error(RequestCanceledException(dto.topic.topic));
+    }
+
     var id = _newId();
     var completer = Completer<dynamic>();
-    _pending[id] = _PendingRequest(completer, dto.topic.topic);
+    final pending = _PendingRequest(completer, dto.topic.topic);
+    _pending[id] = pending;
+
+    void cancel(Object error) {
+      final entry = _takePending(id);
+      if (entry == null) return;
+      if (!entry.completer.isCompleted) {
+        entry.completer.completeError(error);
+      }
+      if (!_closed) {
+        port.send(_IsolateCancel(id));
+      }
+    }
+
+    if (timeout != null) {
+      pending.timer = Timer(timeout, () {
+        cancel(RequestTimeoutException(dto.topic.topic, timeout));
+      });
+    }
+    final token = cancelToken;
+    if (token != null) {
+      token.whenCancelled.then((_) {
+        cancel(RequestCanceledException(dto.topic.topic));
+      });
+    }
+
     port.send(_IsolateRequest(id, dto));
     return completer.future;
+  }
+
+  _PendingRequest? _takePending(int id) {
+    final pending = _pending.remove(id);
+    pending?.timer?.cancel();
+    pending?.timer = null;
+    return pending;
+  }
+
+  ///Publishes a listener/handler interest transition to the other side.
+  bool interest(Topic topic,
+      {required bool listener,
+      required bool handler,
+      bool model = false,
+      required bool present}) {
+    var port = sendPort;
+    if (port == null || _closed) return false;
+    port.send(_IsolateInterest(topic,
+        listener: listener,
+        handler: handler,
+        model: model,
+        present: present));
+    return true;
   }
 
   ///Sends an event without waiting for a reply.
@@ -158,10 +303,9 @@ class _IsolateLink {
   ///exception from the port listener escapes to the zone and kills the isolate.
   void handleMessage(dynamic message) {
     if (message is _IsolateResponse) {
-      _pending.remove(message.id)?.completer.complete(message.value);
+      _takePending(message.id)?.completer.complete(message.value);
     } else if (message is _IsolateErrorResponse) {
-      _pending
-          .remove(message.id)
+      _takePending(message.id)
           ?.completer
           .completeError(message.error, message.stackTrace);
     } else if (message is _IsolatePong) {
@@ -172,6 +316,14 @@ class _IsolateLink {
       unawaited(_answer(message));
     } else if (message is _IsolateFire) {
       _host._dispatchIncoming(message.dto, request: false);
+    } else if (message is _IsolateInterest) {
+      remoteInterest.apply(message.topic,
+          listener: message.listener,
+          handler: message.handler,
+          model: message.model,
+          present: message.present);
+    } else if (message is _IsolateCancel) {
+      _incomingCancellations.remove(message.id)?.cancel();
     } else if (message is _IsolateDelete) {
       // Local only: forwarding here would bounce the delete between the sides.
       _host._removeTopicLocally(message.topic);
@@ -185,8 +337,11 @@ class _IsolateLink {
     if (port == null || _closed) {
       return;
     }
+    final token = CancelToken();
+    _incomingCancellations[request.id] = token;
     try {
-      var value = await _host._dispatchIncoming(request.dto);
+      var value =
+          await _host._dispatchIncoming(request.dto, cancelToken: token);
       if (!_closed) {
         port.send(_IsolateResponse(request.id, value));
       }
@@ -194,6 +349,8 @@ class _IsolateLink {
       if (!_closed) {
         port.send(_IsolateErrorResponse(request.id, error, stackTrace));
       }
+    } finally {
+      _incomingCancellations.remove(request.id);
     }
   }
 
@@ -202,6 +359,8 @@ class _IsolateLink {
   void failAllPending(Object error) {
     _closed = true;
     for (var pending in _pending.values) {
+      pending.timer?.cancel();
+      pending.timer = null;
       if (!pending.completer.isCompleted) {
         pending.completer.completeError(
             EventBusException('$error (pending event "${pending.topic}")'));
@@ -214,6 +373,11 @@ class _IsolateLink {
       }
     }
     _pings.clear();
+    for (final token in _incomingCancellations.values) {
+      token.cancel();
+    }
+    _incomingCancellations.clear();
+    remoteInterest.clear();
   }
 }
 
@@ -241,6 +405,9 @@ class EventBusIsolate extends EventBusImpl {
 
   ///true once the worker has run onInit
   bool _ready = false;
+
+  ///true when the worker termination was already accounted for
+  bool _workerGone = false;
 
   ///Completes with true once the worker has run `onInit`, or with an error when
   ///the isolate could not be spawned or onInit threw.
@@ -273,9 +440,13 @@ class EventBusIsolate extends EventBusImpl {
           'EventBusIsolate is not initialized: await waitInit before fire');
     }
     _rejectWildcardPaths(paths, 'fire');
-    var dto = EventDTO<T>(data,
-        paths: paths, arguments: arguments, separator: separator);
-    return _link.fire(dto);
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    final local = super.fire<T>(data,
+        paths: paths, separator: separator, arguments: arguments);
+    final remote = _link.remoteInterest.hasListener(topic) &&
+        _link.fire(EventDTO<T>(data, topic: topic, arguments: arguments));
+    return local || remote;
   }
 
   @override
@@ -293,10 +464,61 @@ class EventBusIsolate extends EventBusImpl {
           'EventBusIsolate is not initialized: await waitInit before request');
     }
     _rejectWildcardPaths(paths, 'request');
-    var dto = EventDTO<T>(data,
-        paths: paths, arguments: arguments, separator: separator);
-    final future = _link.request(dto);
-    return timeout == null ? await future : await future.timeout(timeout);
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    if (cancelToken?.isCancelled ?? false) {
+      throw RequestCanceledException(topic.topic);
+    }
+    if (haveHandler<T>(paths: paths, separator: separator)) {
+      return super.request<T>(data,
+          paths: paths,
+          separator: separator,
+          arguments: arguments,
+          timeout: timeout,
+          cancelToken: cancelToken);
+    }
+    if (!_link.remoteInterest.hasHandler(topic)) {
+      throw NoHandlerException(topic.topic);
+    }
+    return _link.request(
+        EventDTO<T>(data, topic: topic, arguments: arguments),
+        timeout: timeout,
+        cancelToken: cancelToken);
+  }
+
+  @override
+  void _onListenerInterestChanged(Topic topic, bool present) {
+    _link.interest(topic, listener: true, handler: false, present: present);
+  }
+
+  @override
+  void _onHandlerInterestChanged(Topic topic, bool present) {
+    _link.interest(topic, listener: false, handler: true, present: present);
+  }
+
+  @override
+  void _onModelInterestChanged(Topic topic, bool present) {
+    _link.interest(topic,
+        listener: false, handler: false, model: true, present: present);
+  }
+
+  @override
+  void _onTopicInterestRemoved(Topic topic) {
+    _link.interest(topic,
+        listener: true, handler: true, model: true, present: false);
+  }
+
+  void _sendInterestSnapshot() {
+    for (final topic in _listenerCounts.keys) {
+      _link.interest(topic, listener: true, handler: false, present: true);
+    }
+    for (final topic in _handlerCounts.keys) {
+      _link.interest(topic, listener: false, handler: true, present: true);
+    }
+    for (final topic in _modelTopics) {
+      _link.interest(topic,
+          listener: false, handler: false, model: true, present: true);
+    }
   }
 
   ///Removes the topic on this side and asks the worker to remove it too.
@@ -376,10 +598,16 @@ class EventBusIsolate extends EventBusImpl {
       return;
     }
 
+    // A ReceivePort stays open when the isolate dies: the port's onDone fires
+    // only when we close it ourselves, so the death is reported explicitly.
+    _isolate!.addOnExitListener(_receivePort!.sendPort,
+        response: _isolateExitMessage);
+
     _receivePort!.listen(
       (message) {
         if (message is SendPort) {
           _link.sendPort = message;
+          _sendInterestSnapshot();
         } else if (message is _IsolateReady) {
           _ready = true;
           _completeInitResult(true);
@@ -396,27 +624,39 @@ class EventBusIsolate extends EventBusImpl {
               message.stackTrace);
           // a broken isolate is useless: release its resources
           unawaited(dispose());
+        } else if (message == _isolateExitMessage) {
+          _onWorkerGone();
+          // the port is useless now; closing it releases the listener
+          _receivePort?.close();
         } else {
           _link.handleMessage(message);
         }
       },
       onDone: () {
-        _ready = false;
-        _link.failAllPending('worker isolate has died');
-        if (isDisposed) {
-          // we closed the isolate ourselves - this is not an error
-          _completeInitResult(false);
-        } else {
-          reportError(EventBusError(
-            kind: EventBusErrorKind.isolateDeath,
-            source: EventBusErrorSource.isolate,
-            error: EventBusException('worker isolate has died'),
-          ));
-          _completeInitError(EventBusException('worker isolate has died'));
-        }
+        _onWorkerGone();
         _receivePort = null;
       },
     );
+  }
+
+  ///Accounts for a terminated worker exactly once, whether the death came from
+  ///the exit listener or from our own explicit dispose.
+  void _onWorkerGone() {
+    if (_workerGone) return;
+    _workerGone = true;
+    _ready = false;
+    _link.failAllPending('worker isolate has died');
+    if (isDisposed) {
+      // we closed the isolate ourselves - this is not an error
+      _completeInitResult(false);
+    } else {
+      reportError(EventBusError(
+        kind: EventBusErrorKind.isolateDeath,
+        source: EventBusErrorSource.isolate,
+        error: EventBusException('worker isolate has died'),
+      ));
+      _completeInitError(EventBusException('worker isolate has died'));
+    }
   }
 }
 
@@ -435,6 +675,7 @@ void _worker(dynamic data) async {
 
   try {
     await onInit(eventBus, initialData);
+    eventBus._sendInterestSnapshot();
     sendPort.send(const _IsolateReady());
   } catch (error, stackTrace) {
     sendPort.send(_IsolateInitError(error, stackTrace));
@@ -467,9 +708,13 @@ class _EventBusForIsolate extends EventBusImpl {
       throw StateError('EventBus is disposed');
     }
     _rejectWildcardPaths(paths, 'fire');
-    var dto = EventDTO<T>(data,
-        paths: paths, arguments: arguments, separator: separator);
-    return _link.fire(dto);
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    final local = super.fire<T>(data,
+        paths: paths, separator: separator, arguments: arguments);
+    final remote = _link.remoteInterest.hasListener(topic) &&
+        _link.fire(EventDTO<T>(data, topic: topic, arguments: arguments));
+    return local || remote;
   }
 
   @override
@@ -483,10 +728,61 @@ class _EventBusForIsolate extends EventBusImpl {
       throw StateError('EventBus is disposed');
     }
     _rejectWildcardPaths(paths, 'request');
-    var dto = EventDTO<T>(data,
-        paths: paths, arguments: arguments, separator: separator);
-    final future = _link.request(dto);
-    return timeout == null ? await future : await future.timeout(timeout);
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    if (cancelToken?.isCancelled ?? false) {
+      throw RequestCanceledException(topic.topic);
+    }
+    if (haveHandler<T>(paths: paths, separator: separator)) {
+      return super.request<T>(data,
+          paths: paths,
+          separator: separator,
+          arguments: arguments,
+          timeout: timeout,
+          cancelToken: cancelToken);
+    }
+    if (!_link.remoteInterest.hasHandler(topic)) {
+      throw NoHandlerException(topic.topic);
+    }
+    return _link.request(
+        EventDTO<T>(data, topic: topic, arguments: arguments),
+        timeout: timeout,
+        cancelToken: cancelToken);
+  }
+
+  @override
+  void _onListenerInterestChanged(Topic topic, bool present) {
+    _link.interest(topic, listener: true, handler: false, present: present);
+  }
+
+  @override
+  void _onHandlerInterestChanged(Topic topic, bool present) {
+    _link.interest(topic, listener: false, handler: true, present: present);
+  }
+
+  @override
+  void _onModelInterestChanged(Topic topic, bool present) {
+    _link.interest(topic,
+        listener: false, handler: false, model: true, present: present);
+  }
+
+  @override
+  void _onTopicInterestRemoved(Topic topic) {
+    _link.interest(topic,
+        listener: true, handler: true, model: true, present: false);
+  }
+
+  void _sendInterestSnapshot() {
+    for (final topic in _listenerCounts.keys) {
+      _link.interest(topic, listener: true, handler: false, present: true);
+    }
+    for (final topic in _handlerCounts.keys) {
+      _link.interest(topic, listener: false, handler: true, present: true);
+    }
+    for (final topic in _modelTopics) {
+      _link.interest(topic,
+          listener: false, handler: false, model: true, present: true);
+    }
   }
 
   ///Removes the topic on this side and asks the main isolate to remove it too.

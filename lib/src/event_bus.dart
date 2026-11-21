@@ -356,6 +356,66 @@ mixin EventBusMixin implements EventBus {
   ///Round-robin cursor of the handler dispatcher, per node.
   final Map<EventNode, int> _handlerCursors = {};
 
+  ///Active listener and handler subscriptions per topic, used by isolate
+  ///bridges to publish interest transitions.
+  final Map<Topic, int> _listenerCounts = {};
+  final Map<Topic, int> _handlerCounts = {};
+
+  ///Topics a model bus has a node for; a remote model bus accepts fire even
+  ///without a listener because it stores the value.
+  final Set<Topic> _modelTopics = {};
+
+  ///Hooks for isolate bridges; no-op for local and transport buses.
+  void _onListenerInterestChanged(Topic topic, bool present) {}
+  void _onHandlerInterestChanged(Topic topic, bool present) {}
+  void _onModelInterestChanged(Topic topic, bool present) {}
+  void _onTopicInterestRemoved(Topic topic) {}
+
+  void _markModelTopic(Topic topic, bool present) {
+    if (!isModelBus) return;
+    if (present) {
+      if (_modelTopics.add(topic)) _onModelInterestChanged(topic, true);
+    } else if (_modelTopics.remove(topic)) {
+      _onModelInterestChanged(topic, false);
+    }
+  }
+
+  void _subscriptionAdded(Topic topic,
+      {required bool listener, required bool handler}) {
+    if (listener) {
+      final count = (_listenerCounts[topic] ?? 0) + 1;
+      _listenerCounts[topic] = count;
+      if (count == 1) _onListenerInterestChanged(topic, true);
+    }
+    if (handler) {
+      final count = (_handlerCounts[topic] ?? 0) + 1;
+      _handlerCounts[topic] = count;
+      if (count == 1) _onHandlerInterestChanged(topic, true);
+    }
+  }
+
+  void _subscriptionRemoved(Topic topic,
+      {required bool listener, required bool handler}) {
+    if (listener) {
+      final count = _listenerCounts[topic] ?? 0;
+      if (count == 1) {
+        _listenerCounts.remove(topic);
+        _onListenerInterestChanged(topic, false);
+      } else if (count > 1) {
+        _listenerCounts[topic] = count - 1;
+      }
+    }
+    if (handler) {
+      final count = _handlerCounts[topic] ?? 0;
+      if (count == 1) {
+        _handlerCounts.remove(topic);
+        _onHandlerInterestChanged(topic, false);
+      } else if (count > 1) {
+        _handlerCounts[topic] = count - 1;
+      }
+    }
+  }
+
   /// Whether [send] should create a node when the topic has none.
   ///
   /// A model bus stores every event it sends, so it creates the node. A
@@ -401,6 +461,7 @@ mixin EventBusMixin implements EventBus {
     }
     var created = createNode<T>(topic: topic);
     map[topic] = created;
+    _markModelTopic(topic, true);
     return created;
   }
 
@@ -413,7 +474,12 @@ mixin EventBusMixin implements EventBus {
     var node = _nodeFor<T>(topic);
     return _NodeStream<T>(
       node.streamControllerValue.stream,
-      () => _removeNode(topic, node),
+      () {
+        _subscriptionRemoved(topic, listener: true, handler: false);
+        _removeNode(topic, node);
+      },
+      onListen: () =>
+          _subscriptionAdded(topic, listener: true, handler: false),
     );
   }
 
@@ -488,12 +554,16 @@ mixin EventBusMixin implements EventBus {
       onError: onError,
       onDone: onDone,
       onCancel: () {
+        _subscriptionRemoved(topic,
+            listener: onEvent != null, handler: handler != null);
         host.removeSubscription(subscription);
         _removeNode(topic, node);
       },
       onBusError: reportError,
     );
     host.addSubscription(subscription);
+    _subscriptionAdded(topic,
+        listener: onEvent != null, handler: handler != null);
     if (initialData != null) {
       node.currentData = initialData;
     }
@@ -581,6 +651,7 @@ mixin EventBusMixin implements EventBus {
     if (shouldCreateNodeOnSend(topic)) {
       var created = createNode<T>(topic: topic);
       _eventsMap[topic] = created;
+      _markModelTopic(topic, true);
       return created;
     }
     return null;
@@ -650,6 +721,10 @@ mixin EventBusMixin implements EventBus {
       removed = true;
     }
     if (removed) {
+      final hadInterest = (_listenerCounts.remove(topic) ?? 0) > 0 ||
+          (_handlerCounts.remove(topic) ?? 0) > 0;
+      if (hadInterest) _onTopicInterestRemoved(topic);
+      _markModelTopic(topic, false);
       _handlerCursors.remove(node);
       unawaited(node.dispose());
     }
@@ -689,6 +764,9 @@ mixin EventBusMixin implements EventBus {
     _eventsMap.clear();
     _patternMap.clear();
     _handlerCursors.clear();
+    _listenerCounts.clear();
+    _handlerCounts.clear();
+    _modelTopics.clear();
     await Future.wait(nodes.map((e) => e.dispose()));
   }
 }
@@ -844,20 +922,23 @@ mixin _EventBusHandlersMixin on EventBusMixin {
 
   ///Dispatches a request received from another process, for example a
   ///transport. The handler is resolved exactly like a local [request].
-  Future<dynamic> handleIncomingRequest(EventDTO dto) async =>
-      _dispatchRequest(dto, incoming: true);
+  Future<dynamic> handleIncomingRequest(EventDTO dto,
+          {CancelToken? cancelToken}) async =>
+      _dispatchRequest(dto, incoming: true, cancelToken: cancelToken);
 
   ///Dispatches an event received from another isolate.
   ///
   ///A request needs a matching handler; a fire event is delivered to listeners
   ///only.
-  Future? _dispatchIncoming(EventDTO dto, {bool request = true}) {
+  Future? _dispatchIncoming(EventDTO dto,
+      {bool request = true, CancelToken? cancelToken}) {
     if (!request) {
       final matched = _dispatchToListeners(dto, incoming: true);
       _addAllEvent(dto, matched);
       return null;
     }
-    return _dispatchRequest(dto, incoming: true);
+    return _dispatchRequest(dto,
+        incoming: true, cancelToken: cancelToken);
   }
 
 }
@@ -889,10 +970,12 @@ void _rejectWildcardPaths(List<String>? paths, String operation) {
 ///an extra microtask: the source stays an ordinary asynchronous broadcast
 ///stream, and `listen` only wraps the subscription.
 class _NodeStream<T> extends Stream<T> {
-  _NodeStream(this._source, this._onCancel);
+  _NodeStream(this._source, this._onCancel, {void Function()? onListen})
+      : _onListen = onListen;
 
   final Stream<T> _source;
   final void Function() _onCancel;
+  final void Function()? _onListen;
 
   @override
   bool get isBroadcast => _source.isBroadcast;
@@ -912,6 +995,7 @@ class _NodeStream<T> extends Stream<T> {
       onDone,
       cancelOnError ?? false,
       _onCancel,
+      _onListen,
     );
   }
 }
@@ -926,14 +1010,17 @@ class _NodeSubscription<T> implements StreamSubscription<T> {
     this._onDone,
     this._cancelOnError,
     this._onCancel,
+    this._onListen,
   ) {
     _inner.onData((event) => _onData?.call(event));
     _inner.onError(_handleError);
     _inner.onDone(() => _onDone?.call());
+    _onListen?.call();
   }
 
   final StreamSubscription<T> _inner;
   final void Function() _onCancel;
+  final void Function()? _onListen;
   final bool _cancelOnError;
 
   void Function(T event)? _onData;

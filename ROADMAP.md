@@ -106,7 +106,7 @@ invoked. A model bus still stores the value.
 |---|---|---:|---|
 | M0 | ADRs, Web spike, local verification | 12–17 | Decisions frozen; local verification green |
 | M1 | Core subscription model, request lifecycle, errors, rxdart removal | 34–46 | Task matrix and acceptance criteria pass |
-| M2 | Isolate interest sync, `fire`/`request` semantics, cancellation across the bridge | 15–22 | Isolate matrix passes; no stale-true `fire` |
+| M2 | Isolate interest sync, `fire`/`request` semantics, cancellation across the bridge | 15–22 | Isolate matrix passes; no stale-true `fire`; worker death clears interest (restart re-sync in M3) |
 | M3 | WorkerPool and supervision (including whole-chain Layers restart) | 22–30 | Every pool strategy and restart scenario proven |
 | M4 | Observability, metrics, correlation, error monitor | 13–19 | Overhead budget met; metrics consistent |
 | M5 | Web compatibility and adapter 0.2.0 | 7–12 | Core tests on VM and Chrome pass; adapters compile |
@@ -157,13 +157,13 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 
 | ID | Task | PD | Depends on | Status |
 |---|---|---:|---|---|
-| E2-01 | Interest model: listener/handler, exact/pattern, protocol messages | 2.5 | E1-13, E0-05 | todo |
-| E2-02 | Interest sync on register/cancel/remove; initial handshake and `waitInit` | 3 | E2-01 | todo |
-| E2-03 | `fire`: local delivery + remote send on listener interest; new return semantics | 2 | E2-02 | todo |
-| E2-04 | `request`: local handler first, remote handler interest, immediate `NoHandlerException` | 2 | E2-02 | todo |
-| E2-05 | Cancellation across the bridge: `_IsolateCancel`, queue removal, discarded response | 3 | E1-08, E2-04 | todo |
-| E2-06 | Resync after worker death/restart, generation counter | 2 | E2-02 | todo |
-| E2-07 | Test matrix: local/remote/both/none, patterns, model bus, cancellation, restart | 4 | E2-03..E2-06 | todo |
+| E2-01 | Interest model: listener/handler, exact/pattern, protocol messages | 2.5 | E1-13, E0-05 | done |
+| E2-02 | Interest sync on register/cancel/remove; initial handshake and `waitInit` | 3 | E2-01 | done |
+| E2-03 | `fire`: local delivery + remote send on listener interest; new return semantics | 2 | E2-02 | done |
+| E2-04 | `request`: local handler first, remote handler interest, immediate `NoHandlerException` | 2 | E2-02 | done |
+| E2-05 | Cancellation across the bridge: `_IsolateCancel`, queue removal, discarded response | 3 | E1-08, E2-04 | done |
+| E2-06 | Worker death detection (`addOnExitListener`), pending failure, remote interest cleared; generation-based re-sync moves to E3-06 (restart does not exist yet) | 2 | E2-02 | done |
+| E2-07 | Test matrix: local/remote/both/none, patterns, model bus, cancellation, restart | 4 | E2-03..E2-06 | done |
 
 ### E3 — WorkerPool and supervision (22–30 PD)
 
@@ -253,8 +253,10 @@ Parallelisable pairs:
 * `request` with no handler on either side throws `NoHandlerException` immediately.
 * A local handler wins over a remote one.
 * Cancelling a request on the main side removes it from the worker queue if not dispatched.
-* Interest is resynced after a worker restart; no stale-true `fire` after a listener is gone
-  (best effort, documented).
+* Worker death is detected through `Isolate.addOnExitListener`; pending requests fail with
+  `EventBusException` and the remote interest registry is cleared. Generation-based re-sync after a
+  restart is E3-06, because restart itself is M3.
+* No stale-true `fire` after a listener is gone (best effort, documented).
 
 ### M3
 

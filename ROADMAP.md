@@ -6,17 +6,19 @@ decisions, tasks and estimates. Update the `Status` column as work progresses.
 Last updated: 2026-11-21.
 
 **M0 status: completed 2026-11-21.**
-ADRs: [doc/decisions/](doc/decisions/README.md). CI: [.github/workflows/ci.yml](.github/workflows/ci.yml).
+ADRs: [doc/decisions/](doc/decisions/README.md).
 Web spike results: [ADR-0008](doc/decisions/0008-library-layout-web-rxdart-migration.md).
-Local equivalents of the CI jobs were run: core 152 tests, transport 26, NATS 42 (+10 integration
-skipped without a broker), MQTT 32 (+7 skipped), Chrome smoke 2 tests. The GitHub run itself needs a
-push.
+Local verification was run: core 152 tests, transport 26, NATS 42 (+10 integration skipped without
+a broker), MQTT 32 (+7 skipped), Chrome smoke 2 tests, analyze clean (12 pre-existing info),
+coverage and benchmark smoke commands exercised. **This project has no CI**; every milestone is
+verified locally with the commands in §12.
 
 ## 1. Estimate method
 
 * Estimates are **ideal engineer-days (PD)** for one experienced Dart developer.
 * They include implementation, unit tests and documentation of the task itself.
-* They exclude code review, PR waiting, CI flakiness, broker setup and release logistics.
+* They exclude code review, manual PR review, local environment variance, broker setup and release
+  logistics.
 * The planning range is the task range; a 20% contingency is added at milestone level.
 * The total is deliberately split into epics so that scope can be cut without rewriting the plan.
 
@@ -93,7 +95,7 @@ invoked. A model bus still stores the value.
 
 | Milestone | Scope | Estimate (PD) | Exit criteria |
 |---|---|---:|---|
-| M0 | ADRs, Web spike, CI scaffolding | 12–17 | Decisions frozen; CI green on 3.x |
+| M0 | ADRs, Web spike, local verification | 12–17 | Decisions frozen; local verification green |
 | M1 | Core subscription model, request lifecycle, errors, rxdart removal | 34–46 | Task matrix and acceptance criteria pass |
 | M2 | Isolate interest sync, `fire`/`request` semantics, cancellation across the bridge | 15–22 | Isolate matrix passes; no stale-true `fire` |
 | M3 | WorkerPool and supervision (including whole-chain Layers restart) | 22–30 | Every pool strategy and restart scenario proven |
@@ -119,7 +121,7 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 | E0-07 | ADR-7: WorkerPool strategies, supervision, whole-chain Layers restart — [ADR-0007](doc/decisions/0007-worker-pool-and-supervision.md) | 2 | — | done |
 | E0-08 | ADR-8: library layout, Web, rxdart removal, migration policy — [ADR-0008](doc/decisions/0008-library-layout-web-rxdart-migration.md) | 1 | — | done |
 | E0-09 | Web spike: `dart compile js` succeeds, local bus passes Chrome, isolate APIs fail at runtime — split not required; see ADR-0008 | 1 | — | done |
-| E0-10 | CI scaffolding: analyze, VM tests, Chrome tests, NATS/MQTT docker, coverage, benchmark smoke — [.github/workflows/ci.yml](.github/workflows/ci.yml) | 2 | — | done |
+| E0-10 | Local verification harness: analyze, VM tests, Chrome smoke, package tests, optional broker tests, coverage, benchmark smoke; commands in §12 | 2 | — | done |
 
 ### E1 — Core subscription model (34–46 PD)
 
@@ -184,7 +186,7 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 |---|---|---:|---|---|
 | E5-01 | Web capability guard: detect web, throw `UnsupportedError` in isolate APIs; no library split unless a concrete failure appears (ADR-0008) | 2 | E0-09, E1-14 | todo |
 | E5-02 | `EventBusCapabilities.isolateSupported` capability flag | 1 | E5-01 | todo |
-| E5-03 | Core tests on Chrome (start with `test/web_smoke_test.dart`) and CI matrix | 2 | E5-01 | todo |
+| E5-03 | Core tests on Chrome (start with `test/web_smoke_test.dart`) and local check command | 2 | E5-01 | todo |
 | E5-04 | Adapters 0.2.0 against core `^4.0.0`; compile and tests | 3 | E1-12 | todo |
 | E5-05 | NATS/MQTT over WebSocket checks and documentation | 2 | E5-04 | todo |
 
@@ -318,3 +320,65 @@ D19 Layers restart, rxdart removal — together they are the reason for 4.0.
 * Every milestone closes with all its acceptance criteria quoted in the session report.
 * ADRs are updated before code when a decision changes; this file links the decision IDs.
 * Release is a separate task (E6-05/E6-06); no version bump before the full milestone is green.
+
+## 12. Local verification
+
+This project has no CI. Every milestone is closed with these commands run locally.
+
+### Core and web
+
+```bash
+dart pub get
+dart analyze
+dart test
+dart test -p chrome test/web_smoke_test.dart
+```
+
+### Packages
+
+```bash
+(cd packages/event_bus_arch_transport && dart test)
+(cd packages/event_bus_arch_nats && dart test)
+(cd packages/event_bus_arch_mqtt && dart test)
+```
+
+Without a broker, the NATS/MQTT integration tests are reported as skipped. To run them locally,
+start the brokers and set the environment variable for the shell:
+
+```powershell
+# PowerShell
+$env:NATS_URL = 'nats://127.0.0.1:4222'
+$env:MQTT_URL = 'mqtt://127.0.0.1:1883'
+```
+
+```bash
+# POSIX
+NATS_URL=nats://127.0.0.1:4222 MQTT_URL=mqtt://127.0.0.1:1883
+```
+
+The local brokers used for development are NATS 2.15.1 and NanoMQ 0.25.6 (started with
+`-s 1024`, because the default MQTT user-property size is 32).
+
+### Coverage
+
+```bash
+dart test --coverage=coverage
+dart pub global activate coverage
+dart pub global run coverage:format_coverage \
+  --lcov \
+  --in=coverage \
+  --out=coverage/lcov.info \
+  --packages=.dart_tool/package_config.json \
+  --report-on=lib
+```
+
+### Benchmark smoke
+
+```bash
+dart run benchmark/load_benchmark.dart --seconds=1 --rates=1000,10000 --warmup-ms=200
+```
+
+### Milestone close record
+
+Record the command output (test counts, skipped integration counts, analyze result) in the session
+report and in the milestone status line at the top of this file.

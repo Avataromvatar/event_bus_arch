@@ -13,16 +13,14 @@ a broker), MQTT 32 (+7 skipped), Chrome smoke 2 tests, analyze clean (12 pre-exi
 coverage and benchmark smoke commands exercised. **This project has no CI**; every milestone is
 verified locally with the commands in §12.
 
-**M1 status: implementation complete 2026-11-21; E1-16 benchmark remains.**
-Done: E1-01…E1-15 except E1-16 — listener/handler subscriptions, per-subscription queues and
-concurrency, tier dispatch with round-robin, request timeout/cancellation, dual callbacks,
-transport single-answer resolution, removal of the old handler API, `Scope` on `latest(1)`,
-`EventBusError`/`errors`/`EventBusErrorMonitor`, D14 `fire` semantics, rxdart removal. Core suite
-197 tests, transport 27, NATS 42 (+10 integration skipped), MQTT 32 (+7 skipped), Chrome smoke 3.
-Benchmark smoke:
-no event loss; local fire unchanged, local request p50 ~0.010 ms at 10k/s (new entry/dispatch
-cost is visible but small).
-Remaining in M1: E1-16 — queue-overhead and memory measurements, before/after table.
+**M1 status: completed 2026-11-21.**
+Done: E1-01…E1-16 — listener/handler subscriptions, per-subscription queues and concurrency,
+tier dispatch with round-robin, request timeout/cancellation, dual callbacks, transport
+single-answer resolution, removal of the old handler API, `Scope` on `latest(1)`,
+`EventBusError`/`errors`/`EventBusErrorMonitor`, D14 `fire` semantics, rxdart removal,
+subscription/queue/memory benchmarks. Core suite 197 tests, transport 27, NATS 42 (+10 integration
+skipped), MQTT 32 (+7 skipped), Chrome smoke 3. Benchmark smoke: no event loss; local fire
+unchanged, local request p50 ~0.010 ms at 10k/s (new entry/dispatch cost is visible but small).
 
 ## 1. Estimate method
 
@@ -153,7 +151,7 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 | E1-13 | `EventBusError` envelope, `EventBus.errors`, `EventBusErrorMonitor` skeleton | 3 | E0-04 | done |
 | E1-14 | Remove rxdart: native `doOnCancel` replacement, export and dependency removal | 1 | E1-02 | done |
 | E1-15 | Test matrix: buffers, queues, tiers, pause, cancellation, dual callbacks, lifecycle | 5 | E1-01..E1-14 | done |
-| E1-16 | Benchmarks: delivery overhead, queue overhead, memory, before/after | 1.5 | E1-15 | todo |
+| E1-16 | Benchmarks: delivery overhead, queue overhead, memory, before/after | 1.5 | E1-15 | done |
 
 ### E2 — Isolate semantics (15–22 PD)
 

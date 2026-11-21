@@ -127,6 +127,44 @@ If a sustained rate is above what the consumer can process, add bounded
 concurrency, a request timeout, batching/coalescing, or a transport with flow
 control. The bus itself will not apply backpressure for you.
 
+## 4.0 subscription benchmark
+
+`benchmark/subscription_benchmark.dart` measures the listener/handler subscription path added in
+4.0.0:
+
+```text
+dart run benchmark/subscription_benchmark.dart
+```
+
+Snapshot on the same machine as the load benchmark (Dart 3.14.0, Windows, 12 CPUs, JIT):
+
+| scenario | events | elapsed ms | events/s | note |
+|---|---:|---:|---:|---|
+| legacy listen | 100000 | 193 | 518135 | callback count reached |
+| subscribeEvents async | 100000 | 145 | 689655 | callback count reached |
+| subscribeEvents sync | 100000 | 139 | 719424 | callback count reached |
+| request sequential | 20000 | 91 | 219780 | one handler, concurrency 1 |
+| request burst | 2000 | 22 | 90909 | concurrency 1, queue 2000 |
+| request burst | 2000 | 20 | 100000 | concurrency 4, queue 2000 |
+| request busy | 2000 | 18 | 111111 | 1999 BusyException, no queue |
+| memory bound | 100000 | 0 | - | capacity 16: buffered=16000, dropped=84000, rssDelta≈22 MiB |
+| memory bound | 100000 | 0 | - | unbounded: buffered=100000, dropped=0, rssDelta=0 (RSS is noisy) |
+
+Notes:
+
+* The `subscribeEvents` path is slightly faster than the legacy `listen` path in this run because
+  the legacy path still goes through a broadcast controller plus a subscription wrapper. The sync
+  mode is the cheapest, as expected, and is opt-in.
+* `request sequential` now includes the handler-subscription dispatch and the `_RequestEntry`
+  timer/cancellation setup. Compare it with the pre-4.0 `local request` row in the load benchmark:
+  p50 grew from about 0.002 ms to about 0.010 ms at 10,000/s, while the absolute cost remains in
+  the low microseconds. That is the price of per-subscription queues and request lifecycle.
+* The memory rows report the logical buffer occupancy (the reliable number) and an RSS delta (JIT
+  and GC noise; `0` means the delta was below the measurement granularity, not that no memory was
+  used). Capacity bounds each subscription independently: `buffered == capacity`, and overflow is
+  counted in `dropped`.
+* These are JIT numbers; re-run on the target machine and with `dart compile exe` before sizing.
+
 ## Reading the numbers
 
 * All events were delivered and no sequence number was lost or duplicated in

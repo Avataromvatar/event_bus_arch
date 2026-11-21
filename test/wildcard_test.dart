@@ -94,7 +94,7 @@ void main() {
       final bus = EventBus();
       String? seenTopic;
       int? seenLast;
-      bus.handlers.setHandler<int>(
+      bus.subscribeEvents<int>(
           paths: ['sensor', '*'],
           handler: (dto, lastData) async {
             seenTopic = dto.topic.topic;
@@ -115,9 +115,9 @@ void main() {
 
     test('an exact handler wins over a pattern handler', () async {
       final bus = EventBus();
-      bus.handlers.setHandler<int>(
+      bus.subscribeEvents<int>(
           paths: ['sensor', '*'], handler: (dto, lastData) async => 'pattern');
-      bus.handlers.setHandler<int>(
+      bus.subscribeEvents<int>(
           paths: ['sensor', 'temp'], handler: (dto, lastData) async => 'exact');
 
       expect(await bus.request<int>(1, paths: ['sensor', 'temp']), 'exact');
@@ -126,20 +126,20 @@ void main() {
 
     test('the most specific pattern handler wins', () async {
       final bus = EventBus();
-      bus.handlers.setHandler<int>(
+      bus.subscribeEvents<int>(
           paths: ['*', '*'], handler: (dto, lastData) async => 'short');
-      bus.handlers.setHandler<int>(
+      bus.subscribeEvents<int>(
           paths: ['sensor', '*'], handler: (dto, lastData) async => 'long');
 
       expect(await bus.request<int>(1, paths: ['sensor', 'temp']), 'long');
       await bus.dispose();
     });
 
-    test('removeHandler removes a pattern responder', () async {
+    test('cancelling a pattern responder removes it', () async {
       final bus = EventBus();
-      bus.handlers.setHandler<int>(
+      final handler = bus.subscribeEvents<int>(
           paths: ['sensor', '*'], handler: (dto, lastData) async => 1);
-      bus.handlers.removeHandler<int>(paths: ['sensor', '*']);
+      await handler.cancel();
 
       expect(bus.haveHandler<int>(paths: ['sensor', '*']), isFalse);
       await expectLater(
@@ -147,20 +147,6 @@ void main() {
         throwsA(isA<NoHandlerException>()),
       );
       await bus.dispose();
-    });
-
-    test('addAllHandlerFromOtherBus copies a pattern handler', () async {
-      final source = EventBus();
-      final target = EventBus();
-      source.handlers.setHandler<int>(
-          paths: ['sensor', '*'],
-          handler: (dto, lastData) async => dto.data * 2);
-
-      target.handlers.addAllHandlerFromOtherBus(source);
-
-      expect(await target.request<int>(3, paths: ['sensor', 'temp']), 6);
-      await source.dispose();
-      await target.dispose();
     });
   });
 }

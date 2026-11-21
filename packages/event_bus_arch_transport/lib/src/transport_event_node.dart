@@ -121,12 +121,14 @@ class TransportEventNode<T>
   bool get hasListenerSubscriptions => _local.hasListenerSubscriptions;
 
   @override
-  void deliver(EventDTO dto) {
+  bool deliver(EventDTO dto) {
     final serializer = this.serializer;
+    final published = serializer != null;
     if (serializer != null) {
       _publish(dto, serializer);
     }
-    _local.deliver(dto);
+    final local = _local.deliver(dto);
+    return published || local;
   }
 
   ///Delivers an event that came from the broker to local listeners. It is

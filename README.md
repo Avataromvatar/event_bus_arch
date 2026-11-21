@@ -57,7 +57,7 @@ Future<void> main() async {
 
   // Handle: the handler returns the response; request waits for it.
   // lastData is the PREVIOUS value of this topic, dto.data is the current one.
-  bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+  bus.subscribeEvents<String>(handler: (dto, lastData) async {
     return 'processed: ${dto.data}';
   });
 
@@ -77,7 +77,7 @@ There are exactly two ways to publish an event, and they have different contract
 | | `fire<T>(...)` | `request<T>(...)` |
 |---|---|---|
 | Purpose | one-way event | ask a handler for a result |
-| Invokes `setHandler` responders | **no** — listeners only | **yes** — exactly one handler |
+| Invokes handler subscriptions | **no** — listeners only | **yes** — one handler |
 | Return value | `bool` — was the event accepted | `Future<dynamic>` — the handler's result |
 | No listener / no handler | `false`, not an error | throws `NoHandlerException` |
 | Waits | no, returns immediately | yes, until the handler returns; optional `timeout` |
@@ -91,7 +91,7 @@ final bus = EventBus();
 bus.subscribe<int>(paths: ['sensor', '*'], onData: (v) => print('event: $v'));
 
 // A handler is a request responder; fire never calls it.
-bus.handlers.setHandler<int>(
+bus.subscribeEvents<int>(
   paths: ['sensor', 'temp'],
   handler: (dto, lastData) async => dto.data * 2,
 );
@@ -127,7 +127,8 @@ bus.subscribe<Order>(paths: ['warehouse', 'in'], onData: (order) => print(order)
 
 `paths` selects the topic; `arguments` are delivered to the handler as `dto.arguments` but do not
 affect routing. Because the type is part of the address, `request<int>` and a handler
-registered with `setHandler<num>` are **different topics** — always be explicit with type
+registered with `subscribeEvents<num>(handler: ...)` are **different topics** — always be explicit
+with the type
 arguments.
 
 A path token must not contain the separator (`.` by default): `paths: ['a.b']` and
@@ -140,7 +141,7 @@ final bus = EventBusImpl(false)..defaultTopicPathSeparator = '/';
 
 ### Wildcards
 
-`listen`, `subscribe` and `setHandler` accept wildcard path tokens:
+`listen`, `subscribe` and `subscribeEvents` accept wildcard path tokens:
 
 - `*` matches exactly one path token: `int.sensor.*`;
 - `>` matches one or more trailing tokens and must be the last token:
@@ -169,7 +170,7 @@ bus.fire<int>(24, paths: ['sensor', 'room', 'temp']);   // true → subtree: 24
 The same pattern can answer requests when it is registered as a handler:
 
 ```dart
-bus.handlers.setHandler<int>(paths: ['sensor', '*'],
+bus.subscribeEvents<int>(paths: ['sensor', '*'],
     handler: (dto, lastData) async => dto.data * 2);
 await bus.request<int>(21, paths: ['sensor', 'temp']);   // 42
 ```
@@ -190,7 +191,7 @@ last matching value; `currentData(concrete)` reads only the exact node.
 | `request` without a handler | throws `NoHandlerException` | throws `NoHandlerException` |
 | Forgetting one topic | automatic after the last listener | explicit `removeTopic<T>(paths: [...])` |
 
-A handler registered with `setHandler` is a request responder: `request` invokes it, while
+A handler subscription is a request responder: `request` invokes it, while
 `fire` only notifies listeners. `removeTopic` works on both flavours, closes the listeners of the
 topic and, on a transport bus, cancels the broker subscription; a later `fire` recreates the
 node.
@@ -218,7 +219,7 @@ Future<void> main() async {
 // runs inside the worker isolate — must be a top-level or static function
 Future<void> _worker(EventBus bus, Object? initialData) async {
   await _heavyInit();                                  // async init is fine
-  bus.handlers.setHandler<int>(handler: (dto, lastData) async {
+  bus.subscribeEvents<int>(handler: (dto, lastData) async {
     final m = int.tryParse(dto.arguments?['multiplier'] ?? '1') ?? 1;
     return dto.data * m;
   });
@@ -351,7 +352,7 @@ The address model changed; this is a breaking release.
   invokes handlers
 - **`lastData` was renamed `currentData`** (`bus.currentData<T>()`, `EventNode.currentData`)
 - **Local wildcards**: `*` matches one path token, `>` one or more trailing tokens;
-  `listen`/`subscribe`/`setHandler` accept patterns, `fire`/`request` require concrete topics
+  `listen`/`subscribe`/`subscribeEvents` accept patterns, `fire`/`request` require concrete topics
 - The type in the address is `'$T'` normalised to a subject-safe token —
   no lowercasing, no percent-encoding (`List<int>` → `List(int)`)
 - `topic.topic` is the single routing key (`fullTopic`/`topicWithFragment` are gone)

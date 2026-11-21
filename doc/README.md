@@ -29,7 +29,7 @@ final bus = EventBus();                        // or EventBus(isModelBus: true)
 final sub = bus.subscribe<String>(onData: (e) => print(e));
 
 // a handler that returns a result
-bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+bus.subscribeEvents<String>(handler: (dto, lastData) async {
   return 'processed: ${dto.data}';
 });
 
@@ -46,7 +46,8 @@ await bus.dispose();
 
 What you need to know right away:
 
-1. **The type is part of the address.** `request<int>` and `setHandler<num>` are different topics
+1. **The type is part of the address.** `request<int>` and `subscribeEvents<num>(handler: ...)`
+   are different topics
    ([07-caveats.md, item 1](07-caveats.md#1-the-type-in-a-topic-is-a-static-type-parameter)).
 2. **`lastData` in a handler is the previous value** of the topic, while `dto.data` is the current one.
 3. **`request` is a sync point:** by the time `await bus.request(...)` returns, listeners have
@@ -64,9 +65,9 @@ What you need to know right away:
 
 * Version: 3.1.0, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`; rxdart is no longer
   re-exported.
-* Tests: 187 tests on the VM (plus 3 browser smoke tests) in `test/` (bus, nodes, subscriptions,
-  handlers, isolates and layers, model-bus flags, FSM, Scope/Command, Topic/EventDTO, wildcards) —
-  they pass. Transport suites: `packages/event_bus_arch_transport` (27),
+* Tests: 197 tests on the VM (plus 3 browser smoke tests) in `test/` (bus, nodes, subscriptions,
+  handlers, errors, isolates and layers, model-bus flags, FSM, Scope/Command, Topic/EventDTO,
+  wildcards) — they pass. Transport suites: `packages/event_bus_arch_transport` (27),
   `packages/event_bus_arch_nats` (52 with a live server), `packages/event_bus_arch_mqtt` (39 with a live
   broker).
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`

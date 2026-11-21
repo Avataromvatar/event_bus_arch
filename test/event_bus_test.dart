@@ -15,7 +15,7 @@ void main() {
       final Completer<String> completer = Completer<String>();
 
       // Set up handler
-      (bus as EventBusHandlers).setHandler<String>(
+      bus.subscribeEvents<String>(
         handler: (dto, lastData) async {
           return 'handled';
         },
@@ -42,7 +42,7 @@ void main() {
       final results = <String>[];
 
       // Set up handler
-      (bus as EventBusHandlers).setHandler<String>(
+      bus.subscribeEvents<String>(
         handler: (dto, lastData) async {
           return 'handled';
         },
@@ -75,7 +75,7 @@ void main() {
       final bus = EventBus();
 
       // Set initial data
-      (bus as EventBusHandlers).setHandler<String>(
+      bus.subscribeEvents<String>(
         handler: (dto, lastData) async {
           return 'handled';
         },
@@ -96,7 +96,7 @@ void main() {
       expect(bus.haveHandler<String>(), false);
 
       // Set handler
-      (bus as EventBusHandlers).setHandler<String>(
+      bus.subscribeEvents<String>(
         handler: (dto, lastData) async {
           return 'handled';
         },
@@ -123,11 +123,11 @@ void main() {
       subscription.cancel();
     });
 
-    test('Should remove handler', () {
+    test('Should remove handler', () async {
       final bus = EventBus();
 
       // Set handler
-      (bus as EventBusHandlers).setHandler<String>(
+      final handler = bus.subscribeEvents<String>(
         handler: (dto, lastData) async {
           return 'handled';
         },
@@ -137,7 +137,7 @@ void main() {
       expect(bus.haveHandler<String>(), true);
 
       // Remove handler
-      (bus as EventBusHandlers).removeHandler<String>();
+      await handler.cancel();
 
       // Should not have handler anymore
       expect(bus.haveHandler<String>(), false);
@@ -147,7 +147,7 @@ void main() {
       final bus = EventBus();
 
       // Set up handler that returns a result
-      (bus as EventBusHandlers).setHandler<int>(
+      bus.subscribeEvents<int>(
         handler: (dto, lastData) async {
           return 42;
         },
@@ -176,7 +176,7 @@ void main() {
       final bus = EventBus();
 
       // Set up handler for specific path
-      (bus as EventBusHandlers).setHandler<String>(
+      bus.subscribeEvents<String>(
         paths: ['test'],
         handler: (dto, lastData) async {
           return 'handled';
@@ -195,7 +195,7 @@ void main() {
       Map<String, String>? seen;
 
       // Set up handler
-      (bus as EventBusHandlers).setHandler<String>(
+      bus.subscribeEvents<String>(
         handler: (dto, lastData) async {
           seen = dto.arguments;
           return 'handled';
@@ -216,7 +216,7 @@ void main() {
       final bus = EventBus();
 
       // Set up handler for a path of two tokens
-      (bus as EventBusHandlers).setHandler<String>(
+      bus.subscribeEvents<String>(
         paths: ['specific', 'path'],
         handler: (dto, lastData) async {
           return 'handled';
@@ -234,13 +234,13 @@ void main() {
       final bus = EventBus();
       final received = <String>[];
 
-      (bus as EventBusHandlers).setHandler<String>(
+      bus.subscribeEvents<String>(
         paths: ['a'],
         handler: (dto, lastData) async {
           received.add('a: ${dto.data}');
         },
       );
-      bus.handlers.setHandler<String>(
+      bus.subscribeEvents<String>(
         paths: ['b'],
         handler: (dto, lastData) async {
           received.add('b: ${dto.data}');
@@ -257,7 +257,7 @@ void main() {
       final bus = EventBus();
       var called = false;
 
-      (bus as EventBusHandlers).setHandler<String>(
+      bus.subscribeEvents<String>(
         paths: ['a', 'b'],
         separator: '/',
         handler: (dto, lastData) async {
@@ -282,7 +282,7 @@ void main() {
       (bus as EventBusImpl).defaultTopicPathSeparator = '/';
       var called = false;
 
-      bus.handlers.setHandler<String>(
+      bus.subscribeEvents<String>(
         paths: ['a', 'b'],
         handler: (dto, lastData) async {
           called = true;

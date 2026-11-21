@@ -22,7 +22,7 @@ void main() {
       final isolateBus = EventBusIsolate(
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
-          (bus as EventBusHandlers).setHandler<String>(
+          bus.subscribeEvents<String>(
               handler: (dto, lastData) async {
             return 'Processed: ${dto.data}';
           });
@@ -57,7 +57,7 @@ void main() {
       final isolateBus = EventBusIsolate(
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
-          (bus as EventBusHandlers).setHandler<int>(
+          bus.subscribeEvents<int>(
               handler: (dto, lastData) async {
             return dto.data * 2;
           });

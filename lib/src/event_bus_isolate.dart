@@ -303,8 +303,8 @@ class EventBusIsolate extends EventBusImpl {
   ///
   ///The call is synchronous for the main-side bus; the worker applies the
   ///delete in message order before the next event sent to it. A handler
-  ///registered in the worker for this topic stays; use
-  ///[EventBusHandlers.removeHandler] on the worker bus for a full forget.
+  ///registered in the worker for this topic stays; cancel its handler
+  ///subscription on the worker bus for a full forget.
   @override
   bool removeTopic<T>({List<String>? paths, String? separator}) {
     if (isDisposed) {
@@ -365,6 +365,12 @@ class EventBusIsolate extends EventBusImpl {
       _isolate = await Isolate.spawn(
           _worker, [_receivePort!.sendPort, onInit, initialData, isModelBus]);
     } catch (error, stackTrace) {
+      reportError(EventBusError(
+        kind: EventBusErrorKind.isolateInit,
+        source: EventBusErrorSource.isolate,
+        error: error,
+        stackTrace: stackTrace,
+      ));
       _completeInitError(
           EventBusException('Isolate.spawn failed: $error'), stackTrace);
       return;
@@ -379,6 +385,12 @@ class EventBusIsolate extends EventBusImpl {
           _completeInitResult(true);
         } else if (message is _IsolateInitError) {
           _ready = false;
+          reportError(EventBusError(
+            kind: EventBusErrorKind.isolateInit,
+            source: EventBusErrorSource.isolate,
+            error: message.error,
+            stackTrace: message.stackTrace,
+          ));
           _completeInitError(
               EventBusException('worker onInit failed: ${message.error}'),
               message.stackTrace);
@@ -395,6 +407,11 @@ class EventBusIsolate extends EventBusImpl {
           // we closed the isolate ourselves - this is not an error
           _completeInitResult(false);
         } else {
+          reportError(EventBusError(
+            kind: EventBusErrorKind.isolateDeath,
+            source: EventBusErrorSource.isolate,
+            error: EventBusException('worker isolate has died'),
+          ));
           _completeInitError(EventBusException('worker isolate has died'));
         }
         _receivePort = null;

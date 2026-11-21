@@ -77,19 +77,19 @@ Future<void> _workerInit(EventBus bus, Object? initialData) async {
     fireLatencies.add(latency);
   });
 
-  bus.handlers.setHandler<_RequestEvent>(
+  bus.subscribeEvents<_RequestEvent>(
     handler: (dto, lastData) async => dto.data.seq,
   );
-  bus.handlers.setHandler<_CalibrateRequest>(
+  bus.subscribeEvents<_CalibrateRequest>(
     handler: (dto, lastData) async => workerClock.elapsedMicroseconds,
   );
-  bus.handlers.setHandler<_SetOffsetRequest>(
+  bus.subscribeEvents<_SetOffsetRequest>(
     handler: (dto, lastData) async {
       offsetUs = dto.data.offsetUs;
       return null;
     },
   );
-  bus.handlers.setHandler<_ResetFireRequest>(
+  bus.subscribeEvents<_ResetFireRequest>(
     handler: (dto, lastData) async {
       fireLatencies.clear();
       fireSeqs.clear();
@@ -97,13 +97,13 @@ Future<void> _workerInit(EventBus bus, Object? initialData) async {
       return null;
     },
   );
-  bus.handlers.setHandler<_CountFireRequest>(
+  bus.subscribeEvents<_CountFireRequest>(
     handler: (dto, lastData) async => fireReceived,
   );
-  bus.handlers.setHandler<_CollectFireRequest>(
+  bus.subscribeEvents<_CollectFireRequest>(
     handler: (dto, lastData) async => List<int>.of(fireLatencies),
   );
-  bus.handlers.setHandler<_FireIntegrityRequest>(
+  bus.subscribeEvents<_FireIntegrityRequest>(
     handler: (dto, lastData) async => <int>[fireReceived, fireSeqs.length],
   );
 }
@@ -318,7 +318,7 @@ Future<_Result> _localRequest(
   Stopwatch clock,
 ) async {
   final bus = EventBus();
-  bus.handlers.setHandler<_RequestEvent>(
+  bus.subscribeEvents<_RequestEvent>(
     handler: (dto, lastData) async => dto.data.seq,
   );
   final samples = <int>[];

@@ -98,7 +98,7 @@ void main() {
           .listen<int>(paths: ['sensor', '*'])
           .listen(values.add);
       addTearDown(subscription.cancel);
-      busB.setHandler<int>(
+      busB.subscribeEvents<int>(
         paths: ['sensor', 'double'],
         handler: (dto, lastData) async => dto.data * 2,
       );
@@ -121,7 +121,7 @@ void main() {
           .listen<int>(paths: ['sensor', '*'])
           .listen(values.add);
       addTearDown(subscription.cancel);
-      busB.setHandler<int>(
+      busB.subscribeEvents<int>(
         paths: ['sensor', 'temp'],
         handler: (dto, lastData) async => dto.data,
       );

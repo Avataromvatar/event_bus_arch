@@ -11,9 +11,9 @@ add it to your own dependencies if you need its operators.
 * [Typedefs](#typedefs)
 * [Topic](#topic) / [TopicImpl](#topicimpl) / [TopicPattern](#topicpattern)
 * [EventDTO](#eventdto) / [EventDTOImpl](#eventdtoimpl)
-* [EventNode](#eventnode) / [EventSubscription](#eventsubscription) / [RequestHandler](#requesthandler)
-* [EventBus](#eventbus) / [EventBusHandlers](#eventbushandlers) / [EventBusImpl](#eventbusimpl) /
-  [EventBusMixin](#eventbusmixin) / [EventBusHandlersMixin](#eventbushandlersmixin)
+* [EventNode](#eventnode) / [EventSubscription](#eventsubscription)
+* [EventBus](#eventbus) / [EventBusImpl](#eventbusimpl) / [EventBusMixin](#eventbusmixin)
+* [EventBusError](#eventbuserror) / [EventBusErrorMonitor](#eventbuserrormonitor)
 * [EventBusIsolate](#eventbusisolate)
 * [Layer](#layer) / [Layers](#layers)
 * [FSM](#fsm)
@@ -306,28 +306,6 @@ class RequestCanceledException extends EventBusException;
 `request(..., timeout: ..., cancelToken: ...)` uses both; the first of response, timeout and
 cancellation wins.
 
-## RequestHandler
-
-`class RequestHandler` — a type-erased responder registration stored by the bus. Its closures
-allow `request` and incoming isolate/transport requests to be dispatched without knowing `T`
-statically.
-
-> **4.0 transition:** the dispatcher now uses `EventSubscription` handler capabilities. This
-> class, `EventBusHandlers` and `setHandler` remain only as a temporary compatibility shim and
-> are removed by task E1-10; use `subscribeEvents(handler: ...)`.
-
-```dart
-RequestHandler({
-  required Topic topic,
-  required bool Function(Object? data) accepts,
-  required Future<dynamic> Function(EventDTO dto, Object? lastData) invoke,
-});
-
-final Topic topic;
-final bool Function(Object? data) accepts;
-final Future<dynamic> Function(EventDTO dto, Object? lastData) invoke;
-```
-
 ## EventBus
 
 The abstract bus interface. The factory always returns `EventBusImpl`.
@@ -337,10 +315,12 @@ factory EventBus({bool isModelBus = false});
 
 bool get isModelBus;
 String get defaultTopicPathSeparator;          // '.'; the fallback for every address parameter
-EventBusHandlers get handlers;                 // bus.handlers.setHandler(...) without a cast
 Future<void> dispose();                        // idempotent; after it the bus throws StateError
 bool get isDisposed;
-Stream<(EventDTO, bool)> get allEventStream;   // (event, whether it reached a node)
+Stream<(EventDTO, bool)> get allEventStream;   // (event, whether a listener accepted it)
+Stream<EventBusError> get errors;              // bus failures as data
+List<EventBusError> get recentErrors;          // bounded (100)
+int get suppressedErrors;                      // rate-limited errors
 
 bool fire<T>(T data, {List<String>? paths, String? separator,
                       Map<String, String>? arguments});
@@ -356,6 +336,7 @@ EventSubscription<T> subscribeEvents<T>({
   List<String>? paths, String? separator,
   EventCallback<T>? onEvent,            // listener
   Handler<T>? handler,                  // request responder
+  T? initialData,
   int handlerConcurrency = 1,
   int? requestQueueCapacity,            // default: bus.requestQueueCapacity (64)
   int? bufferCapacity,                  // null = unbounded
@@ -373,15 +354,18 @@ bool haveAvailableHandler<T>({List<String>? paths, String? separator});
 bool haveListener<T>({List<String>? paths, String? separator});
 ```
 
-`fire` returns whether a node accepted the event. `request` throws `NoHandlerException` when no
-handler accepts the data and rejects wildcard paths with `EventBusException`; `timeout` bounds the
-wait for the handler. `currentData` reads the exact node, or the pattern node when the address
-contains wildcards.
+`fire` returns true when at least one listener accepted the event, a model bus stored it, or a
+transport published it. A handler subscription alone does not make `fire` return true (D14).
+
+`request` throws `NoHandlerException` when no handler matches, `BusyException` when handlers exist
+but none has capacity, `RequestTimeoutException` on timeout and `RequestCanceledException` when its
+`CancelToken` is cancelled. Wildcard paths are rejected with `EventBusException`.
+`currentData` reads the exact node, or the pattern node when the address contains wildcards.
 
 `removeTopic` removes the node and forgets `currentData` even on a model bus and even for a
 transport node with a `KeepAliveNode` pin (the broker subscription is cancelled). It returns
-whether a node was removed. Active listeners receive `done`; a registered handler is kept, and a
-model bus recreates the node on the next `fire`, `request` or `listen`.
+whether a node was removed. Active listeners receive `done`; handler subscriptions are cancelled
+with the node. A model bus recreates the node on the next `fire`, `request` or `listen`.
 
 Every method that takes an address resolves `separator ?? defaultTopicPathSeparator`, so changing
 the field on an `EventBusImpl` changes the fallback for all of them at once:
@@ -389,48 +373,28 @@ the field on an `EventBusImpl` changes the fallback for all of them at once:
 ```dart
 final bus = EventBusImpl(false);
 bus.defaultTopicPathSeparator = '/';
-bus.handlers.setHandler<int>(paths: ['a', 'b'], handler: ...);   // int/a/b
-bus.fire<int>(1, paths: ['a', 'b']);                             // int/a/b — delivered
+bus.subscribeEvents<int>(paths: ['a', 'b'], handler: ...);   // int/a/b
+bus.fire<int>(1, paths: ['a', 'b']);                         // int/a/b — delivered
 ```
 
 `defaultTopicPathSeparator` is a **field** on `EventBusMixin`, not a setter on the interface, so a
 variable of type `EventBus` has to be cast (`(bus as EventBusImpl).defaultTopicPathSeparator = '/'`).
+`requestQueueCapacity` is a field on `EventBusMixin` in the same way.
 
-After `dispose` the `fire`/`request`/`listen`/`subscribe`/`setHandler`/`removeTopic` methods throw
-`StateError`.
-
-## EventBusHandlers
-
-A separate interface for managing handlers (accessible through `bus.handlers` or the cast
-`bus as EventBusHandlers`).
-
-```dart
-void setHandler<T>({
-  T? initialData,                              // initial value of currentData
-  List<String>? paths,                         // may contain '*' and '>'
-  String? separator,
-  required Handler<T> handler,
-});
-void removeHandler<T>({List<String>? paths, String? separator});
-void addAllHandlerFromOtherBus(EventBus fromBus);
-void removeAllHandlerPresentInOtherBus(EventBus otherBus);
-```
-
-`setHandler` creates (or reuses) the node for the topic, stores a `RequestHandler`, and optionally
-sets its `currentData`. A repeated registration for the same topic replaces the previous one.
-`removeHandler` removes the registration; the node is removed only if it has no listeners and no
-transport pin.
+After `dispose` the `fire`/`request`/`listen`/`subscribe`/`subscribeEvents`/`removeTopic` methods
+throw `StateError`.
 
 ## EventBusImpl
 
 ```dart
-class EventBusImpl with EventBusMixin, EventBusHandlersMixin {
+class EventBusImpl with EventBusMixin, /* internal dispatch mixin */ {
   EventBusImpl(bool isModelBus);
   bool get isModelBus;
 }
 ```
 
-All behavior comes from the two mixins; the class's own code only stores the flag.
+All behavior comes from the mixins; the class's own code only stores the flag. The dispatch mixin
+is private: request resolution, tier selection, round-robin and the request lifecycle.
 
 ## EventBusMixin
 
@@ -438,8 +402,12 @@ All behavior comes from the two mixins; the class's own code only stores the fla
 
 ```dart
 String defaultTopicPathSeparator = '.';         // the address fallback, writable
-EventBusHandlers get handlers;                  // from EventBusHandlersMixin
+int requestQueueCapacity = 64;                  // default for handler subscriptions
 bool get isDisposed;
+Stream<EventBusError> get errors;
+List<EventBusError> get recentErrors;
+int get suppressedErrors;
+void reportError(EventBusError error);          // transport/isolate seam
 
 // Hooks for transports:
 EventNode<T> createNode<T>({required Topic topic, T? currentData});
@@ -449,51 +417,68 @@ bool removeTopic<T>({List<String>? paths, String? separator});   // explicit evi
 Future<void> dispose();                         // idempotent; closes allEventStream and the nodes
 ```
 
-Inside there are `_eventsMap` (concrete topics), `_patternMap` (topics with `*`/`>`), and a
-broadcast `_allEventStream`. Automatic cleanup is private: `_removeNode` removes the node from
-both maps and disposes it only if it has no listeners, no handler, no `KeepAliveNode` pin, and
-the bus is not model. It is called when the last subscription is cancelled, on `removeHandler`
-and on `removeAllHandlerPresentInOtherBus`. A map entry is removed only when it still holds the
-same node instance, so a late cancellation of an already removed node cannot delete its
-replacement.
+Inside there are `_eventsMap` (concrete topics), `_patternMap` (topics with `*`/`>`), a
+broadcast `_allEventStream` and a broadcast `_errorsController`. Automatic cleanup is private:
+`_removeNode` removes the node from both maps and disposes it only if it has no legacy stream
+listeners, no subscriptions (listener or handler), no `KeepAliveNode` pin, and the bus is not
+model. A map entry is removed only when it still holds the same node instance, so a late
+cancellation of an already removed node cannot delete its replacement.
 
 `removeTopic` is the explicit counterpart: it bypasses the model-bus rule and the `KeepAliveNode`
-pin, removes the node from whichever map holds it, and disposes it. `EventBusIsolate` forwards the
-call to the other side of the bridge.
+pin, removes the node from whichever map holds it, and disposes it (cancelling handler
+subscriptions too). `EventBusIsolate` forwards the call to the other side of the bridge.
 
 `createNode` and `shouldCreateNodeOnSend` are the transport seam: a transport bus overrides them
 to create a broker-backed node for topics it knows and to create one on `fire` when a serializer
 or deserializer is registered. Local buses keep the defaults.
 
-## EventBusHandlersMixin
+Request resolution order is exact topic → most specific matching pattern; competition happens
+only inside the resolved tier. `handlerTopicFor` and `handleIncomingRequest` are public because
+transports and isolate bridges live outside this library.
 
-`mixin EventBusHandlersMixin on EventBusMixin implements EventBusHandlers` — handler registration,
-resolution and invocation.
+## EventBusError
+
+`class EventBusError` — one bus failure delivered as data through `bus.errors`.
 
 ```dart
-EventBusHandlers get handlers;                       // returns this
-void setHandler<T>({T? initialData, List<String>? paths, String? separator,
-                    required Handler<T> handler});
-void removeHandler<T>({List<String>? paths, String? separator});
-bool haveHandler<T>({List<String>? paths, String? separator});
-Future<dynamic> request<T>(T data, {List<String>? paths, String? separator,
-                                    Map<String, String>? arguments, Duration? timeout,
-                                    CancelToken? cancelToken});
-void addAllHandlerFromOtherBus(EventBus fromBus);
-void removeAllHandlerPresentInOtherBus(EventBus otherBus);
+enum EventBusErrorKind {
+  listener, handler, serialization, deserialization, transport,
+  isolateInit, isolateDeath, requestTimeout, requestCanceled,
+  bufferOverflow, busy, supervision, dispose, other,
+}
+enum EventBusErrorSource { core, isolate, transport, supervision }
 
-///The registered topic of the handler that would answer [topic], or null.
-Topic? handlerTopicFor(Topic topic);
-
-///Dispatches a request received from another process (isolate or transport):
-///resolves the handler, notifies listeners and returns the handler future.
-Future<dynamic> handleIncomingRequest(EventDTO dto);
+class EventBusError {
+  EventBusError({
+    required EventBusErrorKind kind,
+    required Object error,
+    EventBusErrorSource source = EventBusErrorSource.core,
+    String? topic,
+    EventDTO? event,                  // null unless payload capture is enabled
+    StackTrace? stackTrace,
+    Map<String, String> context = const {},
+    DateTime? timestamp,
+  });
+}
 ```
 
-Resolution order: exact topic → most specific matching pattern. A pattern topic passed to
-`request` resolves by the exact key only, and `request` rejects wildcard paths first.
-`handlerTopicFor` and `handleIncomingRequest` are intended for transports and isolate bridges;
-they are public because those layers live outside this library.
+The stream never carries stream errors: a listener without `onError` does not receive unhandled
+errors for bus failures. Rate limit: 10 per `(kind, topic)` per second; the rest increments
+`suppressedErrors`. `recentErrors` keeps the last 100.
+
+## EventBusErrorMonitor
+
+Aggregates the error streams of several buses; it is not a static global.
+
+```dart
+bool add(EventBus bus);
+bool remove(EventBus bus);
+Stream<EventBusError> get errors;
+List<EventBusError> get recentErrors;
+Map<EventBusErrorKind, int> get counts;
+void resetCounters();
+Future<void> dispose();
+```
 
 ## EventBusIsolate
 

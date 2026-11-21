@@ -10,7 +10,7 @@ enum NameState { a, b }
 class NameEvent {}
 
 void _worker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+  bus.subscribeEvents<String>(handler: (dto, lastData) async {
     return '$initialData: ${dto.data}';
   });
 }
@@ -30,7 +30,7 @@ void main() {
     test('send takes paths, separator and arguments', () async {
       final bus = EventBus(isModelBus: true);
       Map<String, String>? seen;
-      bus.handlers.setHandler<int>(
+      bus.subscribeEvents<int>(
         paths: ['a', 'b'],
         separator: '/',
         handler: (dto, lastData) async {
@@ -49,8 +49,8 @@ void main() {
 
     test('the reading methods take paths and separator', () async {
       final bus = EventBus(isModelBus: true);
-      bus.handlers
-          .setHandler<int>(paths: ['c'], handler: (dto, lastData) async {});
+      final handler = bus.subscribeEvents<int>(
+          paths: ['c'], handler: (dto, lastData) async {});
 
       expect(bus.haveHandler<int>(paths: ['c'], separator: '.'), true);
       expect(bus.haveListener<int>(paths: ['c'], separator: '.'), false);
@@ -69,15 +69,15 @@ void main() {
       final stream = bus.listen<int>(paths: ['c'], separator: '.');
       expect(stream, isA<Stream<int>>());
 
-      bus.handlers.removeHandler<int>(paths: ['c'], separator: '.');
+      await handler.cancel();
       expect(bus.haveHandler<int>(paths: ['c']), false);
       await bus.dispose();
     });
 
-    test('setHandler takes initialData', () async {
+    test('subscribeEvents takes initialData', () async {
       final bus = EventBus(isModelBus: true);
-      bus.handlers
-          .setHandler<int>(initialData: 3, handler: (dto, lastData) async {});
+      bus.subscribeEvents<int>(
+          initialData: 3, handler: (dto, lastData) async {});
 
       expect(bus.currentData<int>(), 3);
       await bus.dispose();
@@ -134,7 +134,7 @@ void main() {
           onUpdate: (_) {});
 
       expect(scope.lastData, 7);
-      scope.disposeScope(removeHandler: true);
+      scope.disposeScope();
       await bus.dispose();
     });
   });

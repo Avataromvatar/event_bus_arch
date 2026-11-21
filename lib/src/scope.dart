@@ -3,7 +3,7 @@ part of event_arch;
 ///EventBus, if is not model bus, delete node what not have handler and listeners
 ///Scope add listener for T event and use Command for call event
 mixin class Scope<T> {
-  StreamSubscription<T>? _scopeStreamSubscription;
+  EventSubscription<T>? _scopeSubscription;
   Command<T>? _scopeCommand;
   T? lastData;
   (T?, Map<String, String>?)? get lastCall => _scopeCommand != null
@@ -37,10 +37,18 @@ mixin class Scope<T> {
     this.onUpdate = onUpdate;
     _scopeCommand = Command(bus, paths: paths, maxLen: maxLenForUndo);
 
-    _scopeStreamSubscription = bus.listen<T>(paths: paths).listen((event) {
-      lastData = event;
-      this.onUpdate?.call(event);
-    });
+    // A scope is a latest-value consumer: keep only the newest update while
+    // the callback is busy. Older values are dropped and counted by the
+    // subscription.
+    _scopeSubscription = bus.subscribeEvents<T>(
+      paths: paths,
+      bufferCapacity: 1,
+      bufferOverflow: BufferOverflow.latest,
+      onEvent: (event) {
+        lastData = event;
+        this.onUpdate?.call(event);
+      },
+    );
     if (data != null) {
       if (needExecute) {
         await _scopeCommand!.execute(data);
@@ -65,12 +73,9 @@ mixin class Scope<T> {
     return _scopeCommand!.undo();
   }
 
-  void disposeScope({bool removeHandler = true}) {
-    if (_scopeCommand != null && removeHandler) {
-      scopeBus!.handlers.removeHandler<T>(paths: _scopeCommand?.paths);
-    }
-    _scopeStreamSubscription?.cancel();
-    _scopeStreamSubscription = null;
+  void disposeScope() {
+    unawaited(_scopeSubscription?.cancel());
+    _scopeSubscription = null;
     _scopeCommand = null;
   }
 }

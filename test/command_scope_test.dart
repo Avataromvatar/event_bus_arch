@@ -17,7 +17,7 @@ void main() {
     test('undo sends the previous value and can be repeated', () async {
       final bus = EventBus(isModelBus: true);
       final log = <int>[];
-      bus.handlers.setHandler<int>(handler: (dto, lastData) async {
+      bus.subscribeEvents<int>(handler: (dto, lastData) async {
         log.add(dto.data);
       });
       final command = Command<int>(bus, maxLen: 10);
@@ -74,7 +74,7 @@ void main() {
     test('execute sends to the node of the command paths', () async {
       final bus = EventBus(isModelBus: true);
       final seen = <int>[];
-      bus.handlers.setHandler<int>(
+      bus.subscribeEvents<int>(
           paths: ['counter'],
           handler: (dto, lastData) async {
             seen.add(dto.data);
@@ -145,34 +145,37 @@ void main() {
       expect(() => scope.scopeBus, throwsA(isA<EventBusException>()));
     });
 
-    test('a repeated initScope removes the handler of the previous topic',
+    test('a repeated initScope replaces its listener and keeps handlers',
         () async {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
+      final handler = bus.subscribeEvents<int>(
+          paths: ['a'], handler: (dto, lastData) async {});
       await scope.initScope(bus, paths: ['a'], maxLenForUndo: 10);
-      bus.handlers
-          .setHandler<int>(paths: ['a'], handler: (dto, lastData) async {});
 
       await scope.initScope(bus, paths: ['b'], maxLenForUndo: 10);
 
-      expect(bus.haveHandler<int>(paths: ['a']), false);
+      // The handler is not owned by Scope and stays; the old listener is gone.
+      expect(bus.haveHandler<int>(paths: ['a']), true);
+      expect(bus.haveListener<int>(paths: ['a']), false);
       expect(bus.haveListener<int>(paths: ['b']), true);
+
       scope.disposeScope();
+      await handler.cancel();
       await bus.dispose();
     });
 
-    test(
-        'disposeScope(removeHandler: false) does not touch a handler it does not own',
-        () async {
+    test('disposeScope does not touch a handler it does not own', () async {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
+      final handler = bus.subscribeEvents<int>(
+          paths: ['a'], handler: (dto, lastData) async {});
       await scope.initScope(bus, paths: ['a'], maxLenForUndo: 10);
-      bus.handlers
-          .setHandler<int>(paths: ['a'], handler: (dto, lastData) async {});
 
-      scope.disposeScope(removeHandler: false);
+      scope.disposeScope();
 
       expect(bus.haveHandler<int>(paths: ['a']), true);
+      await handler.cancel();
       await bus.dispose();
     });
   });

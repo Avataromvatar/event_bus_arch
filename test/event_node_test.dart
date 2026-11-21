@@ -13,7 +13,7 @@ void main() {
     test('handler receives the previous value, not the current one', () async {
       final bus = EventBus();
       final seen = <String?>[];
-      bus.handlers.setHandler<String>(
+      bus.subscribeEvents<String>(
           initialData: 'INIT',
           handler: (dto, lastData) async {
             seen.add(lastData);
@@ -29,7 +29,7 @@ void main() {
 
     test('lastData is updated synchronously, right after send', () async {
       final bus = EventBus();
-      bus.handlers.setHandler<String>(handler: (dto, lastData) async {});
+      bus.subscribeEvents<String>(handler: (dto, lastData) async {});
 
       await bus.request<String>('data');
 
@@ -40,7 +40,7 @@ void main() {
         () async {
       final bus = EventBus();
       int? previous;
-      bus.handlers.setHandler<int>(
+      bus.subscribeEvents<int>(
           initialData: 5,
           handler: (dto, lastData) async {
             previous = lastData;
@@ -59,7 +59,7 @@ void main() {
       final bus = EventBus();
       final received = <String>[];
       final sub = bus.subscribe<String>(onData: received.add);
-      bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+      bus.subscribeEvents<String>(handler: (dto, lastData) async {
         throw StateError('boom');
       });
 
@@ -73,7 +73,7 @@ void main() {
 
     test('a synchronous handler throw also reaches the sender', () async {
       final bus = EventBus();
-      bus.handlers.setHandler<String>(handler: syncThrowingHandler);
+      bus.subscribeEvents<String>(handler: syncThrowingHandler);
 
       await expectLater(bus.request<String>('x'), throwsStateError);
       await bus.dispose();
@@ -82,7 +82,7 @@ void main() {
     test('the bus keeps working after a handler error', () async {
       final bus = EventBus();
       var calls = 0;
-      bus.handlers.setHandler<int>(handler: (dto, lastData) async {
+      bus.subscribeEvents<int>(handler: (dto, lastData) async {
         calls++;
         if (dto.data == 1) {
           throw StateError('boom');
@@ -103,7 +103,7 @@ void main() {
       final order = <String>[];
       final sub =
           bus.subscribe<String>(onData: (e) => order.add('listener:$e'));
-      bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+      bus.subscribeEvents<String>(handler: (dto, lastData) async {
         order.add('handler-start');
         order.add('handler-end');
         return 'ok';
@@ -150,7 +150,7 @@ void main() {
     test('an event of a mismatched type does not hang the sender', () async {
       final bus = EventBus(isModelBus: true);
       // the node is created for Object, but a String arrives
-      bus.handlers.setHandler<Object>(handler: (dto, lastData) async {
+      bus.subscribeEvents<Object>(handler: (dto, lastData) async {
         return 'handled';
       });
 
@@ -166,23 +166,25 @@ void main() {
     test('fire does not invoke a request handler', () async {
       final bus = EventBus();
       var called = false;
-      bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+      bus.subscribeEvents<String>(handler: (dto, lastData) async {
         called = true;
       });
 
-      expect(bus.fire<String>('x'), isTrue);
+      // A handler-only node is not a listener, so fire returns false (D14).
+      expect(bus.fire<String>('x'), isFalse);
       await Future<void>.delayed(Duration.zero);
 
       expect(called, isFalse);
       await bus.dispose();
     });
 
-    test('removeHandler keeps the node listeners', () async {
+    test('cancelling a handler keeps the node listeners', () async {
       final bus = EventBus();
       final received = <String>[];
       final subscription = bus.subscribe<String>(onData: received.add);
-      bus.handlers.setHandler<String>(handler: (dto, lastData) async {});
-      bus.handlers.removeHandler<String>();
+      final handler =
+          bus.subscribeEvents<String>(handler: (dto, lastData) async {});
+      await handler.cancel();
 
       expect(bus.haveHandler<String>(), isFalse);
       expect(bus.haveListener<String>(), isTrue);
@@ -198,7 +200,7 @@ void main() {
         () async {
       final bus = EventBus();
       final subscription = bus.subscribe<String>(onData: (_) {});
-      bus.handlers.setHandler<String>(handler: (dto, lastData) async => 'ok');
+      bus.subscribeEvents<String>(handler: (dto, lastData) async => 'ok');
 
       await subscription.cancel();
 

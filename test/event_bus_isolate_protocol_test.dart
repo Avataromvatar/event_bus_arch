@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 void silentWorker(EventBus bus, Object? initialData) {}
 
 void doublingWorker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<int>(handler: (dto, lastData) async {
+  bus.subscribeEvents<int>(handler: (dto, lastData) async {
     return dto.data * 2;
   });
 }
@@ -16,14 +16,14 @@ void doublingWorker(EventBus bus, Object? initialData) {
 ///Asynchronous initialization: handlers do not appear immediately.
 Future<void> slowInitWorker(EventBus bus, Object? initialData) async {
   await Future<void>.delayed(const Duration(milliseconds: 50));
-  bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+  bus.subscribeEvents<String>(handler: (dto, lastData) async {
     return 'ready: ${dto.data}';
   });
 }
 
 ///Responses arrive in a different order than the requests.
 void slowByValueWorker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<int>(handler: (dto, lastData) async {
+  bus.subscribeEvents<int>(handler: (dto, lastData) async {
     await Future<void>.delayed(
         Duration(milliseconds: dto.data == 1 ? 200 : 10));
     return dto.data;
@@ -31,7 +31,7 @@ void slowByValueWorker(EventBus bus, Object? initialData) {
 }
 
 void throwingWorker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<int>(handler: (dto, lastData) async {
+  bus.subscribeEvents<int>(handler: (dto, lastData) async {
     throw StateError('worker boom');
   });
 }
@@ -47,14 +47,14 @@ Future<void> failingInitWorker(EventBus bus, Object? initialData) async {
 
 ///Answers with the arguments of the call, so a lost arguments map is visible.
 void argumentWorker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<String>(handler: (dto, lastData) async {
+  bus.subscribeEvents<String>(handler: (dto, lastData) async {
     return 'multiplier=${dto.arguments?['multiplier']}';
   });
 }
 
 ///A handler addressed by paths, not by the type alone.
 void pathWorker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<int>(
+  bus.subscribeEvents<int>(
       paths: ['counter'],
       handler: (dto, lastData) async {
         return dto.data * 2;
@@ -63,7 +63,7 @@ void pathWorker(EventBus bus, Object? initialData) {
 
 ///A request responder registered on a wildcard path.
 void patternHandlerWorker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<int>(
+  bus.subscribeEvents<int>(
       paths: ['sensor', '*'], handler: (dto, lastData) async => dto.data * 2);
 }
 

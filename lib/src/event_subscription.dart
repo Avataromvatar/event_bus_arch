@@ -95,7 +95,7 @@ class EventSubscription<T> {
   final void Function() onCancel;
 
   ///Receives errors that have no subscription-level handler.
-  final void Function(Object error, StackTrace? stackTrace) onBusError;
+  final void Function(EventBusError error) onBusError;
 
   ///Optional subscription-level error handler.
   final void Function(Object error, StackTrace? stackTrace)? onError;
@@ -297,6 +297,7 @@ class EventSubscription<T> {
 
     final limit = _bufferCapacity;
     if (limit == null) return;
+    final before = _dropped;
     while (_buffer.length > limit) {
       if (_bufferOverflow == BufferOverflow.dropNewest) {
         _buffer.removeLast();
@@ -305,6 +306,7 @@ class EventSubscription<T> {
       }
       _dropped++;
     }
+    if (_dropped > before) _reportOverflow(limit);
   }
 
   ///Cancels the subscription: the node stops fanning events out to it and its
@@ -344,20 +346,24 @@ class EventSubscription<T> {
     }
     if (capacity == 0) {
       _dropped++;
+      _reportOverflow(capacity);
       return _bufferOverflow != BufferOverflow.reject;
     }
     if (_buffer.length >= capacity) {
       switch (_bufferOverflow) {
         case BufferOverflow.reject:
           _dropped++;
+          _reportOverflow(capacity);
           return false;
         case BufferOverflow.dropNewest:
           _dropped++;
+          _reportOverflow(capacity);
           return true;
         case BufferOverflow.latest:
         case BufferOverflow.dropOldest:
           _buffer.removeFirst();
           _dropped++;
+          _reportOverflow(capacity);
       }
     }
     _buffer.addLast(event);
@@ -422,10 +428,25 @@ class EventSubscription<T> {
 
   void _handleError(Object error, StackTrace stackTrace) {
     onError?.call(error, stackTrace);
-    onBusError(error, stackTrace);
+    onBusError(EventBusError(
+      kind: EventBusErrorKind.listener,
+      topic: topic.topic,
+      error: error,
+      stackTrace: stackTrace,
+    ));
     if (cancelOnError) {
       unawaited(cancel());
     }
+  }
+
+  void _reportOverflow(int capacity) {
+    onBusError(EventBusError(
+      kind: EventBusErrorKind.bufferOverflow,
+      topic: topic.topic,
+      error: EventBusException(
+          'listener buffer overflow for "${topic.topic}"'),
+      context: {'capacity': '$capacity', 'dropped': '$_dropped'},
+    ));
   }
 
   @override
@@ -461,10 +482,15 @@ class CancelToken {
 ///The entry owns the caller's completer, the timeout timer and the cancellation
 ///hook. The subscription only manages the queue and the in-flight count.
 class _RequestEntry {
-  _RequestEntry({required this.topic, required this.invoke});
+  _RequestEntry({
+    required this.topic,
+    required this.invoke,
+    this.onBusError,
+  });
 
   final String topic;
   final Future<dynamic> Function() invoke;
+  final void Function(EventBusError error)? onBusError;
   final Completer<dynamic> completer = Completer<dynamic>();
 
   EventSubscription? owner;
@@ -506,6 +532,15 @@ class _RequestEntry {
     _timer = null;
     owner?._removeQueuedRequest(this);
     if (!completer.isCompleted) completer.completeError(error);
+    onBusError?.call(EventBusError(
+      kind: error is RequestTimeoutException
+          ? EventBusErrorKind.requestTimeout
+          : error is RequestCanceledException
+              ? EventBusErrorKind.requestCanceled
+              : EventBusErrorKind.other,
+      topic: topic,
+      error: error,
+    ));
   }
 
   ///Fails a queued entry because its subscription was cancelled or disposed.
@@ -517,6 +552,11 @@ class _RequestEntry {
     _timer = null;
     owner?._removeQueuedRequest(this);
     if (!completer.isCompleted) completer.completeError(error);
+    onBusError?.call(EventBusError(
+      kind: EventBusErrorKind.other,
+      topic: topic,
+      error: error,
+    ));
   }
 
   ///Runs the handler. The future never throws: an error goes to the caller's
@@ -527,6 +567,12 @@ class _RequestEntry {
       if (!completer.isCompleted) completer.complete(result);
     } catch (error, stackTrace) {
       if (!completer.isCompleted) completer.completeError(error, stackTrace);
+      onBusError?.call(EventBusError(
+        kind: EventBusErrorKind.handler,
+        topic: topic,
+        error: error,
+        stackTrace: stackTrace,
+      ));
     } finally {
       _finished = true;
       _timer?.cancel();

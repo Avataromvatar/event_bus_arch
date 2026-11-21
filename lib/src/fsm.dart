@@ -7,7 +7,6 @@ typedef FSMFilter<T, E> = bool Function(T currentState, T lastState, E event);
 
 class _FSM<T> {
   EventBus bus = EventBus(isModelBus: false);
-  EventBusHandlers get busHandlers => bus as EventBusHandlers;
   final Map<Topic, Map<T, _FSMNode>> _map = {};
 }
 

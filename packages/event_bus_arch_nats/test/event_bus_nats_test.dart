@@ -262,7 +262,8 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
 
-      expect(errors.single, isA<NatsDeserializationException>());
+      final reported = errors.single as EventBusError;
+      expect(reported.error, isA<NatsDeserializationException>());
       expect(bus.currentData<int>(paths: ['sensor']), isNull);
     },
   );
@@ -355,7 +356,7 @@ void main() {
       connection: connection,
     );
     addTearDown(bus.dispose);
-    bus.setHandler<int>(
+    bus.subscribeEvents<int>(
       paths: ['sensor'],
       handler: (dto, lastData) async => dto.data * 2,
     );

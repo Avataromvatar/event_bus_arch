@@ -100,7 +100,7 @@ void main() {
           .listen<int>(paths: ['sensor', '*'])
           .listen(values.add);
       addTearDown(subscription.cancel);
-      busB.setHandler<int>(
+      busB.subscribeEvents<int>(
         paths: ['sensor', 'double'],
         handler: (dto, lastData) async => dto.data * 2,
       );
@@ -125,7 +125,7 @@ void main() {
       addTearDown(subscription.cancel);
       // An exact node next to the pattern node: both filters match, but a
       // listener on the pattern node must see the event once.
-      busB.setHandler<int>(
+      busB.subscribeEvents<int>(
         paths: ['sensor', 'temp'],
         handler: (dto, lastData) async => dto.data,
       );

@@ -5,7 +5,7 @@ import 'package:test/test.dart';
 
 ///Reports `bus.isModelBus` from inside the worker.
 void modelFlagWorker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<bool>(
+  bus.subscribeEvents<bool>(
       paths: ['model_flag'], handler: (dto, lastData) async => bus.isModelBus);
 }
 
@@ -14,7 +14,7 @@ void modelFlagWorker(EventBus bus, Object? initialData) {
 void canceledListenerWorker(EventBus bus, Object? initialData) async {
   final sub = bus.subscribe<int>(paths: ['state']);
   await sub.cancel();
-  bus.handlers.setHandler<int>(
+  bus.subscribeEvents<int>(
       paths: ['read_state'],
       handler: (dto, lastData) async =>
           bus.currentData<int>(paths: ['state']) ?? -1);
@@ -22,7 +22,7 @@ void canceledListenerWorker(EventBus bus, Object? initialData) async {
 
 ///Fires an event back to main; the main-side bus decides whether to keep it.
 void emitToMainWorker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<int>(
+  bus.subscribeEvents<int>(
       paths: ['emit'],
       handler: (dto, lastData) async {
         bus.fire<int>(dto.data, paths: ['state']);
@@ -34,13 +34,13 @@ void emitToMainWorker(EventBus bus, Object? initialData) {
 
 ///Reports the flags of the three buses the layer can see.
 void inspectBusesLayer(Layer layer, Object? initialData) {
-  layer.top!.handlers.setHandler<bool>(
+  layer.top!.subscribeEvents<bool>(
       paths: ['top_is_model'],
       handler: (dto, lastData) async => layer.top!.isModelBus);
-  layer.top!.handlers.setHandler<bool>(
+  layer.top!.subscribeEvents<bool>(
       paths: ['bottom_is_model'],
       handler: (dto, lastData) async => layer.bottom?.isModelBus ?? false);
-  layer.top!.handlers.setHandler<bool>(
+  layer.top!.subscribeEvents<bool>(
       paths: ['current_is_model'],
       handler: (dto, lastData) async => layer.current.isModelBus);
 }

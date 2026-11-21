@@ -30,7 +30,9 @@ abstract class EventNode<T> {
   StreamController<T> get streamControllerValue;
 
   ///Delivers an event to the value stream. Only listeners are notified.
-  void deliver(EventDTO dto);
+  ///
+  ///Returns true when at least one listener accepted the event.
+  bool deliver(EventDTO dto);
 
   EventNode<T> copy();
 
@@ -63,26 +65,6 @@ abstract class SubscriptionHost<T> {
   bool get hasListenerSubscriptions;
 }
 
-///A request responder registered for a topic.
-///
-///The closures erase the generic type of the handler, so a request received
-///from another isolate can be dispatched without knowing `T` statically.
-class RequestHandler {
-  RequestHandler({
-    required this.topic,
-    required this.accepts,
-    required this.invoke,
-  });
-
-  final Topic topic;
-
-  ///Whether this handler can process an event with [data].
-  final bool Function(Object? data) accepts;
-
-  ///Invokes the user handler with a typed DTO and the previous value.
-  final Future<dynamic> Function(EventDTO dto, Object? lastData) invoke;
-}
-
 ///EventNodeImp stores the current value and fans events out to listeners.
 class EventNodeImp<T> implements EventNode<T>, SubscriptionHost<T> {
   @override
@@ -102,14 +84,16 @@ class EventNodeImp<T> implements EventNode<T>, SubscriptionHost<T> {
   ///the bus, not here, so the value is scheduled before a handler can complete
   ///the request.
   @override
-  void deliver(EventDTO dto) {
-    if (dto.data is! T) return;
+  bool deliver(EventDTO dto) {
+    if (dto.data is! T) return false;
     currentData = dto.data;
+    var accepted = _streamControllerValue.hasListener;
     _streamControllerValue.add(dto.data);
     for (final subscription
         in List<EventSubscription<T>>.of(_subscriptions)) {
-      subscription.offer(dto.data as T);
+      if (subscription.offer(dto.data as T)) accepted = true;
     }
+    return accepted;
   }
 
   ///Creates an independent node with the same current data.
@@ -152,11 +136,9 @@ abstract class EventBus {
   bool get isModelBus;
   String get defaultTopicPathSeparator;
 
-  /// Handler management without casting `bus as EventBusHandlers`.
-  EventBusHandlers get handlers;
-
   /// Closes the all-events stream and every node of the bus. Safe to call twice.
-  /// After dispose the bus is unusable: send/listen/subscribe/setHandler throw StateError.
+  /// After dispose the bus is unusable: fire/request/listen/subscribe/subscribeEvents
+  /// throw StateError.
   Future<void> dispose();
 
   /// true once [dispose] has been called
@@ -164,6 +146,15 @@ abstract class EventBus {
 
   /// Stream for all sent events (event DTO, and whether it had a listener or not)
   Stream<(EventDTO, bool)> get allEventStream;
+
+  ///Bus failures as data. The stream never carries stream errors.
+  Stream<EventBusError> get errors;
+
+  ///The latest errors, bounded (100 entries).
+  List<EventBusError> get recentErrors;
+
+  ///Errors suppressed by the per-kind/topic rate limit.
+  int get suppressedErrors;
 
   /// Returns true if the bus contains a listener for the specified topic
   bool haveListener<T>({List<String>? paths, String? separator});
@@ -177,8 +168,8 @@ abstract class EventBus {
 
   /// Publishes an event to local listeners and forgets about it.
   ///
-  /// Handlers registered with [EventBusHandlers.setHandler] are not awaited;
-  /// their result is ignored. Returns true when the event was accepted: there
+  /// Handler subscriptions are not invoked by [fire]; their result is ignored.
+  /// Returns true when the event was accepted: there
   /// is a local node (or the bus created one) or a transport accepted it.
   /// A false result means nobody is listening and no transport knows the
   /// topic.
@@ -226,6 +217,7 @@ abstract class EventBus {
     String? separator,
     EventCallback<T>? onEvent,
     Handler<T>? handler,
+    T? initialData,
     int handlerConcurrency = 1,
     int? requestQueueCapacity,
     int? bufferCapacity,
@@ -243,9 +235,9 @@ abstract class EventBus {
   ///
   /// Unlike the automatic cleanup after the last subscription, this ignores
   /// [isModelBus] and a `KeepAliveNode` pin: a transport node cancels its
-  /// broker subscription. Active listeners receive `done`. A registered
-  /// handler is kept; remove it with [EventBusHandlers.removeHandler] when the
-  /// whole topic has to be forgotten. A model bus creates the node again on
+  /// broker subscription. Active listeners receive `done`; handler
+  /// subscriptions are cancelled with the node. A model bus creates the node
+  /// again on
   /// the next `fire`, `request` or `listen`.
   ///
   /// Returns true when a node was removed.
@@ -256,27 +248,6 @@ abstract class EventBus {
   factory EventBus({bool isModelBus = false}) {
     return EventBusImpl(isModelBus);
   }
-}
-
-///
-abstract class EventBusHandlers {
-  /// Sets a handler for a specific topic.
-  /// If initialData is provided, it will be used as the initial data for the topic.
-  void setHandler<T>({
-    T? initialData,
-    List<String>? paths,
-    String? separator,
-    required Handler<T> handler,
-  });
-
-  /// Removes a handler from a specific topic.
-  void removeHandler<T>({List<String>? paths, String? separator});
-
-  /// Adds all handlers from another EventBus to this one.
-  void addAllHandlerFromOtherBus(EventBus fromBus);
-
-  /// Removes all handlers that are present in another EventBus from this one.
-  void removeAllHandlerPresentInOtherBus(EventBus otherBus);
 }
 
 class EventBusImpl with EventBusMixin, _EventBusHandlersMixin {
@@ -301,8 +272,51 @@ mixin EventBusMixin implements EventBus {
   final StreamController<(EventDTO, bool)> _allEventStream =
       StreamController<(EventDTO, bool)>.broadcast();
 
+  final StreamController<EventBusError> _errorsController =
+      StreamController<EventBusError>.broadcast();
+  final List<EventBusError> _recentErrors = <EventBusError>[];
+  final Map<String, List<DateTime>> _errorWindows = <String, List<DateTime>>{};
+  int _suppressedErrors = 0;
+
   @override
   Stream<(EventDTO, bool)> get allEventStream => _allEventStream.stream;
+
+  @override
+  Stream<EventBusError> get errors => _errorsController.stream;
+
+  @override
+  List<EventBusError> get recentErrors =>
+      List<EventBusError>.unmodifiable(_recentErrors);
+
+  ///Errors suppressed by the per-kind/topic rate limit.
+  @override
+  int get suppressedErrors => _suppressedErrors;
+
+  ///Publishes a bus error. Transport and isolate adapters use this seam.
+  ///
+  ///Errors are rate-limited per `(kind, topic)`: at most 10 per second, the
+  ///rest are counted in [suppressedErrors]. The recent list is bounded.
+  void reportError(EventBusError error) {
+    if (_disposed) return;
+    final key = '${error.kind.name}|${error.topic}';
+    final window =
+        _errorWindows.putIfAbsent(key, () => <DateTime>[]);
+    final now = error.timestamp;
+    window.removeWhere(
+        (time) => now.difference(time) > const Duration(seconds: 1));
+    if (window.length >= 10) {
+      _suppressedErrors++;
+      return;
+    }
+    window.add(now);
+    _recentErrors.add(error);
+    if (_recentErrors.length > 100) {
+      _recentErrors.removeAt(0);
+    }
+    if (!_errorsController.isClosed) {
+      _errorsController.add(error);
+    }
+  }
 
   /// Map storing exact event nodes by their topic
   final Map<Topic, EventNode> _eventsMap = {};
@@ -434,6 +448,7 @@ mixin EventBusMixin implements EventBus {
     String? separator,
     EventCallback<T>? onEvent,
     Handler<T>? handler,
+    T? initialData,
     int handlerConcurrency = 1,
     int? requestQueueCapacity,
     int? bufferCapacity,
@@ -476,19 +491,14 @@ mixin EventBusMixin implements EventBus {
         host.removeSubscription(subscription);
         _removeNode(topic, node);
       },
-      onBusError: (error, stackTrace) =>
-          _reportSubscriptionError(topic, error, stackTrace),
+      onBusError: reportError,
     );
     host.addSubscription(subscription);
+    if (initialData != null) {
+      node.currentData = initialData;
+    }
     return subscription;
   }
-
-  /// Hook for errors that a subscription could not deliver to its own handler.
-  ///
-  ///E1-13 wires this to the global `EventBusError` stream; until then the
-  ///subscription-level `onError` is the only observer.
-  void _reportSubscriptionError(
-      Topic topic, Object error, StackTrace? stackTrace) {}
 
   /// Publishes an event to local listeners without waiting for a handler.
   @override
@@ -500,15 +510,19 @@ mixin EventBusMixin implements EventBus {
     _rejectWildcardPaths(paths, 'fire');
     var dto = EventDTO<T>(data,
         paths: paths,
-        // the same fallback as setHandler/listen/currentData: otherwise a send
+        // the same fallback as subscribeEvents/listen/currentData: otherwise a send
         // would address a node nobody else can address
         separator: separator ?? defaultTopicPathSeparator,
         arguments: arguments);
     // A model or transport bus may create the exact node for this topic.
     _sendNode<T>(dto.topic);
     final matched = _dispatchToListeners(dto);
-    _addAllEvent(dto, matched);
-    return matched;
+    // A model bus accepted the value even when nobody is listening. A handler
+    // subscription alone does not count for fire (D14).
+    final accepted =
+        matched || (isModelBus && _nodeByTopic(dto.topic) != null);
+    _addAllEvent(dto, accepted);
+    return accepted;
   }
 
   ///Delivers to the exact node and to every matching pattern node.
@@ -516,25 +530,23 @@ mixin EventBusMixin implements EventBus {
   ///An [incoming] event came from another process: a transport node delivers it
   ///locally without publishing it back.
   bool _dispatchToListeners(EventDTO dto, {bool incoming = false}) {
-    var matched = false;
+    var accepted = false;
     final exact = _eventsMap[dto.topic];
     if (exact != null) {
-      _deliverNode(exact, dto, incoming);
-      matched = true;
+      accepted = _deliverNode(exact, dto, incoming) || accepted;
     }
     for (final entry in _matchingPatternEntries(dto.topic)) {
-      _deliverNode(entry.value, dto, incoming);
-      matched = true;
+      accepted = _deliverNode(entry.value, dto, incoming) || accepted;
     }
-    return matched;
+    return accepted;
   }
 
-  void _deliverNode(EventNode node, EventDTO dto, bool incoming) {
+  bool _deliverNode(EventNode node, EventDTO dto, bool incoming) {
     if (incoming && node is IncomingEventNode) {
       (node as IncomingEventNode).deliverIncoming(dto);
-    } else {
-      node.deliver(dto);
+      return true;
     }
+    return node.deliver(dto);
   }
 
   ///Pattern nodes matching a concrete topic, most specific first.
@@ -671,6 +683,8 @@ mixin EventBusMixin implements EventBus {
   Future<void> _disposeImpl() async {
     _disposed = true;
     await _allEventStream.close();
+    await _errorsController.close();
+    _errorWindows.clear();
     var nodes = [..._eventsMap.values, ..._patternMap.values];
     _eventsMap.clear();
     _patternMap.clear();
@@ -682,71 +696,8 @@ mixin EventBusMixin implements EventBus {
 ///Request handlers: resolution, dispatch and the request lifecycle.
 ///
 ///A handler is a capability of [EventSubscription]; this mixin only routes a
-///request to the resolved tier and owns the temporary compatibility shim for
-///the old setHandler API (removed by E1-10).
-mixin _EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
-  final Map<Topic, _CompatHandlerRegistration> _compatHandlers = {};
-
-  @override
-  EventBusHandlers get handlers => this;
-
-  ///Temporary 3.x compatibility: creates a handler subscription.
-  @override
-  void setHandler<T>({
-    T? initialData,
-    List<String>? paths,
-    String? separator,
-    required Handler<T> handler,
-  }) {
-    _checkNotDisposed();
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    final previous = _compatHandlers[topic];
-    if (previous != null) {
-      unawaited(previous.subscription.cancel());
-    }
-    final subscription = _createHandlerSubscription<T>(
-        paths: paths, separator: separator, handler: handler);
-    if (initialData != null) {
-      _nodeFor<T>(topic).currentData = initialData;
-    }
-    _compatHandlers[topic] = _CompatHandlerRegistration(
-      subscription,
-      (target) => target._createHandlerSubscription<T>(
-          paths: paths, separator: separator, handler: handler),
-    );
-  }
-
-  EventSubscription<T> _createHandlerSubscription<T>({
-    List<String>? paths,
-    String? separator,
-    required Handler<T> handler,
-  }) {
-    return subscribeEvents<T>(
-      paths: paths,
-      separator: separator,
-      handler: handler,
-    );
-  }
-
-  @override
-  void removeHandler<T>({List<String>? paths, String? separator}) {
-    _checkNotDisposed();
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    final registration = _compatHandlers.remove(topic);
-    if (registration != null) {
-      unawaited(registration.subscription.cancel());
-    } else {
-      for (final subscription in _handlersOn(_nodeByTopic(topic))) {
-        unawaited(subscription.cancel());
-      }
-    }
-    final node = _nodeByTopic(topic);
-    if (node != null) {
-      _removeNode(topic, node);
-    }
-  }
+///request to the resolved tier and owns the request lifecycle.
+mixin _EventBusHandlersMixin on EventBusMixin {
 
   @override
   bool haveHandler<T>({List<String>? paths, String? separator}) {
@@ -863,8 +814,14 @@ mixin _EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
         .where((subscription) => subscription.hasRequestCapacity)
         .toList(growable: false);
     if (candidates.isEmpty) {
+      final busy = BusyException(dto.topic.topic);
       _addAllEvent(dto, false);
-      throw BusyException(dto.topic.topic);
+      reportError(EventBusError(
+        kind: EventBusErrorKind.busy,
+        topic: dto.topic.topic,
+        error: busy,
+      ));
+      throw busy;
     }
 
     final subscription = _pickHandler(tier.node, candidates);
@@ -876,6 +833,7 @@ mixin _EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
     final entry = _RequestEntry(
       topic: dto.topic.topic,
       invoke: () => subscription.invokeRequest(dto, previous),
+      onBusError: reportError,
     );
     entry.arm(timeout: timeout, cancelToken: cancelToken);
     if (!subscription._enqueueRequest(entry)) {
@@ -902,51 +860,6 @@ mixin _EventBusHandlersMixin on EventBusMixin implements EventBusHandlers {
     return _dispatchRequest(dto, incoming: true);
   }
 
-  @override
-  void addAllHandlerFromOtherBus(EventBus fromBus) {
-    _checkNotDisposed();
-    if (fromBus is! _EventBusHandlersMixin) return;
-
-    void copyInto(Map<Topic, EventNode> from, Map<Topic, EventNode> to) {
-      for (final entry in from.entries) {
-        final existing = to[entry.key];
-        if (existing == null) {
-          to[entry.key] = entry.value.copy();
-        } else {
-          existing.currentData = entry.value.currentData;
-        }
-      }
-    }
-
-    copyInto(fromBus._eventsMap, _eventsMap);
-    copyInto(fromBus._patternMap, _patternMap);
-
-    for (final entry in fromBus._compatHandlers.entries) {
-      final replaced = _compatHandlers[entry.key];
-      if (replaced != null) {
-        unawaited(replaced.subscription.cancel());
-      }
-      final subscription = entry.value.recreate(this);
-      _compatHandlers[entry.key] =
-          _CompatHandlerRegistration(subscription, entry.value.recreate);
-    }
-  }
-
-  @override
-  void removeAllHandlerPresentInOtherBus(EventBus otherBus) {
-    _checkNotDisposed();
-    if (otherBus is! _EventBusHandlersMixin) return;
-    for (final topic in otherBus._compatHandlers.keys) {
-      final registration = _compatHandlers.remove(topic);
-      if (registration != null) {
-        unawaited(registration.subscription.cancel());
-      }
-      final node = _nodeByTopic(topic);
-      if (node != null) {
-        _removeNode(topic, node);
-      }
-    }
-  }
 }
 
 class _HandlerTier {
@@ -955,13 +868,6 @@ class _HandlerTier {
   final Topic topic;
   final EventNode node;
   final List<EventSubscription> subscriptions;
-}
-
-class _CompatHandlerRegistration {
-  _CompatHandlerRegistration(this.subscription, this.recreate);
-
-  final EventSubscription subscription;
-  final EventSubscription Function(_EventBusHandlersMixin target) recreate;
 }
 
 ///A fire or request must address one concrete topic: wildcards are not

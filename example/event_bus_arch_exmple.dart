@@ -54,7 +54,7 @@ void _initIsolate(EventBus bus, Object? initialData) async {
 
   ///sethandler what can return result
   ///the handler answers on the address TestIntData.calc
-  (bus as EventBusHandlers).setHandler<TestIntData>(
+  bus.subscribeEvents<TestIntData>(
     paths: ['calc'],
     handler: (dto, lastData) async {
       print('Arguments:${dto.arguments}');

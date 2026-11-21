@@ -33,11 +33,11 @@ void main() {
       await subscription.cancel();
     });
 
-    test('setHandler passes the topic to createNode', () async {
+    test('subscribeEvents(handler:) passes the topic to createNode', () async {
       final bus = HookedBus();
       addTearDown(bus.dispose);
 
-      bus.handlers.setHandler<int>(paths: ['x'], handler: (dto, last) async {});
+      bus.subscribeEvents<int>(paths: ['x'], handler: (dto, last) async {});
 
       expect(bus.createdTopics.single.topic, 'int.x');
     });
@@ -46,7 +46,9 @@ void main() {
       final bus = HookedBus(createOnSend: true);
       addTearDown(bus.dispose);
 
-      expect(bus.fire<String>('v', paths: ['x']), isTrue);
+      // The node is created and stores the value, but no listener accepted it,
+      // so fire reports false on a common bus (D14).
+      expect(bus.fire<String>('v', paths: ['x']), isFalse);
       await Future<void>.delayed(Duration.zero);
 
       expect(bus.createdTopics.single.topic, 'String.x');

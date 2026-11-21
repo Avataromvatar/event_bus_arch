@@ -19,6 +19,7 @@ part 'src/exception.dart';
 part 'src/event_bus_isolate.dart';
 part 'src/event_bus.dart';
 part 'src/event_subscription.dart';
+part 'src/event_bus_error.dart';
 // export 'src/event_controller.dart'
 //     show
 //         EventBus,

@@ -10,13 +10,13 @@ void doneReporterWorker(EventBus bus, Object? initialData) {
   var done = false;
   bus.subscribe<int>(
       paths: ['state'], onData: (_) {}, onDone: () => done = true);
-  bus.handlers.setHandler<bool>(
+  bus.subscribeEvents<bool>(
       paths: ['was_done'], handler: (dto, lastData) async => done);
 }
 
 ///Removes `state` from inside the worker and reports through the request.
 void workerDeleteWorker(EventBus bus, Object? initialData) {
-  bus.handlers.setHandler<String>(
+  bus.subscribeEvents<String>(
       paths: ['delete_state'],
       handler: (dto, lastData) async {
         bus.removeTopic<int>(paths: ['state']);

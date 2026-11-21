@@ -456,7 +456,7 @@ Future<void> _runShared(_Options options, Stopwatch clock) async {
     fireSeen.add(event.seq);
     fireSamples.add(max(0, clock.elapsedMicroseconds - event.sentAtUs));
   });
-  responder.setHandler<RequestEvent>(
+  responder.subscribeEvents<RequestEvent>(
     handler: (dto, lastData) async => dto.data.seq,
   );
   await _waitForSubscriptions();
@@ -789,7 +789,7 @@ Future<void> _runIsolated(_Options options, Stopwatch clock) async {
     if (latency < 0) negatives++;
     samples.add(latency < 0 ? 0 : latency);
   });
-  responder.setHandler<RequestEvent>(
+  responder.subscribeEvents<RequestEvent>(
     handler: (dto, lastData) async => dto.data.seq,
   );
   await _waitForSubscriptions();

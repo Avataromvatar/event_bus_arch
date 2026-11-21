@@ -18,7 +18,7 @@ import 'transport_serialization.dart';
 ///outside both registries behaves exactly like a local bus: if no local node
 ///exists, it returns false.
 ///
-///Node creation is lazy and typed: `listen<T>`, `setHandler<T>` and
+///Node creation is lazy and typed: `listen<T>`, `subscribeEvents<T>(handler:)` and
 ///`fire<T>`/`request<T>` call [createNode], which resolves the serializer and
 ///the deserializer for the topic and returns a [TransportEventNode].
 class TransportEventBus extends EventBusImpl {
@@ -61,7 +61,6 @@ class TransportEventBus extends EventBusImpl {
 
   late final TransportConnection _connection;
   StreamSubscription<Object>? _connectionErrorsSubscription;
-  final _errorController = StreamController<Object>.broadcast();
   Future<void>? _disposeFuture;
 
   ///The topic-to-subject mapper used by this bus.
@@ -78,9 +77,6 @@ class TransportEventBus extends EventBusImpl {
 
   ///Connection state changes.
   Stream<TransportStatus> get connectionStatus => _connection.statusStream;
-
-  ///Asynchronous transport and node errors.
-  Stream<Object> get errors => _errorController.stream;
 
   ///The identity this bus writes into the origin header.
   String get originId => _originId;
@@ -291,17 +287,16 @@ class TransportEventBus extends EventBusImpl {
     await super.dispose();
     await _connectionErrorsSubscription?.cancel();
     _connectionErrorsSubscription = null;
-    try {
-      await _connection.close();
-    } finally {
-      await _errorController.close();
-    }
+    await _connection.close();
   }
 
   void _reportError(Object error, [StackTrace? stackTrace]) {
-    if (!_errorController.isClosed) {
-      _errorController.add(error);
-    }
+    reportError(EventBusError(
+      kind: EventBusErrorKind.transport,
+      source: EventBusErrorSource.transport,
+      error: error,
+      stackTrace: stackTrace,
+    ));
   }
 }
 

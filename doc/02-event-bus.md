@@ -80,7 +80,8 @@ final receipt = await bus.request<Receipt>(order, paths: ['orders', 'place'],
 
 ## Receiving: `listen` and `subscribe`
 
-These are the stream-style APIs and remain useful for small listeners:
+These are the stream-style compatibility APIs. They are a thin facade over the node's broadcast
+stream:
 
 ```dart
 final stream = bus.listen<Price>(paths: ['market', 'btc']);
@@ -91,8 +92,30 @@ final sub = bus.subscribe<Price>(
 await sub.cancel();
 ```
 
-A stream is broadcast and unbuffered by the bus: a listener created after `fire` sees nothing
-(the value may still be in `currentData` on a model bus).
+They keep exact/pattern matching, model-bus `currentData`, `haveListener`, inbound delivery across
+an isolate or transport bridge, and `fire` acceptance — but they do **not** use the
+`EventSubscription` machinery added in 4.0. The gap is deliberate (ADR-0001, item 9) and the
+facade is planned for removal in 5.0.0.
+
+| Feature | `listen` / `subscribe` | `subscribeEvents` |
+|---|---|---|
+| Per-listener bounded buffer | no — only the Dart stream's invisible queue | yes, `bufferCapacity` |
+| Overflow policy (`latest`, drop, reject) | no | yes, `bufferOverflow` |
+| Counters (`buffered`, `dropped`, `delivered`) | no | yes |
+| `resize`, `.stream` view, `initialData` | no | yes |
+| `DeliveryMode.sync` | no; delivery is async | yes |
+| Listener error routing | **no** — a throwing `onData` goes to the zone and can crash the app | caught and reported through `errors` |
+| Pause semantics | `StreamSubscription.pause()`; the stream buffers **unboundedly** for that listener | `pause()` applies the buffer/overflow policy |
+| Handler (`request`) capability | no | yes, with a queue and `handlerConcurrency` |
+| Per-subscription metrics | no | yes |
+| Isolate/transport interest and inbound delivery | yes | yes |
+
+A listened stream is broadcast and has no replay: a listener created after `fire` sees nothing (the
+value may still be in `currentData` on a model bus). A handler-only topic does not answer a request
+if its only subscription is a legacy listener.
+
+Use `subscribeEvents` for anything that needs backpressure, error handling, counters or request
+answering; use `listen`/`subscribe` only for a small print/log listener in legacy code.
 
 ## Receiving: `subscribeEvents`
 

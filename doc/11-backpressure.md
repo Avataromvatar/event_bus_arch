@@ -6,6 +6,12 @@ A subscription owns every decision about delivery: when a listener callback runs
 it cannot keep up, and how many requests a handler accepts. The bus only fans events out; the
 subscription's own buffer, queue and pause state implement backpressure.
 
+> `listen` and `subscribe` are **not** part of this model. They use the node's raw broadcast
+> stream: a paused legacy subscription buffers unboundedly inside the Dart stream, has no overflow
+> policy or counters, and a throwing `onData` goes to the zone instead of `errors`. Use
+> `subscribeEvents` for any of the controls below; the legacy facade is removed in 5.0.0
+> (ADR-0001).
+
 ## 1. Listener side
 
 `subscribeEvents(onEvent: ...)` returns an `EventSubscription<T>`. Its listener part has:

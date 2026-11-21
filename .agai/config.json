@@ -1,0 +1,109 @@
+{
+  "agai-sdlc": {
+    "tasks_dir": ".agai/tasks",
+    "context_dir": "doc",
+    "artifacts_dir": "doc/artifacts",
+    "requirements_dir": "doc/artifacts/requirements",
+    "base_branch": "master",
+    "sync_on_start": true,
+    "auto_commit": true,
+    "process_paths": "",
+    "commit_language": "ru",
+    "dashboard": {
+      "pattern": "architect|reviewer|advisor",
+      "label": "REVIEWER",
+      "gate_label": "GATE",
+      "panels": "main,architect,gate,agents,dispatch,loops,receipt,log",
+      "moments": true,
+      "match_descriptions": false,
+      "palette": "theme",
+      "status_line": true,
+      "save": false,
+      "save_dir": ".agai/sessions",
+      "ledger": true,
+      "ledger_path": ".agai/dispatch-ledger.jsonl",
+      "rate_path": ".agai/rate-limits.json"
+    },
+    "optimization": {
+      "enabled": false,
+      "collect": false,
+      "dir": ".agai/optimization",
+      "interval": "1h",
+      "days": 30,
+      "ledger_path": ".agai/dispatch-ledger.jsonl",
+      "metrics_dir": ".agai/metrics/sessions",
+      "sessions_dir": ".agai/sessions",
+      "plugin_roots": "",
+      "min_sample": 5,
+      "history_limit": 200
+    },
+    "teams": {
+      "title": "Avatar Games Team",
+      "refresh_seconds": 60,
+      "yougile_config": ""
+    },
+    "storage": {
+      "repo": "git@github.com:AvatarsGame/agai-storage.git",
+      "branch": "main",
+      "checkout": ".agai/storage/repo",
+      "state": ".agai/storage/state.json",
+      "processed": ".agai/storage/processed"
+    },
+    "coordinator": {
+      "project_idea": "doc/context/project.md",
+      "enabled": true,
+      "knowledge_base": "",
+      "use_yougile": null,
+      "approved": false,
+      "approved_at": "",
+      "approved_by": "",
+      "approved_hash": "",
+      "status_interval_minutes": 30,
+      "analysis_interval_hours": 12,
+      "idle_close_minutes": 60,
+      "close_idle_sessions": false,
+      "state_dir": ".agai/coordinator",
+      "claims_path": ".agai/coordinator/claims.json",
+      "actions_path": ".agai/coordinator/actions.jsonl",
+      "optimizer_roots": "",
+      "optimizer_agent": "agai-sdlc:optimizer",
+      "optimizer_session": "agai-optimizer",
+      "push": "ask",
+      "site_port": 0,
+      "analysis_transcripts": false
+    },
+    "setup_version": 1,
+    "setup_plugin_version": "0.2.56"
+  },
+  "agai-idea": {
+    "mode": "ideas",
+    "root": "doc/context",
+    "private_root": "doc/context/private",
+    "setup_version": 1,
+    "setup_plugin_version": "0.1.12"
+  },
+  "agai-dev": {
+    "setup_version": 1,
+    "setup_plugin_version": "0.2.39"
+  },
+  "agai-product": {
+    "setup_version": 1,
+    "setup_plugin_version": "0.2.2"
+  },
+  "agai-sa": {
+    "setup_version": 1,
+    "setup_plugin_version": "0.1.18"
+  },
+  "agai-qa": {
+    "setup_version": 1,
+    "setup_plugin_version": "0.1.8"
+  },
+  "agai-project": {
+    "setup_version": 1,
+    "setup_plugin_version": "0.2.2"
+  },
+  "agai-ba": {
+    "setup_version": 1,
+    "setup_plugin_version": "0.1.6"
+  }
+}

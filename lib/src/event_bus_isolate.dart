@@ -461,9 +461,10 @@ class EventBusIsolate extends EventBusImpl {
     required this.onInit,
     Object? initialData,
     bool isModelBus = false,
+    ObservabilityConfig observability = ObservabilityConfig.disabled,
   })  : _initialData = initialData,
         _workerIsModelBus = isModelBus,
-        super(isModelBus) {
+        super(isModelBus, observability) {
     unawaited(_init());
   }
 
@@ -505,7 +506,8 @@ class EventBusIsolate extends EventBusImpl {
   bool fire<T>(T data,
       {List<String>? paths,
       String? separator,
-      Map<String, String>? arguments}) {
+      Map<String, String>? arguments,
+      String? correlationId}) {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
     }
@@ -520,8 +522,17 @@ class EventBusIsolate extends EventBusImpl {
     // fire goes to the other side. Delivering the fire locally as well would
     // feed a listener that fires the same topic straight back into itself.
     // Local pub/sub belongs to an ordinary EventBus (Layer.current in Layers).
-    return _link.remoteInterest.hasListener(topic) &&
-        _link.fire(EventDTO<T>(data, topic: topic, arguments: arguments));
+    final observing = _metricsEnabled;
+    final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
+    final accepted = _link.remoteInterest.hasListener(topic) &&
+        _link.fire(EventDTO<T>(data,
+            topic: topic, arguments: arguments, correlationId: correlationId));
+    if (observing) {
+      metrics.recordFire(topic,
+          accepted: accepted,
+          elapsedMicros: DateTime.now().microsecondsSinceEpoch - started);
+    }
+    return accepted;
   }
 
   @override
@@ -530,7 +541,8 @@ class EventBusIsolate extends EventBusImpl {
       String? separator,
       Map<String, String>? arguments,
       Duration? timeout,
-      CancelToken? cancelToken}) async {
+      CancelToken? cancelToken,
+      String? correlationId}) async {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
     }
@@ -542,6 +554,11 @@ class EventBusIsolate extends EventBusImpl {
     final topic = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
     if (cancelToken?.isCancelled ?? false) {
+      if (_metricsEnabled) {
+        metrics.recordRequestStarted(topic);
+        metrics.recordRequestOutcome(
+            topic, RequestOutcome.canceled, 0);
+      }
       throw RequestCanceledException(topic.topic);
     }
     if (haveHandler<T>(paths: paths, separator: separator)) {
@@ -550,15 +567,41 @@ class EventBusIsolate extends EventBusImpl {
           separator: separator,
           arguments: arguments,
           timeout: timeout,
-          cancelToken: cancelToken);
+          cancelToken: cancelToken,
+          correlationId: correlationId);
     }
+    final observing = _metricsEnabled;
+    final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
+    if (observing) metrics.recordRequestStarted(topic);
+    void finish(RequestOutcome outcome) {
+      if (observing) {
+        metrics.recordRequestOutcome(topic, outcome,
+            DateTime.now().microsecondsSinceEpoch - started);
+      }
+    }
+
     if (!_link.remoteInterest.hasHandler(topic)) {
+      finish(RequestOutcome.noHandler);
       throw NoHandlerException(topic.topic);
     }
-    return _link.request(
-        EventDTO<T>(data, topic: topic, arguments: arguments),
-        timeout: timeout,
-        cancelToken: cancelToken);
+    try {
+      final result = await _link.request(
+          EventDTO<T>(data,
+              topic: topic,
+              arguments: arguments,
+              correlationId: correlationId),
+          timeout: timeout,
+          cancelToken: cancelToken);
+      finish(RequestOutcome.completed);
+      return result;
+    } catch (error) {
+      finish(error is RequestTimeoutException
+          ? RequestOutcome.timeout
+          : error is RequestCanceledException
+              ? RequestOutcome.canceled
+              : RequestOutcome.errored);
+      rethrow;
+    }
   }
 
   @override
@@ -842,7 +885,8 @@ class _EventBusForIsolate extends EventBusImpl {
   bool fire<T>(T data,
       {List<String>? paths,
       String? separator,
-      Map<String, String>? arguments}) {
+      Map<String, String>? arguments,
+      String? correlationId}) {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
@@ -854,7 +898,8 @@ class _EventBusForIsolate extends EventBusImpl {
     // feed a listener that fires the same topic straight back into itself.
     // Local pub/sub belongs to an ordinary EventBus (Layer.current in Layers).
     return _link.remoteInterest.hasListener(topic) &&
-        _link.fire(EventDTO<T>(data, topic: topic, arguments: arguments));
+        _link.fire(EventDTO<T>(data,
+            topic: topic, arguments: arguments, correlationId: correlationId));
   }
 
   @override
@@ -863,7 +908,8 @@ class _EventBusForIsolate extends EventBusImpl {
       String? separator,
       Map<String, String>? arguments,
       Duration? timeout,
-      CancelToken? cancelToken}) async {
+      CancelToken? cancelToken,
+      String? correlationId}) async {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
@@ -879,13 +925,17 @@ class _EventBusForIsolate extends EventBusImpl {
           separator: separator,
           arguments: arguments,
           timeout: timeout,
-          cancelToken: cancelToken);
+          cancelToken: cancelToken,
+          correlationId: correlationId);
     }
     if (!_link.remoteInterest.hasHandler(topic)) {
       throw NoHandlerException(topic.topic);
     }
     return _link.request(
-        EventDTO<T>(data, topic: topic, arguments: arguments),
+        EventDTO<T>(data,
+            topic: topic,
+            arguments: arguments,
+            correlationId: correlationId),
         timeout: timeout,
         cancelToken: cancelToken);
   }

@@ -1,3 +1,4 @@
+import 'package:event_bus_arch/event_bus_arch.dart' show ObservabilityConfig;
 import 'package:event_bus_arch_transport/event_bus_arch_transport.dart';
 
 import 'dart_nats_connection.dart';
@@ -31,6 +32,7 @@ class EventBusNats extends TransportEventBus {
     Map<String, String>? typeTags,
     String? originId,
     NatsConnection? connection,
+    ObservabilityConfig? observability,
   }) {
     final id = originId ?? newTransportOriginId();
     return EventBusNats._(
@@ -47,6 +49,7 @@ class EventBusNats extends TransportEventBus {
       serializers: serializers,
       deserializers: deserializers,
       originId: id,
+      observability: observability,
     );
   }
 
@@ -56,6 +59,7 @@ class EventBusNats extends TransportEventBus {
     super.serializers,
     super.deserializers,
     required super.originId,
+    super.observability,
   });
 
   ///The topic-to-subject mapper used by this bus.

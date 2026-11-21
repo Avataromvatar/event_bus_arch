@@ -140,6 +140,7 @@ class MqttServerConnection extends ReconnectingTransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     String? replyTo,
   }) {
@@ -164,6 +165,11 @@ class MqttServerConnection extends ReconnectingTransportConnection {
       if (arguments != null && arguments.isNotEmpty) {
         properties.add(
           _userProperty(TransportHeaderNames.arguments, jsonEncode(arguments)),
+        );
+      }
+      if (correlationId != null) {
+        properties.add(
+          _userProperty(TransportHeaderNames.correlation, correlationId),
         );
       }
     }
@@ -243,6 +249,10 @@ class MqttServerConnection extends ReconnectingTransportConnection {
         properties,
         TransportHeaderNames.origin,
       );
+      final correlationId = _userPropertyValue(
+        properties,
+        TransportHeaderNames.correlation,
+      );
 
       Map<String, String>? arguments;
       final rawArguments = _userPropertyValue(
@@ -268,6 +278,7 @@ class MqttServerConnection extends ReconnectingTransportConnection {
         subject: subject,
         data: data,
         arguments: arguments,
+        correlationId: correlationId,
         replyTo: replyTo,
       );
       final identifiers = header?.subscriptionIdentifier ?? const <int?>[];

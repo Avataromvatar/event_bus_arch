@@ -28,12 +28,13 @@ class TransportEventBus extends EventBusImpl {
     Map<String, EventDTOSerialization>? serializers,
     Map<String, EventDTODeserialization>? deserializers,
     required String originId,
+    ObservabilityConfig? observability,
   })  : _serializers =
             Map<String, EventDTOSerialization>.unmodifiable(serializers ?? {}),
         _deserializers = Map<String, EventDTODeserialization>.unmodifiable(
             deserializers ?? {}),
         _originId = originId,
-        super(false) {
+        super(false, observability ?? ObservabilityConfig.disabled) {
     _subjects = subjects;
     for (final key in _serializers.keys) {
       _subjects.validatePublishKey(key);
@@ -134,6 +135,7 @@ class TransportEventBus extends EventBusImpl {
     Map<String, String>? arguments,
     Duration? timeout,
     CancelToken? cancelToken,
+    String? correlationId,
   }) {
     if (isDisposed) {
       throw StateError('EventBus is disposed: $this');
@@ -152,11 +154,13 @@ class TransportEventBus extends EventBusImpl {
         arguments: arguments,
         timeout: timeout,
         cancelToken: cancelToken,
+        correlationId: correlationId,
       );
     }
     // Broker-side cancellation is not part of the 4.0.0 transport contract
     // (D15); the caller's timeout bounds the wait.
-    return _requestTransport<T>(topic, data, arguments, timeout);
+    return _requestTransport<T>(
+        topic, data, arguments, timeout, correlationId);
   }
 
   Future<dynamic> _requestTransport<T>(
@@ -164,6 +168,38 @@ class TransportEventBus extends EventBusImpl {
     T data,
     Map<String, String>? arguments,
     Duration? timeout,
+    String? correlationId,
+  ) async {
+    final observing = isObservable && observabilityConfig.metrics;
+    final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
+    if (observing) metrics.recordRequestStarted(topic);
+    try {
+      final value = await _requestTransportInner<T>(
+          topic, data, arguments, timeout, correlationId);
+      if (observing) {
+        metrics.recordRequestOutcome(topic, RequestOutcome.completed,
+            DateTime.now().microsecondsSinceEpoch - started);
+      }
+      return value;
+    } catch (error) {
+      if (observing) {
+        metrics.recordRequestOutcome(
+            topic,
+            error is TimeoutException
+                ? RequestOutcome.timeout
+                : RequestOutcome.errored,
+            DateTime.now().microsecondsSinceEpoch - started);
+      }
+      rethrow;
+    }
+  }
+
+  Future<dynamic> _requestTransportInner<T>(
+    Topic topic,
+    T data,
+    Map<String, String>? arguments,
+    Duration? timeout,
+    String? correlationId,
   ) async {
     final serializer = _serializerFor(topic);
     final deserializer = _deserializerFor(topic);
@@ -179,7 +215,8 @@ class TransportEventBus extends EventBusImpl {
     }
 
     _subjects.validatePublish(topic);
-    final dto = EventDTO<T>(data, topic: topic, arguments: arguments);
+    final dto = EventDTO<T>(data,
+        topic: topic, arguments: arguments, correlationId: correlationId);
 
     late final (String?, Uint8List) encoded;
     try {
@@ -205,6 +242,7 @@ class TransportEventBus extends EventBusImpl {
       subject,
       bytes,
       arguments: arguments,
+      correlationId: correlationId,
       originId: _originId,
       timeout: timeout,
     );
@@ -255,6 +293,7 @@ class TransportEventBus extends EventBusImpl {
       result,
       topic: dto.topic,
       arguments: dto.arguments,
+      correlationId: dto.correlationId,
     );
     try {
       final (_, bytes) = serializer(response);

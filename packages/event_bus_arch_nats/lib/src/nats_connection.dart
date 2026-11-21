@@ -29,6 +29,9 @@ abstract final class NatsHeaderNames {
 
   ///JSON-encoded `EventDTO.arguments`.
   static const String arguments = TransportHeaderNames.arguments;
+
+  ///`EventDTO.correlationId`.
+  static const String correlation = TransportHeaderNames.correlation;
 }
 
 ///Connection options that do not leak `dart_nats` types into the public API.

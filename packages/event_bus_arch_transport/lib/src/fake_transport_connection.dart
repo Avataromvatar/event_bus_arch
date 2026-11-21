@@ -12,6 +12,7 @@ class FakeTransportPublish {
     this.arguments,
     this.originId, [
     this.replyTo,
+    this.correlationId,
   ]);
 
   final String subject;
@@ -19,6 +20,7 @@ class FakeTransportPublish {
   final Map<String, String>? arguments;
   final String? originId;
   final String? replyTo;
+  final String? correlationId;
 }
 
 ///One request captured by [FakeTransportConnection].
@@ -29,12 +31,14 @@ class FakeTransportRequest {
     this.arguments,
     this.originId,
     this.replyTo,
+    this.correlationId,
   );
 
   final String subject;
   final Uint8List data;
   final Map<String, String>? arguments;
   final String? originId;
+  final String? correlationId;
 
   ///The subject a response must be delivered to with [deliver].
   final String replyTo;
@@ -94,15 +98,15 @@ class FakeTransportConnection implements TransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     String? replyTo,
   }) {
     if (!isConnected) {
       throw TransportServerUnavailableException(subject);
     }
-    publishes.add(
-      FakeTransportPublish(subject, data, arguments, originId, replyTo),
-    );
+    publishes.add(FakeTransportPublish(
+        subject, data, arguments, originId, replyTo, correlationId));
   }
 
   @override
@@ -110,6 +114,7 @@ class FakeTransportConnection implements TransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     Duration? timeout,
   }) async {
@@ -118,9 +123,8 @@ class FakeTransportConnection implements TransportConnection {
     }
 
     final replyTo = '_INBOX.${_nextInbox++}';
-    requests.add(
-      FakeTransportRequest(subject, data, arguments, originId, replyTo),
-    );
+    requests.add(FakeTransportRequest(
+        subject, data, arguments, originId, replyTo, correlationId));
     final completer = Completer<TransportMessage>();
     final subscription = subscribe(replyTo, (message) {
       if (!completer.isCompleted) completer.complete(message);

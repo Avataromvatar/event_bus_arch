@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-21
+- Implementation notes: 2026-11-22 (settled API and scope are below)
 - Roadmap: E4-01..E4-07
 
 ## Context
@@ -73,6 +74,44 @@ Dynamic topics (`session.<id>`, `order.<uuid>`) make naive per-topic counters un
 
 8. `EventBusLogger` remains the simple event-trace helper; it is not the metrics mechanism and is
    not required for observability.
+
+## Implementation notes (2026-11-22)
+
+Settled API and the scope chosen where the decision left room:
+
+- `ObservabilityConfig({enabled, metrics, tracing, sampleRate, cardinalityLimit,
+  capturePayloads, metricKeyBuilder})`; `enabled` is false by default. It is passed to
+  `EventBus(isModelBus:, observability:)`, `EventBusIsolate(observability:)` and the transport
+  buses. `isObservable` reports `enabled`; `metrics` reads `EventBusMetrics`.
+- The metric key is the event type token by default (`Topic.type`), so a dynamic path cannot grow
+  the registry; `metricKeyBuilder` allows a custom key. The `cardinalityLimit` is enforced before a
+  new key is created; overflow goes to `__other__` and increments `droppedMetricSeries`.
+- Per-key counters: `fired`, `delivered`, `dropped`, `bufferOverflow`; requests `started`,
+  `completed`, `errored`, `timeout`, `canceled`, `busy`. Latency histograms are fixed-bucket and
+  are recorded for `fire` dispatch, request round trips and per-subscription queue wait.
+  `sampleRate` applies only to histogram samples; counters are exact.
+- `EventBusMetrics.snapshot()` returns immutable `EventBusMetricsSnapshot` objects with topic and
+  subscription views. A subscription view includes buffer/queue depth, `maxBufferedRequests`,
+  `bufferedRequests`, `inFlight`, `handlerConcurrency`, delivered/dropped and queue-wait latency.
+  `changes` is a coalesced live stream (at most one snapshot per microtask, only while it has a
+  listener). `EventBusMetricsExporter` is the exporter seam; no exporter ships in the core.
+- Metric recording happens only when `enabled && metrics`; the disabled hot path adds one field
+  read. Benchmark (`benchmark/observability_benchmark.dart`, min of five runs): fire +7.8%,
+  request +3.6% on the same machine, within the provisional <10% budget.
+- Incoming requests (from an isolate or a broker) are counted as requests handled by the bus; an
+  incoming `fire` is not counted as a local `fired` event, but its subscription deliveries are in
+  the subscription view.
+- Correlation id: `EventDTO.correlationId`; `fire`/`request` accept `correlationId:`; handlers see
+  it in the received DTO; isolates carry the DTO unchanged; transports carry it in the
+  `X-EventBus-Correlation-Id` header (NATS headers, MQTT 5 user properties). `EventBusError`
+  carries it when the envelope is created from a request DTO. Listener errors currently have no
+  DTO (the subscription sees only the value), so they carry no correlation id; request errors do.
+- `EventBusErrorMonitor({filter, recentLimit, maxErrorsPerSecond})` merges buses, filters before
+  counting, keeps a bounded recent buffer and a per-second monitor-wide limit (`suppressed`), and
+  exposes `snapshot()` counters by kind and topic. Per-bus limits from ADR-0004 stay in place.
+- Tracing spans are not implemented in 4.0.0: `tracing` and `sampleRate` are carried for a future
+  exporter, while metrics and correlation are complete. Transport connection/status metrics are not
+  in the bus snapshot either; pool restart counters are in `WorkerPoolMetrics` (M3).
 
 ## Consequences
 

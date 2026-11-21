@@ -27,6 +27,8 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 - `Layers` — chains of isolates: `main ↔ isolate₂ ↔ isolate₁ ↔ isolate₀`
 - `WorkerPool` — N workers with `broadcast`/`roundRobin`/`keyed`/`leastBusy`/`single` dispatch,
   request credits and restart supervision; `Layers.supervise` restarts a whole worker chain
+- Observability — opt-in per-topic/subscription metrics, snapshots and a changes stream,
+  correlation ids across isolates and transports, and an error monitor
 - `FSM` — finite state machine driven by bus events
 - `Scope` / `Command` — stateful value with call history
 - `EventBusLogger` — trace every event that crosses the bus
@@ -310,6 +312,35 @@ await supervisor.waitInit;
 supervisor.errors.listen((error) => print(error));
 await supervisor.close();
 ```
+
+### Observability
+
+Collection is off by default and costs nothing on the hot path. Enable it at construction:
+
+```dart
+final bus = EventBus(observability: const ObservabilityConfig(
+  enabled: true,
+  cardinalityLimit: 1000,     // new keys above the limit go to __other__
+  capturePayloads: false,     // errors carry event data only when asked
+));
+
+bus.fire<int>(1, correlationId: 'job-42');
+final snapshot = bus.metrics.snapshot();
+print(snapshot.topics.first.fired);       // 1
+```
+
+- Per topic: fired/delivered/dropped/overflow and request outcomes
+  (started/completed/errored/timeout/canceled/busy), plus fixed-bucket latency histograms.
+- Per subscription: buffer and queue depth, `maxBufferedRequests`, in-flight handlers,
+  concurrency, delivered/dropped and queue-wait latency.
+- The metric key is the event type token by default; `metricKeyBuilder` overrides it. Dynamic paths
+  therefore cannot grow the registry without bound.
+- `bus.metrics.changes` is a coalesced live stream; implement `EventBusMetricsExporter` to feed
+  OpenTelemetry, Prometheus or a dashboard.
+- `correlationId:` on `fire`/`request` reaches handlers (`dto.correlationId`), crosses isolates and
+  travel transport headers; `EventBusError.correlationId` reports it when known.
+- `EventBusErrorMonitor(filter: ..., maxErrorsPerSecond: ...)` aggregates several buses, keeps a
+  bounded recent buffer and exposes `snapshot()` counters by kind and topic.
 
 ### Finite state machine
 

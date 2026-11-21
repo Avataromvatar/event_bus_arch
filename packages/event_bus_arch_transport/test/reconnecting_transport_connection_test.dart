@@ -44,12 +44,12 @@ class _Adapter extends ReconnectingTransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     String? replyTo,
   }) {
-    publications.add(
-      FakeTransportPublish(subject, data, arguments, originId, replyTo),
-    );
+    publications.add(FakeTransportPublish(
+        subject, data, arguments, originId, replyTo, correlationId));
   }
 
   @override

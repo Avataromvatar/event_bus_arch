@@ -114,6 +114,7 @@ class DartNatsConnection extends ReconnectingTransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     String? replyTo,
   }) {
@@ -128,7 +129,7 @@ class DartNatsConnection extends ReconnectingTransportConnection {
         subject: subject,
       );
     }
-    final header = _header(arguments, originId);
+    final header = _header(arguments, originId, correlationId);
     unawaited(() async {
       try {
         final sent = await client.pub(
@@ -181,11 +182,13 @@ class DartNatsConnection extends ReconnectingTransportConnection {
     }
   }
 
-  nats.Header? _header(Map<String, String>? arguments, String? originId) {
+  nats.Header? _header(Map<String, String>? arguments, String? originId,
+      String? correlationId) {
     if (!_options.useHeaders) return null;
     final hasOrigin = originId != null;
     final hasArguments = arguments != null && arguments.isNotEmpty;
-    if (!hasOrigin && !hasArguments) return null;
+    final hasCorrelation = correlationId != null;
+    if (!hasOrigin && !hasArguments && !hasCorrelation) return null;
 
     final header = nats.Header();
     if (hasOrigin) {
@@ -193,6 +196,9 @@ class DartNatsConnection extends ReconnectingTransportConnection {
     }
     if (hasArguments) {
       header.add(NatsHeaderNames.arguments, jsonEncode(arguments));
+    }
+    if (hasCorrelation) {
+      header.add(NatsHeaderNames.correlation, correlationId);
     }
     return header;
   }
@@ -215,6 +221,7 @@ class DartNatsConnection extends ReconnectingTransportConnection {
 
     final headers = _options.useHeaders ? message.header?.headers : null;
     final origin = headers?[NatsHeaderNames.origin];
+    final correlationId = headers?[NatsHeaderNames.correlation];
 
     Map<String, String>? arguments;
     final rawArguments = headers?[NatsHeaderNames.arguments];
@@ -239,6 +246,7 @@ class DartNatsConnection extends ReconnectingTransportConnection {
         subject: subject,
         data: message.byte,
         arguments: arguments,
+        correlationId: correlationId,
         replyTo: message.replyTo,
       ),
       origin: origin,

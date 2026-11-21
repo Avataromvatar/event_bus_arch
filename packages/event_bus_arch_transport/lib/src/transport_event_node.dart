@@ -165,6 +165,7 @@ class TransportEventNode<T>
       subject,
       bytes,
       arguments: dto.arguments,
+      correlationId: dto.correlationId,
       originId: originId,
     );
   }
@@ -173,7 +174,7 @@ class TransportEventNode<T>
     final deserializer = this.deserializer;
     if (deserializer == null) return;
 
-    late final EventDTO dto;
+    late EventDTO dto;
     late final String localTopic;
     try {
       localTopic = subjects.toTopic(message.subject).topic;
@@ -200,6 +201,13 @@ class TransportEventNode<T>
     if (TopicPattern.isPattern(topic) &&
         !TopicPattern.matches(topic, dto.topic)) {
       return;
+    }
+
+    // The wire metadata is authoritative for the correlation id: a decoder
+    // cannot know it from the payload alone.
+    final correlationId = message.correlationId;
+    if (correlationId != null && dto.correlationId != correlationId) {
+      dto = dto.copyWith(correlationId: correlationId);
     }
 
     if (dto.data is! T) {
@@ -236,7 +244,8 @@ class TransportEventNode<T>
     try {
       final bytes = await onRequest(dto, message);
       if (bytes == null) return;
-      connection.publish(replyTo, bytes, originId: originId);
+      connection.publish(replyTo, bytes,
+          originId: originId, correlationId: dto.correlationId);
     } catch (error, stackTrace) {
       _report(error, stackTrace);
     }

@@ -181,13 +181,13 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 
 | ID | Task | PD | Depends on | Status |
 |---|---|---:|---|---|
-| E4-01 | `ObservabilityConfig` and toggle; zero allocations when off | 2 | E1-13 | todo |
-| E4-02 | Metrics model: per topic/subscription, queue depth, busy, timeouts, cancellations | 3 | E4-01 | todo |
-| E4-03 | Snapshot + stream + exporter interface | 2 | E4-02 | todo |
-| E4-04 | Correlation id on `EventDTO`; propagation across isolates and transports | 3 | E1-13 | todo |
-| E4-05 | Cardinality limits and aggregation for dynamic topics | 2 | E4-02 | todo |
-| E4-06 | `EventBusErrorMonitor`: multi-bus aggregation, filters, rate limit, bounded recent buffer | 2 | E1-13 | todo |
-| E4-07 | Tests and overhead benchmark (on/off) | 2 | E4-03..E4-06 | todo |
+| E4-01 | `ObservabilityConfig` and toggle; zero allocations when off | 2 | E1-13 | done |
+| E4-02 | Metrics model: per topic/subscription, queue depth, busy, timeouts, cancellations | 3 | E4-01 | done |
+| E4-03 | Snapshot + stream + exporter interface | 2 | E4-02 | done |
+| E4-04 | Correlation id on `EventDTO`; propagation across isolates and transports | 3 | E1-13 | done |
+| E4-05 | Cardinality limits and aggregation for dynamic topics | 2 | E4-02 | done |
+| E4-06 | `EventBusErrorMonitor`: multi-bus aggregation, filters, rate limit, bounded recent buffer | 2 | E1-13 | done |
+| E4-07 | Tests and overhead benchmark (on/off) | 2 | E4-03..E4-06 | done |
 
 ### E5 — Web and adapters (7–12 PD)
 
@@ -276,10 +276,19 @@ Parallelisable pairs:
 
 ### M4
 
-* Observability off adds no measurable allocation/overhead in the hot path.
-* Metrics are consistent with counters: fired/delivered/dropped/errors/requests/busy/timeouts.
-* Dynamic topics do not grow the metric registry without bound.
-* Correlation id survives an isolate hop and a transport hop.
+* Observability off adds no measurable allocation/overhead in the hot path; the benchmark reports
+  fire +7.8% and request +3.6% when it is on (within the provisional <10% budget).
+* Metrics are consistent with counters: fired/delivered/dropped, request outcomes
+  (started/completed/errored/timeout/canceled/busy), overflow, in-flight and queue depth.
+* The metric key defaults to the event type token; a custom builder is available, and the
+  cardinality limit routes new keys to `__other__` with a `droppedMetricSeries` counter.
+* `snapshot()`, the coalesced `changes` stream and `EventBusMetricsExporter` are the read/exporter
+  seam; queue-wait latency is recorded per subscription.
+* Correlation id survives an isolate hop and a transport hop; errors carry it when known.
+* `EventBusErrorMonitor` filters, limits per second, keeps a bounded recent buffer and snapshots by
+  kind and topic.
+* Tracing spans are deferred: `tracing` and `sampleRate` are carried but no span exporter ships in
+  4.0.0.
 
 ### M5
 

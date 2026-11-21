@@ -65,6 +65,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     String? replyTo,
   });
@@ -109,6 +110,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     String? replyTo,
   }) {
@@ -122,6 +124,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
       subject,
       data,
       arguments: arguments,
+      correlationId: correlationId,
       originId: originId,
       replyTo: replyTo,
     );
@@ -132,6 +135,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     Duration? timeout,
   }) async {
@@ -153,6 +157,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
         subject,
         data,
         arguments: arguments,
+        correlationId: correlationId,
         originId: originId,
         replyTo: replySubject,
       );

@@ -165,6 +165,27 @@ Notes:
   counted in `dropped`.
 * These are JIT numbers; re-run on the target machine and with `dart compile exe` before sizing.
 
+## Observability overhead
+
+`benchmark/observability_benchmark.dart` runs the same hot paths with collection off and on. Each
+scenario is measured five times per setting, alternating, and the minimum is reported.
+
+```text
+dart run benchmark/observability_benchmark.dart
+```
+
+Snapshot (Dart 3.14.0, Windows, 12 CPUs, JIT):
+
+| scenario | operations | off, ns/op | on, ns/op | overhead |
+|---|---:|---:|---:|---:|
+| fire (sync listener) | 200000 | 1316.3 | 1419.3 | +7.8% |
+| request (async handler) | 20000 | 2302.3 | 2385.3 | +3.6% |
+
+The on-path cost is the `DateTime.now` timestamps, the counters and the histogram samples. The
+`changes` stream only schedules a snapshot while it has a listener, so a bus with metrics on but no
+dashboards pays only the counters. `sampleRate` reduces histogram samples without weakening the
+counters.
+
 ## Reading the numbers
 
 * All events were delivered and no sequence number was lost or duplicated in

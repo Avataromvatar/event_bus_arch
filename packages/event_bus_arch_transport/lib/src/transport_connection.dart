@@ -18,6 +18,9 @@ abstract final class TransportHeaderNames {
 
   ///JSON-encoded `EventDTO.arguments`.
   static const String arguments = 'X-EventBus-Arguments';
+
+  ///`EventDTO.correlationId`, when the event has one.
+  static const String correlation = 'X-EventBus-Correlation-Id';
 }
 
 ///One message received from the broker.
@@ -26,12 +29,14 @@ class TransportMessage {
     required this.subject,
     required this.data,
     this.arguments,
+    this.correlationId,
     this.replyTo,
   });
 
   final String subject;
   final Uint8List data;
   final Map<String, String>? arguments;
+  final String? correlationId;
   final String? replyTo;
 }
 
@@ -63,6 +68,7 @@ abstract class TransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     String? replyTo,
   });
@@ -76,6 +82,7 @@ abstract class TransportConnection {
     String subject,
     Uint8List data, {
     Map<String, String>? arguments,
+    String? correlationId,
     String? originId,
     Duration? timeout,
   });

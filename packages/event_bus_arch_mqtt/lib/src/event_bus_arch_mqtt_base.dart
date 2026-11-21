@@ -1,3 +1,4 @@
+import 'package:event_bus_arch/event_bus_arch.dart' show ObservabilityConfig;
 import 'package:event_bus_arch_transport/event_bus_arch_transport.dart';
 
 import 'mqtt5_client_connection.dart';
@@ -29,6 +30,7 @@ class EventBusMqtt extends TransportEventBus {
     Map<String, String>? typeTags,
     String? originId,
     MqttConnection? connection,
+    ObservabilityConfig? observability,
   }) {
     final id = originId ?? newTransportOriginId();
     return EventBusMqtt._(
@@ -44,6 +46,7 @@ class EventBusMqtt extends TransportEventBus {
       serializers: serializers,
       deserializers: deserializers,
       originId: id,
+      observability: observability,
     );
   }
 
@@ -53,6 +56,7 @@ class EventBusMqtt extends TransportEventBus {
     super.serializers,
     super.deserializers,
     required super.originId,
+    super.observability,
   });
 
   ///The topic-to-subject mapper used by this bus.

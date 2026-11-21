@@ -156,6 +156,13 @@ abstract class EventBus {
   ///Errors suppressed by the per-kind/topic rate limit.
   int get suppressedErrors;
 
+  ///True when observability is enabled for this bus.
+  bool get isObservable;
+
+  ///The metric collector of this bus. Safe to read when observability is off:
+  ///the snapshot is empty in that case.
+  EventBusMetrics get metrics;
+
   /// Returns true if the bus contains a listener for the specified topic
   bool haveListener<T>({List<String>? paths, String? separator});
 
@@ -172,12 +179,14 @@ abstract class EventBus {
   /// Returns true when the event was accepted: there
   /// is a local node (or the bus created one) or a transport accepted it.
   /// A false result means nobody is listening and no transport knows the
-  /// topic.
+  /// topic. [correlationId] is stored in the event and reaches handlers,
+  /// isolates and transport headers; it is optional.
   bool fire<T>(
     T data, {
     List<String>? paths,
     String? separator,
     Map<String, String>? arguments,
+    String? correlationId,
   });
 
   /// Sends a request and waits for the result of a handler.
@@ -192,6 +201,7 @@ abstract class EventBus {
     Map<String, String>? arguments,
     Duration? timeout,
     CancelToken? cancelToken,
+    String? correlationId,
   });
 
   /// Listens to events on a specific topic.
@@ -245,8 +255,10 @@ abstract class EventBus {
 
   /// Factory constructor for EventBus.
   /// Creates an EventBusImpl instance.
-  factory EventBus({bool isModelBus = false}) {
-    return EventBusImpl(isModelBus);
+  factory EventBus(
+      {bool isModelBus = false, ObservabilityConfig? observability}) {
+    return EventBusImpl(
+        isModelBus, observability ?? ObservabilityConfig.disabled);
   }
 }
 
@@ -255,14 +267,34 @@ class EventBusImpl with EventBusMixin, _EventBusHandlersMixin {
   @override
   bool get isModelBus => _isModelBus;
 
+  @override
+  final ObservabilityConfig observabilityConfig;
+
   /// Creates an EventBusImpl instance.
   /// If isModelBus is true, the bus behaves as a model bus.
-  EventBusImpl(this._isModelBus);
+  EventBusImpl(this._isModelBus,
+      [this.observabilityConfig = ObservabilityConfig.disabled]);
 }
 
 mixin EventBusMixin implements EventBus {
   @override
   String defaultTopicPathSeparator = '.';
+
+  ///Observability switches of this bus; supplied by the concrete bus.
+  ObservabilityConfig get observabilityConfig;
+
+  EventBusMetrics? _metricsInstance;
+
+  @override
+  bool get isObservable => observabilityConfig.enabled;
+
+  @override
+  EventBusMetrics get metrics => _metricsInstance ??= EventBusMetrics(this);
+
+  ///True when metric counters and histograms must be collected. The check is a
+  ///field read, so a disabled bus pays nothing beyond it.
+  bool get _metricsEnabled =>
+      observabilityConfig.enabled && observabilityConfig.metrics;
 
   ///Default requestQueueCapacity for handler subscriptions created without an
   ///explicit override.
@@ -298,6 +330,9 @@ mixin EventBusMixin implements EventBus {
   ///rest are counted in [suppressedErrors]. The recent list is bounded.
   void reportError(EventBusError error) {
     if (_disposed) return;
+    if (_metricsEnabled && error.kind == EventBusErrorKind.bufferOverflow) {
+      metrics.recordOverflow(error.topic);
+    }
     final key = '${error.kind.name}|${error.topic}';
     final window =
         _errorWindows.putIfAbsent(key, () => <DateTime>[]);
@@ -551,6 +586,8 @@ mixin EventBusMixin implements EventBus {
       bufferOverflow: bufferOverflow,
       deliveryMode: deliveryMode,
       cancelOnError: cancelOnError,
+      capturePayloads: isObservable && observabilityConfig.capturePayloads,
+      trackMetrics: _metricsEnabled,
       onError: onError,
       onDone: onDone,
       onCancel: () {
@@ -575,15 +612,19 @@ mixin EventBusMixin implements EventBus {
   bool fire<T>(T data,
       {List<String>? paths,
       String? separator,
-      Map<String, String>? arguments}) {
+      Map<String, String>? arguments,
+      String? correlationId}) {
     _checkNotDisposed();
     _rejectWildcardPaths(paths, 'fire');
+    final observing = _metricsEnabled;
+    final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
     var dto = EventDTO<T>(data,
         paths: paths,
         // the same fallback as subscribeEvents/listen/currentData: otherwise a send
         // would address a node nobody else can address
         separator: separator ?? defaultTopicPathSeparator,
-        arguments: arguments);
+        arguments: arguments,
+        correlationId: correlationId);
     // A model or transport bus may create the exact node for this topic.
     _sendNode<T>(dto.topic);
     final matched = _dispatchToListeners(dto);
@@ -592,6 +633,11 @@ mixin EventBusMixin implements EventBus {
     final accepted =
         matched || (isModelBus && _nodeByTopic(dto.topic) != null);
     _addAllEvent(dto, accepted);
+    if (observing) {
+      metrics.recordFire(dto.topic,
+          accepted: accepted,
+          elapsedMicros: DateTime.now().microsecondsSinceEpoch - started);
+    }
     return accepted;
   }
 
@@ -759,6 +805,11 @@ mixin EventBusMixin implements EventBus {
     _disposed = true;
     await _allEventStream.close();
     await _errorsController.close();
+    final metricsInstance = _metricsInstance;
+    _metricsInstance = null;
+    if (metricsInstance != null) {
+      await metricsInstance.dispose();
+    }
     _errorWindows.clear();
     var nodes = [..._eventsMap.values, ..._patternMap.values];
     _eventsMap.clear();
@@ -849,15 +900,23 @@ mixin _EventBusHandlersMixin on EventBusMixin {
       String? separator,
       Map<String, String>? arguments,
       Duration? timeout,
-      CancelToken? cancelToken}) async {
+      CancelToken? cancelToken,
+      String? correlationId}) async {
     _checkNotDisposed();
     _rejectWildcardPaths(paths, 'request');
     final topic = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
     if (cancelToken?.isCancelled ?? false) {
+      if (_metricsEnabled) {
+        metrics.recordRequestStarted(topic);
+        metrics.recordRequestOutcome(topic, RequestOutcome.canceled, 0);
+      }
       throw RequestCanceledException(topic.topic);
     }
-    final dto = EventDTO<T>(data, topic: topic, arguments: arguments);
+    final dto = EventDTO<T>(data,
+        topic: topic,
+        arguments: arguments,
+        correlationId: correlationId);
     return _dispatchRequest(
       dto,
       incoming: false,
@@ -874,9 +933,20 @@ mixin _EventBusHandlersMixin on EventBusMixin {
     CancelToken? cancelToken,
     void Function()? onAccepted,
   }) {
+    final observing = _metricsEnabled;
+    final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
+    if (observing) metrics.recordRequestStarted(dto.topic);
+    void finish(RequestOutcome outcome) {
+      if (observing) {
+        metrics.recordRequestOutcome(dto.topic, outcome,
+            DateTime.now().microsecondsSinceEpoch - started);
+      }
+    }
+
     final tier = _resolveTier(dto.topic);
     if (tier == null) {
       _addAllEvent(dto, false);
+      finish(RequestOutcome.errored);
       throw NoHandlerException(dto.topic.topic);
     }
 
@@ -885,6 +955,7 @@ mixin _EventBusHandlersMixin on EventBusMixin {
         .toList(growable: false);
     if (accepting.isEmpty) {
       _addAllEvent(dto, false);
+      finish(RequestOutcome.errored);
       throw NoHandlerException(dto.topic.topic);
     }
 
@@ -899,6 +970,7 @@ mixin _EventBusHandlersMixin on EventBusMixin {
         topic: dto.topic.topic,
         error: busy,
       ));
+      finish(RequestOutcome.busy);
       throw busy;
     }
 
@@ -913,6 +985,12 @@ mixin _EventBusHandlersMixin on EventBusMixin {
       invoke: () => subscription.invokeRequest(dto, previous),
       onBusError: reportError,
     );
+    entry.dto = dto;
+    entry.capturePayloads =
+        isObservable && observabilityConfig.capturePayloads;
+    if (isObservable) {
+      entry.onFinished = finish;
+    }
     entry.arm(timeout: timeout, cancelToken: cancelToken);
     if (!subscription._enqueueRequest(entry)) {
       entry.fail(BusyException(dto.topic.topic));

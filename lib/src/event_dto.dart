@@ -1,28 +1,47 @@
 part of event_arch;
 
-///One event: its topic, the data and the call arguments.
+///One event: its topic, the data, the call arguments and an optional
+///correlation id.
 abstract class EventDTO<T> {
   Topic get topic;
   T get data;
   Map<String, String>? get arguments;
 
+  ///An optional id that ties an event and every event caused by it together.
+  ///It crosses isolate and transport boundaries but is never required.
+  String? get correlationId;
+
+  ///A copy with some fields replaced. A null argument keeps the current value,
+  ///so a correlation id cannot be cleared with this method.
+  EventDTO<T> copyWith(
+      {T? data,
+      Topic? topic,
+      Map<String, String>? arguments,
+      String? correlationId});
+
   static EventDTO<T> create<T>(T data,
       {List<String>? paths,
       String? separator,
-      Map<String, String>? arguments}) {
+      Map<String, String>? arguments,
+      String? correlationId}) {
     return EventDTO<T>(data,
-        paths: paths, separator: separator, arguments: arguments);
+        paths: paths,
+        separator: separator,
+        arguments: arguments,
+        correlationId: correlationId);
   }
 
   factory EventDTO(T data,
       {Topic? topic,
       List<String>? paths,
       Map<String, String>? arguments,
-      String? separator}) {
+      String? separator,
+      String? correlationId}) {
     return EventDTOImpl<T>(
       topic ?? Topic.create<T>(paths: paths, separator: separator ?? '.'),
       data,
       arguments: arguments,
+      correlationId: correlationId,
       /* route*/
     );
   }
@@ -40,7 +59,25 @@ class EventDTOImpl<T> implements EventDTO<T> {
   T data;
   @override
   Map<String, String>? arguments;
-  EventDTOImpl(this.topic, this.data, {this.arguments});
+  @override
+  final String? correlationId;
+  EventDTOImpl(this.topic, this.data,
+      {this.arguments, this.correlationId});
+
+  @override
+  EventDTO<T> copyWith(
+      {T? data,
+      Topic? topic,
+      Map<String, String>? arguments,
+      String? correlationId}) {
+    return EventDTOImpl<T>(
+      topic ?? this.topic,
+      data ?? this.data,
+      arguments: arguments ?? this.arguments,
+      correlationId: correlationId ?? this.correlationId,
+    );
+  }
+
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -63,6 +100,7 @@ class EventDTOImpl<T> implements EventDTO<T> {
     return {
       'topic': topic.topic,
       'data': data,
+      if (correlationId != null) 'correlationId': correlationId,
     };
   }
 
@@ -72,6 +110,7 @@ class EventDTOImpl<T> implements EventDTO<T> {
         Topic.parse(json['topic']),
         dataConverter != null
             ? dataConverter.call(json['topic'], json['data'])
-            : json['data']);
+            : json['data'],
+        correlationId: json['correlationId'] as String?);
   }
 }

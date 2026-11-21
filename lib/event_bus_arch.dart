@@ -22,6 +22,7 @@ part 'src/event_bus.dart';
 part 'src/event_subscription.dart';
 part 'src/event_bus_error.dart';
 part 'src/worker_pool.dart';
+part 'src/observability.dart';
 // export 'src/event_controller.dart'
 //     show
 //         EventBus,

@@ -289,11 +289,13 @@ class WorkerPool {
   bool fire<T>(T data,
       {List<String>? paths,
       String? separator,
-      Map<String, String>? arguments}) {
+      Map<String, String>? arguments,
+      String? correlationId}) {
     _checkOpen();
     final topic =
         Topic.create<T>(paths: paths, separator: separator ?? '.');
-    final dto = EventDTO<T>(data, topic: topic, arguments: arguments);
+    final dto = EventDTO<T>(data,
+        topic: topic, arguments: arguments, correlationId: correlationId);
     _counters.fired++;
 
     if (dispatch == DispatchStrategy.broadcast) {
@@ -303,15 +305,17 @@ class WorkerPool {
         final bus = slot.bus;
         if (!slot.ready || bus == null) continue;
         delivered = true;
-        accepted =
-            _fireOn<T>(slot, bus, data, paths, separator, arguments) || accepted;
+        accepted = _fireOn<T>(slot, bus, data, paths, separator, arguments,
+                correlationId) ||
+            accepted;
       }
       if (!delivered) _counters.dropped++;
       return accepted;
     }
 
     final slot = _select(dto);
-    return _fireOnSelected<T>(slot, data, paths, separator, arguments);
+    return _fireOnSelected<T>(
+        slot, data, paths, separator, arguments, correlationId);
   }
 
   ///Sends a request to the worker selected by [dispatch] and waits for its
@@ -321,7 +325,8 @@ class WorkerPool {
       String? separator,
       Map<String, String>? arguments,
       Duration? timeout,
-      CancelToken? cancelToken}) async {
+      CancelToken? cancelToken,
+      String? correlationId}) async {
     _checkOpen();
     if (dispatch == DispatchStrategy.broadcast) {
       throw UnsupportedError(
@@ -330,7 +335,8 @@ class WorkerPool {
     }
     final topic =
         Topic.create<T>(paths: paths, separator: separator ?? '.');
-    final dto = EventDTO<T>(data, topic: topic, arguments: arguments);
+    final dto = EventDTO<T>(data,
+        topic: topic, arguments: arguments, correlationId: correlationId);
     final slot = _select(dto);
     if (slot == null || !_available(slot)) {
       _counters.failedRequests++;
@@ -348,7 +354,8 @@ class WorkerPool {
           separator: separator,
           arguments: arguments,
           timeout: timeout,
-          cancelToken: cancelToken);
+          cancelToken: cancelToken,
+          correlationId: correlationId);
     } on StateError {
       // the worker died between the readiness check and the send
       _counters.failedRequests++;
@@ -437,20 +444,26 @@ class WorkerPool {
   int _positiveHash(Object? key) => (key ?? '').hashCode & 0x7fffffff;
 
   bool _fireOnSelected<T>(_WorkerSlot? slot, T data, List<String>? paths,
-      String? separator, Map<String, String>? arguments) {
+      String? separator, Map<String, String>? arguments,
+      String? correlationId) {
     if (slot == null || !_available(slot)) {
       _counters.dropped++;
       return false;
     }
-    return _fireOn<T>(slot, slot.bus!, data, paths, separator, arguments);
+    return _fireOn<T>(
+        slot, slot.bus!, data, paths, separator, arguments, correlationId);
   }
 
   bool _fireOn<T>(_WorkerSlot slot, EventBusIsolate bus, T data,
-      List<String>? paths, String? separator, Map<String, String>? arguments) {
+      List<String>? paths, String? separator, Map<String, String>? arguments,
+      String? correlationId) {
     slot.fired++;
     try {
       final accepted = bus.fire<T>(data,
-          paths: paths, separator: separator, arguments: arguments);
+          paths: paths,
+          separator: separator,
+          arguments: arguments,
+          correlationId: correlationId);
       if (accepted) _counters.accepted++;
       return accepted;
     } on StateError {

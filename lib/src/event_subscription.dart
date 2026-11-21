@@ -46,6 +46,8 @@ class EventSubscription<T> {
     required this.cancelOnError,
     required this.onCancel,
     required this.onBusError,
+    this.capturePayloads = false,
+    this.trackMetrics = false,
     this.onError,
     this.onDone,
     int? bufferCapacity,
@@ -68,6 +70,7 @@ class EventSubscription<T> {
       throw ArgumentError(
           'an EventSubscription needs onEvent, handler, or both');
     }
+    if (trackMetrics) _queueWait = _LatencyHistogram();
   }
 
   ///The topic this subscription is attached to.
@@ -91,6 +94,13 @@ class EventSubscription<T> {
   ///Cancel the subscription after the first listener error.
   final bool cancelOnError;
 
+  ///Attach the event to listener errors. Off by default; set by the bus when
+  ///`ObservabilityConfig.capturePayloads` is on.
+  final bool capturePayloads;
+
+  ///Track queue depth and queue-wait latency for the metrics snapshot.
+  final bool trackMetrics;
+
   ///Called when the subscription is cancelled explicitly.
   final void Function() onCancel;
 
@@ -107,6 +117,8 @@ class EventSubscription<T> {
   final Queue<_RequestEntry> _requestQueue = Queue<_RequestEntry>();
   int? _bufferCapacity;
   BufferOverflow _bufferOverflow;
+  _LatencyHistogram? _queueWait;
+  int _maxBufferedRequests = 0;
 
   bool _paused = false;
   bool _busy = false;
@@ -171,13 +183,21 @@ class EventSubscription<T> {
   bool get hasListener =>
       onEvent != null || (_view != null && (_view?.hasListener ?? false));
 
+  ///The largest request queue depth observed.
+  int get maxBufferedRequests => _maxBufferedRequests;
+
+  ///Queue-wait latency, recorded only when [trackMetrics] is on.
+  LatencySnapshot? get queueWaitLatency => _queueWait?.snapshot();
+
   ///Whether [data] is of the handler's type.
   bool acceptsData(Object? data) => hasHandler && data is T;
 
   ///Invokes the handler with a typed DTO and the previous value snapshot.
   Future<dynamic> invokeRequest(EventDTO dto, Object? lastData) {
     final typed = EventDTO<T>(dto.data as T,
-        topic: dto.topic, arguments: dto.arguments);
+        topic: dto.topic,
+        arguments: dto.arguments,
+        correlationId: dto.correlationId);
     return handler!(typed, lastData as T?);
   }
 
@@ -190,6 +210,12 @@ class EventSubscription<T> {
     if (_inFlight < handlerConcurrency) {
       _startRequest(entry);
     } else {
+      if (trackMetrics) {
+        entry._queuedAtMicros = DateTime.now().microsecondsSinceEpoch;
+        if (_requestQueue.length + 1 > _maxBufferedRequests) {
+          _maxBufferedRequests = _requestQueue.length + 1;
+        }
+      }
       _requestQueue.addLast(entry);
     }
     return true;
@@ -199,6 +225,11 @@ class EventSubscription<T> {
   bool _removeQueuedRequest(_RequestEntry entry) => _requestQueue.remove(entry);
 
   void _startRequest(_RequestEntry entry) {
+    final queuedAt = entry._queuedAtMicros;
+    if (queuedAt != null) {
+      _queueWait?.record(DateTime.now().microsecondsSinceEpoch - queuedAt);
+      entry._queuedAtMicros = null;
+    }
     _inFlight++;
     unawaited(entry.run().whenComplete(() {
       _inFlight--;
@@ -409,12 +440,12 @@ class EventSubscription<T> {
       _delivered++;
       if (result is Future) {
         return result.catchError((Object error, StackTrace stackTrace) {
-          _handleError(error, stackTrace);
+          _handleError(error, stackTrace, event);
         });
       }
       return null;
     } catch (error, stackTrace) {
-      _handleError(error, stackTrace);
+      _handleError(error, stackTrace, event);
       return null;
     }
   }
@@ -426,13 +457,14 @@ class EventSubscription<T> {
     }
   }
 
-  void _handleError(Object error, StackTrace stackTrace) {
+  void _handleError(Object error, StackTrace stackTrace, T event) {
     onError?.call(error, stackTrace);
     onBusError(EventBusError(
       kind: EventBusErrorKind.listener,
       topic: topic.topic,
       error: error,
       stackTrace: stackTrace,
+      event: capturePayloads ? EventDTO<T>(event, topic: topic) : null,
     ));
     if (cancelOnError) {
       unawaited(cancel());
@@ -494,6 +526,19 @@ class _RequestEntry {
   final Completer<dynamic> completer = Completer<dynamic>();
 
   EventSubscription? owner;
+
+  ///When the request was put into the queue; only set when metrics are on.
+  int? _queuedAtMicros;
+
+  ///The request event, available only when observability is enabled. Used for
+  ///payload capture and the correlation id in error envelopes.
+  EventDTO? dto;
+  bool capturePayloads = false;
+
+  ///One metric outcome per request; set by the bus only when metrics are on.
+  void Function(RequestOutcome outcome)? onFinished;
+  bool _outcomeReported = false;
+
   Timer? _timer;
   bool _finished = false;
   bool _cancelled = false;
@@ -501,6 +546,24 @@ class _RequestEntry {
   Future<dynamic> get future => completer.future;
   bool get isFinished => _finished;
   bool get isCancelled => _cancelled;
+
+  void _reportOutcome(RequestOutcome outcome) {
+    if (_outcomeReported) return;
+    _outcomeReported = true;
+    onFinished?.call(outcome);
+  }
+
+  EventBusError _errorEnvelope(EventBusErrorKind kind, Object error,
+      [StackTrace? stackTrace]) {
+    return EventBusError(
+      kind: kind,
+      topic: topic,
+      error: error,
+      stackTrace: stackTrace,
+      event: capturePayloads ? dto : null,
+      correlationId: dto?.correlationId,
+    );
+  }
 
   ///Starts the timeout and/or attaches the cancellation token.
   void arm({Duration? timeout, CancelToken? cancelToken}) {
@@ -532,15 +595,19 @@ class _RequestEntry {
     _timer = null;
     owner?._removeQueuedRequest(this);
     if (!completer.isCompleted) completer.completeError(error);
-    onBusError?.call(EventBusError(
-      kind: error is RequestTimeoutException
+    onBusError?.call(_errorEnvelope(
+      error is RequestTimeoutException
           ? EventBusErrorKind.requestTimeout
           : error is RequestCanceledException
               ? EventBusErrorKind.requestCanceled
               : EventBusErrorKind.other,
-      topic: topic,
-      error: error,
+      error,
     ));
+    _reportOutcome(error is RequestTimeoutException
+        ? RequestOutcome.timeout
+        : error is RequestCanceledException
+            ? RequestOutcome.canceled
+            : RequestOutcome.errored);
   }
 
   ///Fails a queued entry because its subscription was cancelled or disposed.
@@ -552,11 +619,12 @@ class _RequestEntry {
     _timer = null;
     owner?._removeQueuedRequest(this);
     if (!completer.isCompleted) completer.completeError(error);
-    onBusError?.call(EventBusError(
-      kind: EventBusErrorKind.other,
-      topic: topic,
-      error: error,
-    ));
+    onBusError?.call(_errorEnvelope(EventBusErrorKind.other, error));
+    _reportOutcome(error is BusyException
+        ? RequestOutcome.busy
+        : error is NoHandlerException
+            ? RequestOutcome.noHandler
+            : RequestOutcome.errored);
   }
 
   ///Runs the handler. The future never throws: an error goes to the caller's
@@ -565,14 +633,12 @@ class _RequestEntry {
     try {
       final result = await invoke();
       if (!completer.isCompleted) completer.complete(result);
+      _reportOutcome(RequestOutcome.completed);
     } catch (error, stackTrace) {
       if (!completer.isCompleted) completer.completeError(error, stackTrace);
-      onBusError?.call(EventBusError(
-        kind: EventBusErrorKind.handler,
-        topic: topic,
-        error: error,
-        stackTrace: stackTrace,
-      ));
+      onBusError?.call(_errorEnvelope(
+          EventBusErrorKind.handler, error, stackTrace));
+      _reportOutcome(RequestOutcome.errored);
     } finally {
       _finished = true;
       _timer?.cancel();

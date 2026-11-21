@@ -34,6 +34,7 @@ class EventBusError {
     this.source = EventBusErrorSource.core,
     this.topic,
     this.event,
+    this.correlationId,
     this.stackTrace,
     this.context = const <String, String>{},
     DateTime? timestamp,
@@ -47,6 +48,9 @@ class EventBusError {
 
   ///The event involved; null unless payload capture is enabled.
   final EventDTO? event;
+
+  ///The correlation id of the event involved, when one was known.
+  final String? correlationId;
 
   ///The underlying error.
   final Object error;
@@ -64,37 +68,114 @@ class EventBusError {
   }
 }
 
+///A predicate that decides whether the monitor accepts an error.
+typedef EventBusErrorFilter = bool Function(EventBusError error);
+
+///A consistent view of a monitor's counters and its bounded recent buffer.
+class EventBusErrorSnapshot {
+  const EventBusErrorSnapshot({
+    required this.total,
+    required this.suppressed,
+    required this.byKind,
+    required this.byTopic,
+    required this.recent,
+  });
+
+  final int total;
+
+  ///Errors dropped by the monitor's own per-second limit.
+  final int suppressed;
+
+  final Map<EventBusErrorKind, int> byKind;
+
+  ///Counts keyed by topic; errors without a topic use `__none__`.
+  final Map<String, int> byTopic;
+
+  final List<EventBusError> recent;
+
+  @override
+  String toString() =>
+      'EventBusErrorSnapshot(total: $total, suppressed: $suppressed)';
+}
+
 ///An aggregator over the error streams of several buses.
 ///
 ///It is not a static global: tests and applications keep their own monitor,
-///so several applications in one process do not share state.
+///so several applications in one process do not share state. [filter] runs
+///before counting; the per-second [maxErrorsPerSecond] limit protects a
+///dashboard from a storm coming from many buses at once, while each bus keeps
+///its own per-`(kind, topic)` limit (ADR-0004).
 class EventBusErrorMonitor {
+  EventBusErrorMonitor({
+    this.filter,
+    this.recentLimit = 100,
+    this.maxErrorsPerSecond = 200,
+  })  : assert(recentLimit >= 0),
+        assert(maxErrorsPerSecond == null || maxErrorsPerSecond > 0);
+
+  final EventBusErrorFilter? filter;
+  final int recentLimit;
+
+  ///The monitor-wide limit; null means unlimited.
+  final int? maxErrorsPerSecond;
+
   final Map<EventBus, StreamSubscription<EventBusError>> _subscriptions = {};
   final StreamController<EventBusError> _controller =
       StreamController<EventBusError>.broadcast();
   final List<EventBusError> _recent = <EventBusError>[];
   final Map<EventBusErrorKind, int> _counts = <EventBusErrorKind, int>{};
+  final Map<String, int> _byTopic = <String, int>{};
+  final List<DateTime> _window = <DateTime>[];
+  int _total = 0;
+  int _suppressed = 0;
 
   ///Merged errors of every registered bus.
   Stream<EventBusError> get errors => _controller.stream;
 
-  ///The most recent errors, up to 100.
-  List<EventBusError> get recentErrors => List<EventBusError>.unmodifiable(_recent);
+  ///The most recent errors, up to [recentLimit].
+  List<EventBusError> get recentErrors =>
+      List<EventBusError>.unmodifiable(_recent);
 
   ///Counts by kind since [resetCounters] or construction.
   Map<EventBusErrorKind, int> get counts =>
       Map<EventBusErrorKind, int>.unmodifiable(_counts);
 
+  ///Errors dropped by the monitor-wide rate limit.
+  int get suppressed => _suppressed;
+
   ///Starts observing [bus]. Returns false when it is already observed.
   bool add(EventBus bus) {
     if (_subscriptions.containsKey(bus)) return false;
-    _subscriptions[bus] = bus.errors.listen((error) {
-      _counts[error.kind] = (_counts[error.kind] ?? 0) + 1;
-      _recent.add(error);
-      if (_recent.length > 100) _recent.removeAt(0);
-      if (!_controller.isClosed) _controller.add(error);
-    });
+    _subscriptions[bus] = bus.errors.listen(_onError);
     return true;
+  }
+
+  void _onError(EventBusError error) {
+    final filter = this.filter;
+    if (filter != null && !filter(error)) return;
+    final limit = maxErrorsPerSecond;
+    if (limit != null) {
+      final now = DateTime.now();
+      _window.removeWhere(
+          (time) => now.difference(time) > const Duration(seconds: 1));
+      if (_window.length >= limit) {
+        _suppressed++;
+        return;
+      }
+      _window.add(now);
+    }
+
+    _total++;
+    _counts[error.kind] = (_counts[error.kind] ?? 0) + 1;
+    final topic = error.topic ?? '__none__';
+    _byTopic[topic] = (_byTopic[topic] ?? 0) + 1;
+    _recent.add(error);
+    while (_recent.length > recentLimit) {
+      _recent.removeAt(0);
+    }
+    if (!_controller.isClosed) {
+      _controller.add(error);
+    }
   }
 
   ///Stops observing [bus]. Returns false when it was not observed.
@@ -105,8 +186,22 @@ class EventBusErrorMonitor {
     return true;
   }
 
-  ///Clears [counts]; [recentErrors] is kept.
-  void resetCounters() => _counts.clear();
+  ///Clears the counters (including [suppressed]); [recentErrors] is kept.
+  void resetCounters() {
+    _counts.clear();
+    _byTopic.clear();
+    _total = 0;
+    _suppressed = 0;
+  }
+
+  ///An immutable view of the counters and the recent buffer.
+  EventBusErrorSnapshot snapshot() => EventBusErrorSnapshot(
+        total: _total,
+        suppressed: _suppressed,
+        byKind: Map<EventBusErrorKind, int>.unmodifiable(_counts),
+        byTopic: Map<String, int>.unmodifiable(_byTopic),
+        recent: List<EventBusError>.unmodifiable(_recent),
+      );
 
   ///Stops observing every bus and closes the merged stream.
   Future<void> dispose() async {

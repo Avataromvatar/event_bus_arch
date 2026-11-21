@@ -5,8 +5,6 @@ import 'dart:isolate';
 import 'dart:collection';
 
 // import 'package:async/async.dart';
-import 'package:rxdart/rxdart.dart';
-export 'package:rxdart/rxdart.dart';
 
 part 'src/layers.dart';
 part 'src/fsm.dart';
@@ -20,6 +18,7 @@ part 'src/exception.dart';
 // part 'src/event_master.dart';
 part 'src/event_bus_isolate.dart';
 part 'src/event_bus.dart';
+part 'src/event_subscription.dart';
 // export 'src/event_controller.dart'
 //     show
 //         EventBus,

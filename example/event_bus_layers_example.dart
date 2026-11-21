@@ -111,8 +111,9 @@ void _initMiddleLayers(Layer layer, Object? initialData) async {
   // await (layer.bottom as EventBusIsolate).waitInit;
   var controller = TestMiddleIsolateController(layer);
   //create closure for controller
-  layer.top!.allEventStream.doOnDone(
-    () {
+  layer.top!.allEventStream.listen(
+    null,
+    onDone: () {
       controller.dispose();
     },
   );
@@ -122,8 +123,9 @@ void _initBottomLayers(Layer layer, Object? initialData) async {
   print('Hello From Bottom ${Isolate.current.hashCode}');
   var controller = TestBottomIsolateController(layer);
   //create closure for controller
-  layer.top!.allEventStream.doOnDone(
-    () {
+  layer.top!.allEventStream.listen(
+    null,
+    onDone: () {
       controller.dispose();
     },
   );

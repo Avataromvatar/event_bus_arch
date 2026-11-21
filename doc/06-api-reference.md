@@ -3,16 +3,15 @@
 [← 05. Scope and Command](05-scope-and-command.md) · [Contents](README.md) · [Next: Pitfalls →](07-caveats.md)
 
 The entire public API lives in a single library — `package:event_bus_arch/event_bus_arch.dart`
-(library name `event_arch`, assembled from `part` files). The package **re-exports `rxdart`**, so
-`BehaviorSubject`, `doOnCancel`, `debounceTime` and the rest are available through it — no
-separate import is needed.
+(library name `event_arch`, assembled from `part` files). The package does not re-export `rxdart`;
+add it to your own dependencies if you need its operators.
 
 ## Contents
 
 * [Typedefs](#typedefs)
 * [Topic](#topic) / [TopicImpl](#topicimpl) / [TopicPattern](#topicpattern)
 * [EventDTO](#eventdto) / [EventDTOImpl](#eventdtoimpl)
-* [EventNode](#eventnode) / [RequestHandler](#requesthandler)
+* [EventNode](#eventnode) / [EventSubscription](#eventsubscription) / [RequestHandler](#requesthandler)
 * [EventBus](#eventbus) / [EventBusHandlers](#eventbushandlers) / [EventBusImpl](#eventbusimpl) /
   [EventBusMixin](#eventbusmixin) / [EventBusHandlersMixin](#eventbushandlersmixin)
 * [EventBusIsolate](#eventbusisolate)
@@ -222,6 +221,61 @@ abstract class IncomingEventNode {
 
 Transport nodes implement both. Local `EventNodeImp` implements neither.
 
+### SubscriptionHost
+
+```dart
+abstract class SubscriptionHost<T> {
+  void addSubscription(EventSubscription<T> subscription);
+  void removeSubscription(EventSubscription<T> subscription);
+  bool get hasSubscriptions;           // at least one non-cancelled subscription
+  bool get hasListenerSubscriptions;   // at least one subscription that receives events
+}
+```
+
+Every built-in node implements it; a custom `EventNode` must implement it to work with
+`subscribeEvents`. Transport nodes delegate to their local node.
+
+## EventSubscription
+
+`class EventSubscription<T>` — a listener registration created by
+`bus.subscribeEvents<T>(...)`. Unlike `listen`/`subscribe`, it owns its buffer and delivery
+state, and can be paused, resumed, resized and cancelled.
+
+```dart
+typedef EventCallback<T> = FutureOr<void> Function(T event);
+
+enum BufferOverflow { latest, dropOldest, dropNewest, reject }
+enum DeliveryMode { async, sync }
+
+Future<void> cancel();                 // remove the subscription; does not call onDone
+void pause();                          // stop delivering; buffered events stay
+void resume();                         // resume delivery from the buffer
+void resize(int? capacity, {BufferOverflow? overflow});
+
+bool get isPaused;
+bool get isBusy;                       // an async onEvent future is pending
+bool get isCanceled;
+int? get bufferCapacity;               // null = unbounded
+BufferOverflow get bufferOverflow;
+int get buffered;
+int get dropped;
+int get delivered;
+bool get hasListener;
+Stream<T> get stream;                  // broadcast view for UI
+```
+
+Delivery:
+
+* `DeliveryMode.async` (default) delivers in a microtask and preserves the stream timing of
+  `listen`; `DeliveryMode.sync` invokes `onEvent` inside `fire` and is reentrancy-sensitive.
+* While an asynchronous `onEvent` is running the subscription is `isBusy`; incoming events go
+  through the buffer policy. A full buffer drops or rejects according to `bufferOverflow`; a
+  rejected event is counted in `dropped`.
+* `cancel()` clears the buffer and closes the `.stream` view; `onDone` is called only when the
+  node is disposed (`dispose`, `removeTopic`), matching stream semantics.
+* Listener errors go to the subscription-level `onError`; `cancelOnError` also cancels the
+  subscription. The bus-level error stream is added by E1-13.
+
 ## RequestHandler
 
 `class RequestHandler` — a type-erased responder registration stored by the bus. Its closures
@@ -263,6 +317,16 @@ Stream<T> listen<T>({List<String>? paths, String? separator});
 StreamSubscription<T> subscribe<T>({List<String>? paths, String? separator,
                                     void Function(T e)? onData, Function? onError,
                                     void Function()? onDone, bool? cancelOnError});
+EventSubscription<T> subscribeEvents<T>({
+  List<String>? paths, String? separator,
+  required EventCallback<T> onEvent,
+  int? bufferCapacity,                 // null = unbounded
+  BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
+  DeliveryMode deliveryMode = DeliveryMode.async,
+  void Function(Object error, StackTrace? stackTrace)? onError,
+  void Function()? onDone,
+  bool cancelOnError = false,
+});
 T? currentData<T>({List<String>? paths, String? separator});
 bool removeTopic<T>({List<String>? paths, String? separator});
 

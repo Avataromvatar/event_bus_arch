@@ -186,7 +186,7 @@ event_bus_arch/                     ← core, zero broker dependencies
 
 ### C. Everything in the core package
 
-Rejected. `event_bus_arch` currently depends on `intl`, `async`, `rxdart` only. Adding
+Rejected. `event_bus_arch` currently depends on `intl` and `async` only. Adding
 `mqtt_client`, `redis` and `dart_nats` would pull all three — plus their transitive dependencies —
 into every consumer, including Flutter Web applications for which two of them cannot compile. It
 would also end the "no code generation, no broker lock-in" property the README sells.

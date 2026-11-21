@@ -44,6 +44,23 @@ abstract class EventNode<T> {
   }
 }
 
+///A node that can host [EventSubscription]s.
+///
+///Every built-in node implements it. A custom [EventNode] that wants to support
+///[EventBus.subscribeEvents] must implement it too; the bus throws
+///[UnsupportedError] otherwise.
+abstract class SubscriptionHost<T> {
+  void addSubscription(EventSubscription<T> subscription);
+
+  void removeSubscription(EventSubscription<T> subscription);
+
+  ///True when the node has at least one subscription that is not cancelled.
+  bool get hasSubscriptions;
+
+  ///True when at least one subscription can receive listener events.
+  bool get hasListenerSubscriptions;
+}
+
 ///A request responder registered for a topic.
 ///
 ///The closures erase the generic type of the handler, so a request received
@@ -65,7 +82,7 @@ class RequestHandler {
 }
 
 ///EventNodeImp stores the current value and fans events out to listeners.
-class EventNodeImp<T> implements EventNode<T> {
+class EventNodeImp<T> implements EventNode<T>, SubscriptionHost<T> {
   @override
   T? currentData;
   @override
@@ -74,6 +91,8 @@ class EventNodeImp<T> implements EventNode<T> {
       StreamController<T>.broadcast();
   @override
   StreamController<T> get streamControllerValue => _streamControllerValue;
+
+  final List<EventSubscription<T>> _subscriptions = <EventSubscription<T>>[];
 
   EventNodeImp({this.currentData});
 
@@ -85,6 +104,10 @@ class EventNodeImp<T> implements EventNode<T> {
     if (dto.data is! T) return;
     currentData = dto.data;
     _streamControllerValue.add(dto.data);
+    for (final subscription
+        in List<EventSubscription<T>>.of(_subscriptions)) {
+      subscription.offer(dto.data as T);
+    }
   }
 
   ///Creates an independent node with the same current data.
@@ -92,10 +115,31 @@ class EventNodeImp<T> implements EventNode<T> {
   EventNode<T> copy() => EventNodeImp<T>(currentData: currentData);
 
   @override
+  void addSubscription(EventSubscription<T> subscription) {
+    _subscriptions.add(subscription);
+  }
+
+  @override
+  void removeSubscription(EventSubscription<T> subscription) {
+    _subscriptions.remove(subscription);
+  }
+
+  @override
+  bool get hasSubscriptions =>
+      _subscriptions.any((subscription) => !subscription.isCanceled);
+
+  @override
+  bool get hasListenerSubscriptions => _subscriptions
+      .any((subscription) => !subscription.isCanceled && subscription.hasListener);
+
+  @override
   Future<void> dispose() async {
+    final subscriptions = List<EventSubscription<T>>.of(_subscriptions);
+    _subscriptions.clear();
     if (!_streamControllerValue.isClosed) {
       await _streamControllerValue.close();
     }
+    await Future.wait(subscriptions.map((subscription) => subscription._close()));
   }
 }
 
@@ -161,6 +205,23 @@ abstract class EventBus {
       Function? onError,
       void Function()? onDone,
       bool? cancelOnError});
+
+  ///Creates a listener subscription with its own buffer and lifecycle.
+  ///
+  ///Unlike [listen]/[subscribe], this returns a handle that can be paused,
+  ///resumed, resized and cancelled, and whose buffer policy bounds the events
+  ///that arrive while the listener is busy.
+  EventSubscription<T> subscribeEvents<T>({
+    List<String>? paths,
+    String? separator,
+    required EventCallback<T> onEvent,
+    int? bufferCapacity,
+    BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
+    DeliveryMode deliveryMode = DeliveryMode.async,
+    void Function(Object error, StackTrace? stackTrace)? onError,
+    void Function()? onDone,
+    bool cancelOnError = false,
+  });
 
   /// Gets the last data sent to a specific topic.
   T? currentData<T>({List<String>? paths, String? separator});
@@ -314,11 +375,31 @@ mixin EventBusMixin implements EventBus {
   }
 
   /// Value stream of a topic; the node may be removed when the last subscription is cancelled.
+  ///
+  ///The per-listener controller propagates pause/resume to the node's
+  ///broadcast stream and removes the node when the listener cancels. It
+  ///replaces the former rxdart `doOnCancel` extension.
   Stream<T> _valueStream<T>(Topic topic) {
     var node = _nodeFor<T>(topic);
-    return node.streamControllerValue.stream.doOnCancel(() {
-      _removeNode(topic, node);
-    });
+    late StreamSubscription<T> inner;
+    late final StreamController<T> controller;
+    controller = StreamController<T>(
+      sync: true,
+      onListen: () {
+        inner = node.streamControllerValue.stream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+      },
+      onPause: () => inner.pause(),
+      onResume: () => inner.resume(),
+      onCancel: () async {
+        await inner.cancel();
+        _removeNode(topic, node);
+      },
+    );
+    return controller.stream;
   }
 
   /// Listens to events on a specific topic.
@@ -345,6 +426,58 @@ mixin EventBusMixin implements EventBus {
         .listen(onData,
             cancelOnError: cancelOnError, onDone: onDone, onError: onError);
   }
+
+  @override
+  EventSubscription<T> subscribeEvents<T>({
+    List<String>? paths,
+    String? separator,
+    required EventCallback<T> onEvent,
+    int? bufferCapacity,
+    BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
+    DeliveryMode deliveryMode = DeliveryMode.async,
+    void Function(Object error, StackTrace? stackTrace)? onError,
+    void Function()? onDone,
+    bool cancelOnError = false,
+  }) {
+    _checkNotDisposed();
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    if (TopicPattern.isPattern(topic)) {
+      TopicPattern.validate(topic);
+    }
+    final node = _nodeFor<T>(topic);
+    if (node is! SubscriptionHost<T>) {
+      throw UnsupportedError(
+          'node ${node.runtimeType} does not implement SubscriptionHost');
+    }
+    final host = node as SubscriptionHost<T>;
+    late final EventSubscription<T> subscription;
+    subscription = EventSubscription<T>._(
+      topic: topic,
+      onEvent: onEvent,
+      bufferCapacity: bufferCapacity,
+      bufferOverflow: bufferOverflow,
+      deliveryMode: deliveryMode,
+      cancelOnError: cancelOnError,
+      onError: onError,
+      onDone: onDone,
+      onCancel: () {
+        host.removeSubscription(subscription);
+        _removeNode(topic, node);
+      },
+      onBusError: (error, stackTrace) =>
+          _reportSubscriptionError(topic, error, stackTrace),
+    );
+    host.addSubscription(subscription);
+    return subscription;
+  }
+
+  /// Hook for errors that a subscription could not deliver to its own handler.
+  ///
+  ///E1-13 wires this to the global `EventBusError` stream; until then the
+  ///subscription-level `onError` is the only observer.
+  void _reportSubscriptionError(
+      Topic topic, Object error, StackTrace? stackTrace) {}
 
   /// Publishes an event to local listeners without waiting for a handler.
   @override
@@ -435,13 +568,24 @@ mixin EventBusMixin implements EventBus {
   /// transport, or when this is a model bus.
   bool _removeNode(Topic topic, EventNode node) {
     final pinned = node is KeepAliveNode && (node as KeepAliveNode).keepAlive;
+    final hasSubscriptions =
+        node is SubscriptionHost && (node as SubscriptionHost).hasSubscriptions;
     if (!node.streamControllerValue.hasListener &&
+        !hasSubscriptions &&
         !isModelBus &&
         !_hasHandlerFor(topic) &&
         !pinned) {
       return _detachNode(topic, node);
     }
     return false;
+  }
+
+  ///Whether a node has a legacy stream listener or a listener subscription.
+  bool _nodeHasListener(EventNode? node) {
+    if (node == null) return false;
+    if (node.streamControllerValue.hasListener) return true;
+    return node is SubscriptionHost &&
+        (node as SubscriptionHost).hasListenerSubscriptions;
   }
 
   /// Removes the node of a topic and forgets its value, even on a model bus.
@@ -501,12 +645,11 @@ mixin EventBusMixin implements EventBus {
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
     if (TopicPattern.isPattern(t)) {
       TopicPattern.validate(t);
-      return _patternMap[t]?.streamControllerValue.hasListener ?? false;
+      return _nodeHasListener(_patternMap[t]);
     }
-    final exact = _eventsMap[t];
-    if (exact?.streamControllerValue.hasListener ?? false) return true;
+    if (_nodeHasListener(_eventsMap[t])) return true;
     return _matchingPatternEntries(t)
-        .any((entry) => entry.value.streamControllerValue.hasListener);
+        .any((entry) => _nodeHasListener(entry.value));
   }
 
   /// Closes the all-events stream and every node of the bus.

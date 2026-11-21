@@ -17,6 +17,8 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 - **Two publish modes**: `fire` (one-way, listeners only) and `request` (one handler, returns a
   result) — see [Two modes: `fire` and `request`](#two-modes-fire-and-request)
 - Send and receive events between components (`listen` / `subscribe`)
+- `subscribeEvents` — a subscription handle with its own bounded buffer, pause/resume, resize and
+  backpressure policies
 - Handlers that return a result to `request`
 - Two bus flavours: **common** (`EventBus()`) and **model** (`EventBus(isModelBus: true)`) —
   the model bus keeps the last value per topic even when nobody is listening
@@ -39,8 +41,8 @@ dependencies:
 dart pub get      # or: flutter pub get
 ```
 
-Dart SDK `>=3.6.0 <4.0.0`. The package re-exports `rxdart`, so `BehaviorSubject`,
-`debounceTime`, `doOnCancel` and friends are available without an extra import.
+Dart SDK `>=3.6.0 <4.0.0`. The package no longer re-exports `rxdart`; add it to your own
+dependencies if you need `BehaviorSubject`, `debounceTime` and the rest.
 
 ## Quick start
 

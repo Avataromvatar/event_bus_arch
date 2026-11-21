@@ -62,10 +62,11 @@ What you need to know right away:
 
 ## Package status
 
-* Version: 3.0.2, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`, `rxdart` (re-exported).
-* Tests: 140 tests in `test/` (bus, nodes, isolates and layers, model-bus flags, FSM,
-  Scope/Command, Topic/EventDTO, wildcards) — they pass. Transport suites:
-  `packages/event_bus_arch_transport` (24),
+* Version: 3.1.0, SDK `>=3.6.0 <4.0.0`, dependencies: `intl`, `async`; rxdart is no longer
+  re-exported.
+* Tests: 170 tests on the VM (plus 3 browser smoke tests) in `test/` (bus, nodes, subscriptions,
+  isolates and layers, model-bus flags, FSM, Scope/Command, Topic/EventDTO, wildcards) — they pass.
+  Transport suites: `packages/event_bus_arch_transport` (26),
   `packages/event_bus_arch_nats` (52 with a live server), `packages/event_bus_arch_mqtt` (39 with a live
   broker).
 * Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`

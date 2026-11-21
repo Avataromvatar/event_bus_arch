@@ -13,6 +13,12 @@ a broker), MQTT 32 (+7 skipped), Chrome smoke 2 tests, analyze clean (12 pre-exi
 coverage and benchmark smoke commands exercised. **This project has no CI**; every milestone is
 verified locally with the commands in §12.
 
+**M1 status: in progress 2026-11-21.**
+Done: E1-01, E1-02, E1-03, E1-14 — listener subscriptions, buffer policies, async/sync delivery,
+node subscription registry, rxdart removal. Core suite 170 tests, transport 26, NATS 42 (+10
+integration skipped), MQTT 32 (+7 skipped), Chrome smoke 3. Benchmarks show no local regression.
+Next: E1-04/E1-05 handler subscriptions and per-subscription request queues.
+
 ## 1. Estimate method
 
 * Estimates are **ideal engineer-days (PD)** for one experienced Dart developer.
@@ -127,9 +133,9 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 
 | ID | Task | PD | Depends on | Status |
 |---|---|---:|---|---|
-| E1-01 | Base `EventSubscription<T>`: pause/resume/cancel, `isPaused`, `isCanceled`, counters, error routing | 1.5 | E0-01 | todo |
-| E1-02 | Listener side: sync/async `onEvent`, buffer, overflow policies, `resize`, `.stream` view | 4 | E1-01 | todo |
-| E1-03 | Node refactor: subscription registry, fan-out, `currentData`, lifecycle, `removeTopic` | 4 | E1-01 | todo |
+| E1-01 | Base `EventSubscription<T>`: pause/resume/cancel, `isPaused`, `isCanceled`, counters, error routing | 1.5 | E0-01 | done |
+| E1-02 | Listener side: sync/async `onEvent`, buffer, overflow policies, `resize`, `.stream` view | 4 | E1-01 | done |
+| E1-03 | Node refactor: subscription registry, fan-out, `currentData`, lifecycle, `removeTopic` | 4 | E1-01 | done |
 | E1-04 | Handler side: `handler`, `handlerConcurrency`, `isBusy`, `inFlight` | 2 | E1-01 | todo |
 | E1-05 | Per-subscription bounded FIFO request queue; bus default + override; capacity 0 | 3 | E1-04 | todo |
 | E1-06 | Dispatcher: exact/pattern tier, round-robin, paused/busy filtering, queue selection | 4 | E1-04, E1-05 | todo |
@@ -140,7 +146,7 @@ Status values: `todo`, `doing`, `done`, `blocked`.
 | E1-11 | Migrate `Scope`/`Command`/`FSM`: `Scope` `latest(1)`, `FSM` `unbounded` | 2 | E1-10 | todo |
 | E1-12 | Transport adaptation: resolve handler subscription, single answer, busy without response | 4 | E1-06, E1-09 | todo |
 | E1-13 | `EventBusError` envelope, `EventBus.errors`, `EventBusErrorMonitor` skeleton | 3 | E0-04 | todo |
-| E1-14 | Remove rxdart: native `doOnCancel` replacement, export and dependency removal | 1 | E1-02 | todo |
+| E1-14 | Remove rxdart: native `doOnCancel` replacement, export and dependency removal | 1 | E1-02 | done |
 | E1-15 | Test matrix: buffers, queues, tiers, pause, cancellation, dual callbacks, lifecycle | 5 | E1-01..E1-14 | todo |
 | E1-16 | Benchmarks: delivery overhead, queue overhead, memory, before/after | 1.5 | E1-15 | todo |
 

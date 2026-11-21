@@ -34,7 +34,11 @@ typedef TransportRequestAnswer = Future<Uint8List?> Function(
 ///The node is a [KeepAliveNode]: the core must not remove it while it owns a
 ///transport subscription, even after its last listener unsubscribes.
 class TransportEventNode<T>
-    implements EventNode<T>, KeepAliveNode, IncomingEventNode {
+    implements
+        EventNode<T>,
+        KeepAliveNode,
+        IncomingEventNode,
+        SubscriptionHost<T> {
   TransportEventNode({
     required this.connection,
     required this.subjects,
@@ -98,6 +102,20 @@ class TransportEventNode<T>
 
   @override
   StreamController<T> get streamControllerValue => _local.streamControllerValue;
+
+  @override
+  void addSubscription(EventSubscription<T> subscription) =>
+      _local.addSubscription(subscription);
+
+  @override
+  void removeSubscription(EventSubscription<T> subscription) =>
+      _local.removeSubscription(subscription);
+
+  @override
+  bool get hasSubscriptions => _local.hasSubscriptions;
+
+  @override
+  bool get hasListenerSubscriptions => _local.hasListenerSubscriptions;
 
   @override
   void deliver(EventDTO dto) {

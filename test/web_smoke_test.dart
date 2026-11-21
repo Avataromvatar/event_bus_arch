@@ -33,4 +33,18 @@ void main() {
 
     await bus.dispose();
   });
+
+  test('subscribeEvents delivers and cancels on the web target', () async {
+    final bus = EventBus();
+    final received = <int>[];
+    final sub = bus.subscribeEvents<int>(
+        paths: ['web', 'subscription'], onEvent: received.add);
+
+    bus.fire<int>(1, paths: ['web', 'subscription']);
+    await Future<void>.delayed(Duration.zero);
+    expect(received, [1]);
+
+    await sub.cancel();
+    await bus.dispose();
+  });
 }

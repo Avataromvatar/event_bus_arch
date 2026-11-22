@@ -34,7 +34,7 @@ void main() {
       await subscription.cancel();
     });
 
-    test('subscribeEvents(handler:) passes the topic to createNode', () async {
+    test('subscribe(handler:) passes the topic to createNode', () async {
       final bus = HookedBus();
       addTearDown(bus.dispose);
 

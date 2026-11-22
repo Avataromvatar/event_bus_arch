@@ -194,7 +194,7 @@ final class EventKey<T> extends EventSelector<T> {
   String toString() => address.value;
 }
 
-///A typed wildcard selector: the unit passed to `listen`/`subscribeEvents`.
+///A typed wildcard selector: the unit passed to `listen`/`subscribe`.
 ///
 ///The pattern matches addresses only; delivery filters by [type]. `fire` and
 ///`request` require an exact [EventKey].

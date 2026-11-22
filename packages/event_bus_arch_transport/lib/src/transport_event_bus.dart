@@ -17,7 +17,7 @@ import 'transport_key_event_node.dart';
 ///resolves. `fire` to an address outside the registry behaves exactly like a
 ///local bus: if no local node exists, it returns false.
 ///
-///Node creation is lazy and typed: `listen<T>`, `subscribeEvents<T>(handler:)`
+///Node creation is lazy and typed: `listen<T>`, `subscribe<T>(handler:)`
 ///and `fire<T>`/`request<T>` call [createNodeForKey] or
 ///[createPatternNodeForKey], which resolve the codec for the address and return
 ///a [TransportKeyEventNode].

@@ -21,7 +21,7 @@ itself stays a routing library.
   type, and `EventPatternKey<T>` adds a wildcard pattern.
 - **Two publish modes**: `fire` (one-way, listeners only) and `request` (one handler, returns a
   result) — see [Two modes: `fire` and `request`](#two-modes-fire-and-request)
-- `subscribeEvents` — a subscription handle with its own bounded buffer, pause/resume, resize and
+- `subscribe` — a subscription handle with its own bounded buffer, pause/resume, resize and
   backpressure policies
 - Two bus flavours: **common** (`EventBus()`) and **model** (`EventBus(isModelBus: true)`) —
   the model bus keeps the last value per key even when nobody is listening
@@ -78,7 +78,7 @@ Future<void> main() async {
 
   // Handle: the handler returns the response; request waits for it.
   // lastData is the PREVIOUS value of this key, dto.data is the current one.
-  final handler = bus.subscribeEvents(helloKey, handler: (dto, lastData) async {
+  final handler = bus.subscribe(helloKey, handler: (dto, lastData) async {
     return 'processed: ${dto.data}';
   });
 
@@ -112,10 +112,10 @@ final sensorKey = EventKey<int>('sensor.temp');
 final anySensor = EventPatternKey<int>('sensor.*');
 
 // A wildcard listener.
-bus.subscribe(anySensor, onData: (v) => print('event: $v'));
+bus.subscribe(anySensor, onEvent: (v) => print('event: $v'));
 
 // A handler is a request responder; fire never calls it.
-bus.subscribeEvents(sensorKey, handler: (dto, lastData) async => dto.data * 2);
+bus.subscribe(sensorKey, handler: (dto, lastData) async => dto.data * 2);
 
 // fire: one-way, returns whether the event was accepted.
 final delivered = bus.fire(sensorKey, 21);          // true
@@ -147,7 +147,7 @@ and the wire subject at once. `EventKey<T>` binds an address to a static type:
 final placed = EventKey<OrderPlaced>('orders.placed.v1');
 
 bus.fire(placed, order, arguments: {'priority': '1'});
-bus.subscribeEvents(placed, onEvent: (order) => print(order));
+bus.subscribe(placed, onEvent: (order) => print(order));
 ```
 
 The type is **not** part of the address. It is the delivery filter: a node is identified by
@@ -166,7 +166,7 @@ matches one or more trailing tokens. `EventAddress` rejects empty tokens and wil
 
 ### Wildcards
 
-`listen`, `subscribe` and `subscribeEvents` accept an `EventPatternKey<T>`:
+`listen`, `subscribe` and `subscribe` accept an `EventPatternKey<T>`:
 
 - `*` matches exactly one token: `sensor.*`;
 - `>` matches one or more trailing tokens and must be last: `sensor.>`.
@@ -175,7 +175,7 @@ matches one or more trailing tokens. `EventAddress` rejects empty tokens and wil
 final anyReading = EventPatternKey<int>('sensor.*');
 final wholeTree = EventPatternKey<int>('sensor.>');
 
-bus.subscribe(anyReading, onData: (value) => print('sensor: $value'));
+bus.subscribe(anyReading, onEvent: (value) => print('sensor: $value'));
 
 final temp = EventKey<int>('sensor.temp');
 bus.fire(temp, 21);                  // matches both patterns
@@ -188,7 +188,7 @@ not a runtime surprise.
 The same pattern can answer requests when it is registered as a handler:
 
 ```dart
-bus.subscribeEvents(anyReading, handler: (dto, lastData) async => dto.data * 2);
+bus.subscribe(anyReading, handler: (dto, lastData) async => dto.data * 2);
 await bus.request(temp, 21);   // 42
 ```
 
@@ -204,7 +204,7 @@ returns the last matching value of that type; `currentData(exactKey)` reads only
 | Keeps `currentData` after the last listener unsubscribes | no | yes |
 | `fire` to a key with no node | returns `false`, event goes to `allEventStream` with flag `false` | returns `true`, node is created |
 | `request` without a handler | throws `NoHandlerException` | throws `NoHandlerException` |
-| Forgetting one key | automatic after the last listener | explicit `remove(key)` / `removePattern(patternKey)` / `removeAddress(address)` |
+| Forgetting one key | automatic after the last listener | explicit `remove(selector)` / `removeAddress(address)` |
 
 A handler subscription is a request responder: `request` invokes it, while `fire` only notifies
 listeners. `remove` works on both flavours, closes the listeners of the node and, on a transport
@@ -226,7 +226,7 @@ Future<void> main() async {
   final iso = EventBusIsolate(onInit: _worker, initialData: 'worker');
   await iso.waitInit;                                  // true when onInit has completed
 
-  iso.subscribe(responseKey, onData: (e) => print('from worker: $e'));
+  iso.subscribe(responseKey, onEvent: (e) => print('from worker: $e'));
   final doubled = await iso.request(requestKey, 21, arguments: {'multiplier': '2'});
   print(doubled);                                      // 42
 
@@ -236,7 +236,7 @@ Future<void> main() async {
 // runs inside the worker isolate — must be a top-level or static function
 Future<void> _worker(EventBus bus, Object? initialData) async {
   await _heavyInit();                                  // async init is fine
-  bus.subscribeEvents(requestKey, handler: (dto, lastData) async {
+  bus.subscribe(requestKey, handler: (dto, lastData) async {
     final m = int.tryParse(dto.arguments?['multiplier'] ?? '1') ?? 1;
     return dto.data * m;
   });
@@ -271,14 +271,14 @@ Good to know:
 final chainKey = EventKey<int>('chain');
 
 final layer = await Layers.createLayers([
-  (_initMiddle, null, true),   // (init function, initial data, isModelBus)
-  (_initBottom, null, true),
+  LayerSpec(init: _initMiddle, isModelBus: true),   // init, optional data, isModelBus
+  LayerSpec(init: _initBottom, isModelBus: true),
 ], bridgeIsModelBus: true);    // optional: model buses for the isolate bridges
 // main ↔ isolate[middle] ↔ isolate[bottom]
 
 // createLayers completes only when every layer in the chain is initialized,
 // so events can be sent right away
-layer.bottom!.subscribe(chainKey, onData: (e) => print(e));
+layer.bottom!.subscribe(chainKey, onEvent: (e) => print(e));
 layer.bottom!.fire(chainKey, 0);
 await layer.close();
 ```
@@ -326,7 +326,7 @@ the chain is restarting.
 
 ```dart
 final supervisor = Layers.supervise(
-    [(_initMiddle, null, true), (_initBottom, null, true)]);
+    [LayerSpec(init: _initMiddle, isModelBus: true), LayerSpec(init: _initBottom, isModelBus: true)]);
 await supervisor.waitInit;
 supervisor.errors.listen((error) => print(error));
 await supervisor.close();
@@ -420,7 +420,7 @@ bus. `undo()` returns `null` when there is nothing to roll back to.
 
 ## Web
 
-The core bus, model buses, `subscribeEvents`, observability and the broker-agnostic transport seam
+The core bus, model buses, `subscribe`, observability and the broker-agnostic transport seam
 compile and run in the browser. The isolate APIs are VM-only:
 
 ```dart
@@ -476,9 +476,9 @@ The address model changed; this is a breaking release.
   tokens. The per-call `paths`/`separator` parameters and `EventBus.defaultTopicPathSeparator` are
   gone.
 - **The bus API takes selectors**: `fire(key, data)`, `request(key, data)`,
-  `listen(selector)`, `subscribe(selector)`, `subscribeEvents(selector)`,
-  `currentData(key)`, `haveListener/haveHandler/haveAvailableHandler(selector)`,
-  `remove(key)`, `removePattern(patternKey)`, `removeAddress(address)`.
+  `listen(selector)`, `subscribe(selector)`, `subscribe(selector)`,
+  `currentData(selector)`, `haveListener/haveHandler/haveAvailableHandler(selector)`,
+  `remove(selector)`, `removeAddress(address)`.
 - **`EventDTO.key` and `EventDTO.address`** replace the string `topic`; `EventBusError.address`
   replaces `topic` (the old field remains as a compatibility alias).
 - **Transports are typed**: `EventCodecRegistry` resolves an encoder/decoder by address or pattern;

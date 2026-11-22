@@ -61,8 +61,7 @@ extension LegacyBusTestApi on EventBus {
           Function? onError,
           void Function()? onDone,
           bool? cancelOnError}) =>
-      subscribe<T>(_legacySelector<T>(paths, separator),
-          onData: onData,
+      listen<T>(_legacySelector<T>(paths, separator)).listen(onData,
           onError: onError,
           onDone: onDone,
           cancelOnError: cancelOnError);
@@ -81,7 +80,7 @@ extension LegacyBusTestApi on EventBus {
           void Function(Object error, StackTrace? stackTrace)? onError,
           void Function()? onDone,
           bool cancelOnError = false}) =>
-      subscribeEvents<T>(_legacySelector<T>(paths, separator),
+      subscribe<T>(_legacySelector<T>(paths, separator),
           onEvent: onEvent,
           handler: handler,
           initialData: initialData,
@@ -96,7 +95,7 @@ extension LegacyBusTestApi on EventBus {
 
   T? currentDataLegacy<T>({List<String>? paths, String? separator}) {
     final selector = _legacySelector<T>(paths, separator);
-    return currentDataFor<T>(selector);
+    return currentData<T>(selector);
   }
 
   bool haveListenerLegacy<T>({List<String>? paths, String? separator}) =>
@@ -109,11 +108,8 @@ extension LegacyBusTestApi on EventBus {
           {List<String>? paths, String? separator}) =>
       haveAvailableHandler<T>(_legacySelector<T>(paths, separator));
 
-  bool removeTopicLegacy<T>({List<String>? paths, String? separator}) {
-    final selector = _legacySelector<T>(paths, separator);
-    if (selector is EventPatternKey<T>) return removePattern<T>(selector);
-    return remove<T>(selector as EventKey<T>);
-  }
+  bool removeTopicLegacy<T>({List<String>? paths, String? separator}) =>
+      remove<T>(_legacySelector<T>(paths, separator));
 }
 
 extension LegacyPoolTestApi on WorkerPool {

@@ -18,7 +18,7 @@ Future<void> main() async {
   });
 
   // A listener that keeps only the newest value while it is busy.
-  final values = bus.subscribeEvents(
+  final values = bus.subscribe(
     counterKey,
     bufferCapacity: 1,
     bufferOverflow: BufferOverflow.latest,
@@ -34,7 +34,7 @@ Future<void> main() async {
   print('listener buffered=${values.buffered} dropped=${values.dropped}');
 
   // A handler with concurrency 1 and a bounded queue.
-  final handler = bus.subscribeEvents(
+  final handler = bus.subscribe(
     workKey,
     handlerConcurrency: 1,
     requestQueueCapacity: 2,

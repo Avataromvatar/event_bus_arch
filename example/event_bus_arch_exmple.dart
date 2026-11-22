@@ -29,7 +29,7 @@ Future<void> main() async {
   });
 
   ///`subscribe` returns StreamSubscription<T>.
-  isolateBus.subscribe(inboxKey, onData: (e) {
+  isolateBus.subscribe(inboxKey, onEvent: (e) {
     print(e.value);
   });
   isolateBus.fire(inboxKey, TestStrData('Hello from main isolate'));
@@ -45,13 +45,13 @@ Future<void> main() async {
 void _initIsolate(EventBus bus, Object? initialData) async {
   var name = initialData as String;
   print('Worker Isolate ${Isolate.current.hashCode}');
-  bus.subscribe(inboxKey, onData: (e) {
+  bus.subscribe(inboxKey, onEvent: (e) {
     bus.fire(inboxKey, TestStrData('$name get ${e.value}'));
     bus.fire(originKey, TestStrData(e.value));
   });
 
   ///The handler answers on the address `calc`.
-  bus.subscribeEvents(calcKey, handler: (dto, lastData) async {
+  bus.subscribe(calcKey, handler: (dto, lastData) async {
     print('Arguments:${dto.arguments}');
     var multStr = dto.arguments?['multiplier'] ?? '';
     return dto.data.value * (int.tryParse(multStr) ?? 1);

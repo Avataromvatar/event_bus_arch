@@ -21,7 +21,7 @@ void main() {
       final isolate = EventBusIsolate(
         onInit: (bus, data) {
           final out = data as SendPort;
-          bus.subscribeEvents<Order>(EventKey<Order>('orders'),
+          bus.subscribe<Order>(EventKey<Order>('orders'),
               onEvent: (order) => out.send(order.id));
         },
         initialData: port.sendPort,
@@ -39,7 +39,7 @@ void main() {
       final start = Completer<void>();
       final isolate = EventBusIsolate(
         onInit: (bus, data) {
-          bus.subscribeEvents<String>(EventKey<String>('start'),
+          bus.subscribe<String>(EventKey<String>('start'),
               onEvent: (_) {
             bus.fire(EventKey<Order>('orders'), Order('W-1'));
           });
@@ -48,7 +48,7 @@ void main() {
       await isolate.waitInit;
 
       final received = <Order>[];
-      final sub = isolate.subscribeEvents<Order>(
+      final sub = isolate.subscribe<Order>(
           EventKey<Order>('orders'), onEvent: (order) {
         received.add(order);
         if (!start.isCompleted) start.complete();
@@ -68,7 +68,7 @@ void main() {
         () async {
       final isolate = EventBusIsolate(
         onInit: (bus, data) {
-          bus.subscribeEvents<Order>(EventKey<Order>('orders'),
+          bus.subscribe<Order>(EventKey<Order>('orders'),
               handler: (dto, lastData) async => dto.data.id);
         },
       );
@@ -86,7 +86,7 @@ void main() {
       final isolate = EventBusIsolate(
         onInit: (bus, data) {
           final out = data as SendPort;
-          bus.subscribeEvents<Order>(
+          bus.subscribe<Order>(
               EventPatternKey<Order>('orders.*'),
               onEvent: (order) => out.send(order.id));
         },
@@ -109,12 +109,12 @@ void main() {
       final isolate = EventBusIsolate(onInit: (bus, data) {});
       await isolate.waitInit;
 
-      final sub = isolate.subscribeEvents<Order>(
+      final sub = isolate.subscribe<Order>(
           EventKey<Order>('orders'), onEvent: (_) {});
       expect(isolate.remove(EventKey<Order>('orders')), isTrue);
       expect(isolate.haveListener(EventKey<Order>('orders')), isFalse);
 
-      final sub2 = isolate.subscribeEvents<Invoice>(
+      final sub2 = isolate.subscribe<Invoice>(
           EventKey<Invoice>('orders'), onEvent: (_) {});
       expect(isolate.removeAddress(EventAddress('orders')), isTrue);
       expect(isolate.haveListener(EventKey<Invoice>('orders')), isFalse);

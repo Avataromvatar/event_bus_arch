@@ -3,7 +3,7 @@
 MQTT 5 transport for [`event_bus_arch`](https://pub.dev/packages/event_bus_arch).
 
 `EventBusMqtt.keys` is an `EventBus` whose nodes publish to and subscribe from an MQTT 5 broker.
-Application code keeps using `fire`, `request`, `listen`, `subscribe` and `subscribeEvents`; the
+Application code keeps using `fire`, `request`, `listen`, `subscribe` and `subscribe`; the
 transport is configured with an `EventCodecRegistry` keyed by event address.
 
 The package is a thin MQTT adapter over
@@ -64,7 +64,7 @@ Future<void> main() async {
   final received = Completer<int>();
   final subscription = subscriber.subscribe(
     EventPatternKey<int>('sensor.*'),
-    onData: (value) {
+    onEvent: (value) {
       print('received: $value');
       received.complete(value);
     },
@@ -110,7 +110,7 @@ The prefix is stripped before the codec runs, so the codec always receives the l
 - The most specific pattern is the one with the most literal tokens; ties keep the insertion order
   of the registry.
 - A codec may implement only one direction: a publisher needs `encode`, a subscriber needs `decode`.
-- A node is created lazily by `listen`, `subscribeEvents` or `fire`/`request`. `fire` creates a node
+- A node is created lazily by `listen`, `subscribe` or `fire`/`request`. `fire` creates a node
   only for an address present in the codec registry; otherwise it keeps local bus semantics and
   returns false.
 

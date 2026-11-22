@@ -539,5 +539,29 @@ data: A-1
 - obfuscation-check: `Type.toString()` = `minified:bJ`, keyed-публикация одна;
 - код не коммитился.
 
+### Финальная чистка API EventBus (по решению пользователя)
+
+Выполнено:
+
+- `subscribeEvents` переименован в `subscribe`; старый сырой `subscribe`, возвращавший
+  `StreamSubscription`, удалён. Сырой поток остаётся через `listen(selector)`;
+  `test/legacy_compat.dart` для старых тестов реализует `subscribeLegacy` через `listen`.
+- `currentData<T>(EventSelector<T> selector)` принимает exact и pattern; `currentDataFor` удалён.
+- `remove<T>(EventSelector<T> selector)` принимает exact и pattern; `removePattern` удалён;
+  `removeAddress(EventAddress)` оставлен как отдельная операция «все типы по адресу».
+  Обновлены переопределения в `EventBusIsolate` и `_EventBusForIsolate`.
+- `fnInitLayer` переименован в `LayerInit`; добавлен `LayerSpec { init, initialData, isModelBus }`.
+  `Layers.createLayers`/`Layers.supervise` принимают `List<LayerSpec>`; tuple-записи заменены
+  во всех тестах, примерах и документации.
+- Обновлены README, `doc/00`–`doc/15`, CHANGELOG, ADR-0009, примеры и package READMEs; старые
+  имена в docs удалены.
+- `dart analyze`: 17 info (минус один — `LayerInit` исправил `camel_case_types`), ошибок нет.
+- Obfuscation-check пересобран: `Type.toString()` = `minified:bJ`, keyed-публикация одна.
+
+Прогоны:
+
+- core 243, patterns 20, transport 26, NATS 24 (+10 skipped), MQTT 19 (+7 skipped) — зелёные.
+- Код не коммитился.
+
 ## Ссылки
 Вверх: нет (локальная задача). ADR: doc/decisions/0009-event-key-and-address.md

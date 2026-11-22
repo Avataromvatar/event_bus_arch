@@ -40,7 +40,7 @@ Future<void> main() async {
   final received = Completer<int>();
   final subscription = subscriber.subscribe(
     EventPatternKey<int>('sensor.*'),
-    onData: (value) {
+    onEvent: (value) {
       print('received: $value');
       received.complete(value);
     },

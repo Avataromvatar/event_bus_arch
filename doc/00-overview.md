@@ -53,11 +53,11 @@ classDiagram
         +bool isObservable
         +fire(key, data, arguments, correlationId) bool
         +request(key, data, timeout, cancelToken, correlationId) Future
-        +subscribeEvents(selector, ...) EventSubscription
+        +subscribe(selector, ...) EventSubscription
         +listen(selector) Stream
-        +currentData(key) T?
+        +currentData(selector) T?
         +remove(key) bool
-        +removePattern(patternKey) bool
+        +remove(patternKey) bool
         +errors Stream
         +metrics EventBusMetrics
     }
@@ -170,7 +170,7 @@ NATS/MQTT connections are VM-only (see 14). Pools and layers are built from the 
 | Addressing | Explicit `EventAddress` string plus `EventKey<T>`/`EventPatternKey<T>`; the Dart type is the delivery filter, never a token in the address |
 | Obfuscation | Type identity is captured through a compile-time token, not `Type.toString()`/`runtimeType`; keys survive `dart compile js -O2` |
 | Wildcards | Fixed grammar: `.` separates tokens, `*` matches one token, `>` matches one or more trailing tokens; no per-call separator |
-| Subscriptions | `subscribeEvents` returns an `EventSubscription` with its own bounded buffer, pause/resume, resize and overflow policy; `onEvent` and `handler` can be combined |
+| Subscriptions | `subscribe` returns an `EventSubscription` with its own bounded buffer, pause/resume, resize and overflow policy; `onEvent` and `handler` can be combined |
 | Handlers | A handler is a subscription capability, not a node-level registry; per-subscription FIFO queue, `handlerConcurrency`, `inFlight`, `BusyException` |
 | Requests | Local handler first, timeout and `CancelToken`, queue removal, dispatched-then-cancelled responses discarded |
 | Errors | `EventBus.errors` carries `EventBusError` data events with rate limiting and a bounded recent buffer; `EventBusErrorMonitor` aggregates buses; errors carry `address` |

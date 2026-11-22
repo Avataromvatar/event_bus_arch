@@ -6,14 +6,14 @@ import 'package:test/test.dart';
 ///Answers requests on `counter`; the response carries the worker index.
 void keyWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
-  bus.subscribeEvents<int>(EventKey<int>('counter'),
+  bus.subscribe<int>(EventKey<int>('counter'),
       handler: (dto, lastData) async => '$index:${dto.data}');
 }
 
 ///Reports fires on `counter` to the SendPort from initialData.
 void keyPortWorker(EventBus bus, Object? initialData) {
   final port = initialData as SendPort;
-  bus.subscribeEvents<int>(EventKey<int>('counter'),
+  bus.subscribe<int>(EventKey<int>('counter'),
       onEvent: (value) => port.send(value));
 }
 

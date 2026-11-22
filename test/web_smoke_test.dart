@@ -26,9 +26,9 @@ void main() {
         throwsA(isA<UnsupportedError>()));
     expect(() => WorkerPool(onInit: _silentWorker),
         throwsA(isA<UnsupportedError>()));
-    expect(() => Layers.supervise([(_silentLayer, null, false)]),
+    expect(() => Layers.supervise([LayerSpec(init: _silentLayer, isModelBus: false)]),
         throwsA(isA<UnsupportedError>()));
-    await expectLater(Layers.createLayers([(_silentLayer, null, false)]),
+    await expectLater(Layers.createLayers([LayerSpec(init: _silentLayer, isModelBus: false)]),
         throwsA(isA<UnsupportedError>()));
   });
 
@@ -78,7 +78,7 @@ void main() {
     await bus.dispose();
   });
 
-  test('subscribeEvents delivers and cancels on the web target', () async {
+  test('subscribe delivers and cancels on the web target', () async {
     final bus = EventBus();
     final received = <int>[];
     final sub = bus.subscribeEventsLegacy<int>(

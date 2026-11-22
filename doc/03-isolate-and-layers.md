@@ -74,7 +74,7 @@ await iso.waitInit;
 final pingKey = EventKey<String>('ping');
 final workKey = EventKey<int>('work');
 
-iso.subscribe(pingKey, onData: (e) => print('from worker: $e')); // inbound listener
+iso.subscribe(pingKey, onEvent: (e) => print('from worker: $e')); // inbound listener
 iso.fire(pingKey, 'ping');                                        // outbound
 final doubled = await iso.request(workKey, 21);                   // worker handler
 ```
@@ -89,7 +89,7 @@ side stores what it receives.
 
 ### Forgetting a topic
 
-``remove(key)`, `removePattern(patternKey)` and `removeAddress(address)` remove the node(s) on this
+``remove(key)`, `remove(patternKey)` and `removeAddress(address)` remove the node(s) on this
 side, cancel their subscriptions and forward a delete to the other side; both sides forget the
 address. A handler registered on the other side stays. A model bus recreates the node on the next
 `fire`, `request` or `listen`.
@@ -123,12 +123,12 @@ See [13](13-pool-and-supervision.md) for supervised pools and chains.
 
 ```dart
 final layer = await Layers.createLayers([
-  (_initMiddle, null, true),   // (init function, initial data, isModelBus)
-  (_initBottom, null, true),
+  LayerSpec(init: _initMiddle, isModelBus: true),   // init, optional data, isModelBus
+  LayerSpec(init: _initBottom, isModelBus: true),
 ], bridgeIsModelBus: false);
 
 final pingKey = EventKey<Ping>('ping');
-layer.bottom!.subscribe(pingKey, onData: (e) => print(e.count));
+layer.bottom!.subscribe(pingKey, onEvent: (e) => print(e.count));
 layer.bottom!.fire(pingKey, Ping(0));
 await layer.close();
 ```
@@ -161,8 +161,8 @@ class Ping { final int count; Ping(this.count); }
 
 Future<void> main() async {
   final layer = await Layers.createLayers([
-    (_initMiddle, null, true),
-    (_initBottom, null, true),
+    LayerSpec(init: _initMiddle, isModelBus: true),
+    LayerSpec(init: _initBottom, isModelBus: true),
   ]);
 
   final pingKey = EventKey<Ping>('ping');
@@ -179,16 +179,16 @@ Future<void> _initMiddle(Layer layer, Object? _) async {
   await Future<void>.delayed(const Duration(milliseconds: 20));
   final pingKey = EventKey<Ping>('ping');
   layer.top!.subscribe(pingKey,
-      onData: (e) => layer.bottom!.fire(pingKey, Ping(e.count + 1)));
+      onEvent: (e) => layer.bottom!.fire(pingKey, Ping(e.count + 1)));
   layer.bottom!.subscribe(pingKey,
-      onData: (e) => layer.top!.fire(pingKey, Ping(e.count + 1)));
+      onEvent: (e) => layer.top!.fire(pingKey, Ping(e.count + 1)));
 }
 
 Future<void> _initBottom(Layer layer, Object? _) async {
   await Future<void>.delayed(const Duration(milliseconds: 20));
   final pingKey = EventKey<Ping>('ping');
   layer.top!.subscribe(pingKey,
-      onData: (e) => layer.top!.fire(pingKey, Ping(e.count + 1)));
+      onEvent: (e) => layer.top!.fire(pingKey, Ping(e.count + 1)));
 }
 ```
 
@@ -206,8 +206,8 @@ not retried; calls on the bridge throw `StateError` while the chain is restartin
 
 ```dart
 final supervisor = Layers.supervise([
-  (_initMiddle, null, true),
-  (_initBottom, null, true),
+  LayerSpec(init: _initMiddle, isModelBus: true),
+  LayerSpec(init: _initBottom, isModelBus: true),
 ]);
 await supervisor.waitInit;
 supervisor.errors.listen(print);

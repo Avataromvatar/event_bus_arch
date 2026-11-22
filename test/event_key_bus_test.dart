@@ -17,12 +17,12 @@ Future<void> _pump() => pumpEventQueue();
 
 void main() {
   group('EventBus: E key API', () {
-    test('fireKey and subscribeEventsKey deliver on an exact key', () async {
+    test('fireKey and subscribeKey deliver on an exact key', () async {
       final bus = EventBus();
       final received = <int>[];
       final key = EventKey<int>('counter');
 
-      final sub = bus.subscribeEvents<int>(key, onEvent: received.add);
+      final sub = bus.subscribe<int>(key, onEvent: received.add);
       expect(bus.fire(key, 1), isTrue);
       expect(bus.fire(key, 2), isTrue);
       await _pump();
@@ -42,9 +42,9 @@ void main() {
       final invoiceKey = EventKey<Invoice>('orders');
 
       final orderSub =
-          bus.subscribeEvents<Order>(orderKey, onEvent: orders.add);
+          bus.subscribe<Order>(orderKey, onEvent: orders.add);
       final invoiceSub =
-          bus.subscribeEvents<Invoice>(invoiceKey, onEvent: invoices.add);
+          bus.subscribe<Invoice>(invoiceKey, onEvent: invoices.add);
 
       bus.fire(orderKey, Order('A-1'));
       await _pump();
@@ -69,7 +69,7 @@ void main() {
       final seen = <DomainEvent>[];
       final domainKey = EventKey<DomainEvent>('events');
 
-      final sub = bus.subscribeEvents<DomainEvent>(domainKey,
+      final sub = bus.subscribe<DomainEvent>(domainKey,
           onEvent: seen.add);
       bus.fire(EventKey<Order>('events'), Order('A-1'));
       await _pump();
@@ -88,7 +88,7 @@ void main() {
       final pattern = EventPatternKey<Order>('orders.*');
 
       final sub =
-          bus.subscribeEvents<Order>(pattern, onEvent: received.add);
+          bus.subscribe<Order>(pattern, onEvent: received.add);
       bus.fire(EventKey<Order>('orders.placed'), Order('A-1'));
       bus.fire(EventKey<Invoice>('orders.placed'), Invoice('I-1'));
       await _pump();
@@ -112,9 +112,9 @@ void main() {
       final patternKey = EventPatternKey<int>('sensor.*');
       final exactKey = EventKey<int>('sensor.temp');
 
-      final patternSub = bus.subscribeEvents<int>(patternKey,
+      final patternSub = bus.subscribe<int>(patternKey,
           handler: (dto, lastData) async => 'pattern');
-      final exactSub = bus.subscribeEvents<int>(exactKey,
+      final exactSub = bus.subscribe<int>(exactKey,
           handler: (dto, lastData) async => 'exact');
 
       expect(await bus.request(exactKey, 1), 'exact');
@@ -130,7 +130,7 @@ void main() {
         () async {
       final bus = EventBus();
       final domainPattern = EventPatternKey<DomainEvent>('orders.*');
-      final sub = bus.subscribeEvents<DomainEvent>(domainPattern,
+      final sub = bus.subscribe<DomainEvent>(domainPattern,
           handler: (dto, lastData) async => dto.data.runtimeType);
 
       final result = await bus.request(
@@ -143,7 +143,7 @@ void main() {
 
     test('a type mismatch has no handler', () async {
       final bus = EventBus();
-      final sub = bus.subscribeEvents<Order>(EventKey<Order>('orders'),
+      final sub = bus.subscribe<Order>(EventKey<Order>('orders'),
           handler: (dto, lastData) async => dto.data);
 
       await expectLater(
@@ -160,9 +160,9 @@ void main() {
       final orderKey = EventKey<Order>('orders');
       final invoiceKey = EventKey<Invoice>('orders');
       final orderSub =
-          bus.subscribeEvents<Order>(orderKey, onEvent: (_) {});
+          bus.subscribe<Order>(orderKey, onEvent: (_) {});
       final invoiceSub =
-          bus.subscribeEvents<Invoice>(invoiceKey, onEvent: (_) {});
+          bus.subscribe<Invoice>(invoiceKey, onEvent: (_) {});
 
       expect(bus.remove(orderKey), isTrue);
       expect(bus.currentData(orderKey), isNull);
@@ -181,7 +181,7 @@ void main() {
       final bus = EventBus();
       final key = EventKey<int>('counter');
       final pattern = EventPatternKey<int>('counter.*');
-      final sub = bus.subscribeEvents<int>(key,
+      final sub = bus.subscribe<int>(key,
           handler: (dto, lastData) async => dto.data);
 
       expect(bus.haveHandler(key), isTrue);

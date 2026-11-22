@@ -54,7 +54,7 @@ Future<void> main() async {
     subscriber.waitConnected(timeout: const Duration(seconds: 5)),
   ]);
 
-  subscriber.subscribeEvents(
+  subscriber.subscribe(
     EventKey<int>('sensor.double'),
     handler: (dto, lastData) async => dto.data * 2,
   );

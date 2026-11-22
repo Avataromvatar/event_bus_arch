@@ -4,7 +4,7 @@ import 'legacy_compat.dart';
 
 void main() {
   group('EventBus: handlers and dispose', () {
-    test('subscribeEvents creates and cancels a handler', () async {
+    test('subscribe creates and cancels a handler', () async {
       final bus = EventBus();
 
       final handler = bus.subscribeEventsLegacy<String>(
@@ -42,7 +42,7 @@ void main() {
       await expectLater(bus.requestLegacy<String>('x'), throwsStateError);
     });
 
-    test('listen and subscribeEvents after dispose throw StateError', () async {
+    test('listen and subscribe after dispose throw StateError', () async {
       final bus = EventBus();
       await bus.dispose();
 

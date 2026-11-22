@@ -127,8 +127,8 @@ void main() {
   group('Layers: bridgeIsModelBus', () {
     test('isolate bridges are common buses by default', () async {
       final layer = await Layers.createLayers([
-        (inspectBusesLayer, null, false),
-        (silentLayer, null, false),
+        LayerSpec(init: inspectBusesLayer, isModelBus: false),
+        LayerSpec(init: silentLayer, isModelBus: false),
       ]);
 
       expect((layer.bottom as EventBusIsolate).isModelBus, isFalse);
@@ -146,8 +146,8 @@ void main() {
 
     test('bridgeIsModelBus applies to every isolate bridge', () async {
       final layer = await Layers.createLayers([
-        (inspectBusesLayer, null, false),
-        (silentLayer, null, false),
+        LayerSpec(init: inspectBusesLayer, isModelBus: false),
+        LayerSpec(init: silentLayer, isModelBus: false),
       ], bridgeIsModelBus: true);
 
       // the bridge to the first worker and the bridge from it to the second
@@ -163,8 +163,8 @@ void main() {
 
     test('layer.current follows its own flag, not bridgeIsModelBus', () async {
       final layer = await Layers.createLayers([
-        (inspectBusesLayer, null, true),
-        (silentLayer, null, false),
+        LayerSpec(init: inspectBusesLayer, isModelBus: true),
+        LayerSpec(init: silentLayer, isModelBus: false),
       ]);
 
       expect(

@@ -15,7 +15,7 @@ void main() async {
   final bus = EventBus(
       observability: const ObservabilityConfig(enabled: true));
   final key = EventKey<int>('web.check');
-  final sub = bus.subscribeEvents(key, onEvent: (_) {});
+  final sub = bus.subscribe(key, onEvent: (_) {});
   bus.fire(key, 1, correlationId: 'web-check');
   print('web build ok; isolates: ${EventBusCapabilities.isolateSupported}');
   await sub.cancel();

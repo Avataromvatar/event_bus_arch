@@ -49,7 +49,7 @@ abstract class EventNode<T> {
 ///A node that can host [EventSubscription]s.
 ///
 ///Every built-in node implements it. A custom [EventNode] that wants to support
-///[EventBus.subscribeEvents] must implement it too; the bus throws
+///[EventBus.subscribe] must implement it too; the bus throws
 ///[UnsupportedError] otherwise.
 abstract class SubscriptionHost<T> {
   Iterable<EventSubscription<T>> get subscriptions;
@@ -136,7 +136,7 @@ abstract class EventBus {
   bool get isModelBus;
 
   /// Closes the all-events stream and every node of the bus. Safe to call twice.
-  /// After dispose the bus is unusable: fire/request/listen/subscribe/subscribeEvents
+  /// After dispose the bus is unusable: fire/request/listen/subscribe/subscribe
   /// throw StateError.
   Future<void> dispose();
 
@@ -183,17 +183,8 @@ abstract class EventBus {
   /// Listens to a typed exact or pattern selector.
   Stream<T> listen<T>(EventSelector<T> selector);
 
-  /// Subscribes to a typed selector as a raw stream subscription.
-  StreamSubscription<T> subscribe<T>(
-    EventSelector<T> selector, {
-    void Function(T e)? onData,
-    Function? onError,
-    void Function()? onDone,
-    bool? cancelOnError,
-  });
-
   /// Creates a listener and/or handler subscription for a typed selector.
-  EventSubscription<T> subscribeEvents<T>(
+  EventSubscription<T> subscribe<T>(
     EventSelector<T> selector, {
     EventCallback<T>? onEvent,
     Handler<T>? handler,
@@ -208,11 +199,8 @@ abstract class EventBus {
     bool cancelOnError = false,
   });
 
-  /// The value stored for an exact typed key.
-  T? currentData<T>(EventKey<T> key);
-
-  /// The value stored for a selector, including a pattern key.
-  T? currentDataFor<T>(EventSelector<T> selector);
+  /// The value stored for a selector: an exact key or a pattern key.
+  T? currentData<T>(EventSelector<T> selector);
 
   /// Whether a selector has a listener.
   bool haveListener<T>(EventSelector<T> selector);
@@ -223,11 +211,8 @@ abstract class EventBus {
   /// Whether a handler for the selector could accept a request now.
   bool haveAvailableHandler<T>(EventSelector<T> selector);
 
-  /// Removes the type node for an exact key.
-  bool remove<T>(EventKey<T> key);
-
-  /// Removes the type node for a pattern key.
-  bool removePattern<T>(EventPatternKey<T> key);
+  /// Removes one type node for an exact or pattern selector.
+  bool remove<T>(EventSelector<T> selector);
 
   /// Removes every type node registered at an exact address.
   bool removeAddress(EventAddress address);
@@ -479,19 +464,15 @@ mixin EventBusMixin implements EventBus {
       _patternMap.putIfAbsent(pattern, () => <Type, EventNode>{});
 
   @override
-  T? currentData<T>(EventKey<T> key) {
-    final node = _eventsMap[key.address]?[key.type];
-    return node is EventNode<T> ? node.currentData : null;
-  }
-
-  @override
-  T? currentDataFor<T>(EventSelector<T> selector) {
+  T? currentData<T>(EventSelector<T> selector) {
     _checkNotDisposed();
     if (selector is EventPatternKey<T>) {
       final node = _patternMap[selector.pattern]?[selector.type];
       return node is EventNode<T> ? node.currentData : null;
     }
-    return currentData<T>(selector as EventKey<T>);
+    final key = selector as EventKey<T>;
+    final node = _eventsMap[key.address]?[key.type];
+    return node is EventNode<T> ? node.currentData : null;
   }
 
   /// Returns the typed node of a selector, creating it when needed.
@@ -541,18 +522,7 @@ mixin EventBusMixin implements EventBus {
   }
 
   @override
-  StreamSubscription<T> subscribe<T>(EventSelector<T> selector,
-      {void Function(T e)? onData,
-      Function? onError,
-      void Function()? onDone,
-      bool? cancelOnError}) {
-    _checkNotDisposed();
-    return _valueStream<T>(selector).listen(onData,
-        cancelOnError: cancelOnError, onDone: onDone, onError: onError);
-  }
-
-  @override
-  EventSubscription<T> subscribeEvents<T>(
+  EventSubscription<T> subscribe<T>(
     EventSelector<T> selector, {
     EventCallback<T>? onEvent,
     Handler<T>? handler,
@@ -567,7 +537,7 @@ mixin EventBusMixin implements EventBus {
     bool cancelOnError = false,
   }) {
     _checkNotDisposed();
-    return _subscribeEvents<T>(
+    return _subscribe<T>(
       selector,
       onEvent: onEvent,
       handler: handler,
@@ -583,7 +553,7 @@ mixin EventBusMixin implements EventBus {
     );
   }
 
-  EventSubscription<T> _subscribeEvents<T>(
+  EventSubscription<T> _subscribe<T>(
     EventSelector<T> selector, {
     EventCallback<T>? onEvent,
     Handler<T>? handler,
@@ -598,7 +568,7 @@ mixin EventBusMixin implements EventBus {
     bool cancelOnError = false,
   }) {
     if (onEvent == null && handler == null) {
-      throw ArgumentError('subscribeEvents needs onEvent, handler, or both');
+      throw ArgumentError('subscribe needs onEvent, handler, or both');
     }
     final node = _nodeFor<T>(selector);
     if (node is! SubscriptionHost<T>) {
@@ -751,19 +721,9 @@ mixin EventBusMixin implements EventBus {
   }
 
   @override
-  bool remove<T>(EventKey<T> key) {
+  bool remove<T>(EventSelector<T> selector) {
     _checkNotDisposed();
-    final node = _eventsMap[key.address]?[key.type];
-    if (node == null) return false;
-    return _detachNode(key, node);
-  }
-
-  @override
-  bool removePattern<T>(EventPatternKey<T> key) {
-    _checkNotDisposed();
-    final node = _patternMap[key.pattern]?[key.type];
-    if (node == null) return false;
-    return _detachNode(key, node);
+    return _removeSelectorLocally(selector);
   }
 
   @override

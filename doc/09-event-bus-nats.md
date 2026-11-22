@@ -12,7 +12,7 @@ This chapter describes the NATS transport implemented in
 ## 1. Scope
 
 `EventBusNats.keys` is an `EventBus` that keeps the local API (`fire`, `request`,
-`listen`, `subscribe`, `subscribeEvents`, `currentData`) and adds a NATS direction:
+`listen`, `subscribe`, `subscribe`, `currentData`) and adds a NATS direction:
 
 * an `EventCodec` decides how an outgoing event becomes bytes and how incoming bytes become an
   `EventDTO`;

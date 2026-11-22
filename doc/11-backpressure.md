@@ -9,11 +9,11 @@ subscription's own buffer, queue and pause state implement backpressure.
 > `listen` and `subscribe` are **not** part of this model. They use the node's raw broadcast
 > stream: a paused raw subscription buffers unboundedly inside the Dart stream, has no overflow
 > policy or counters, and a throwing `onData` goes to the zone instead of `errors`. Use
-> `subscribeEvents` for any of the controls below (ADR-0001).
+> `subscribe` for any of the controls below (ADR-0001).
 
 ## 1. Listener side
 
-`subscribeEvents(onEvent: ...)` returns an `EventSubscription<T>`. Its listener part has:
+`subscribe(onEvent: ...)` returns an `EventSubscription<T>`. Its listener part has:
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -24,7 +24,7 @@ subscription's own buffer, queue and pause state implement backpressure.
 
 ```dart
 final priceKey = EventKey<Price>('market.btc');
-final sub = bus.subscribeEvents(priceKey,
+final sub = bus.subscribe(priceKey,
   bufferCapacity: 8,
   bufferOverflow: BufferOverflow.latest, // keep the newest 8
   onEvent: (price) async => await render(price),
@@ -70,7 +70,7 @@ A handler is a capability of the same subscription:
 
 ```dart
 final orderKey = EventKey<Order>('orders');
-final sub = bus.subscribeEvents(orderKey,
+final sub = bus.subscribe(orderKey,
   handlerConcurrency: 2,
   requestQueueCapacity: 32,
   handler: (dto, lastData) async => await process(dto),
@@ -118,7 +118,7 @@ Both callbacks may be set on one subscription:
 
 ```dart
 final commandKey = EventKey<Command>('commands');
-final sub = bus.subscribeEvents(commandKey,
+final sub = bus.subscribe(commandKey,
   onEvent: (command) => log(command),      // fire reaches this
   handler: (dto, last) async => execute(dto), // request reaches this
 );

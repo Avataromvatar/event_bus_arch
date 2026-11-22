@@ -46,7 +46,7 @@ class MigrationReport {
 ///Rewrites the known 3.x handler surface in [source].
 ///
 ///The only automatic rewrite is `x.handlers.setHandler(...)` ->
-///`x.subscribeEvents(...)`. Everything else is reported, because removing a
+///`x.subscribe(...)`. Everything else is reported, because removing a
 ///handler now means cancelling the `EventSubscription` that replaced it.
 MigrationReport migrateSource(String source, String path) {
   var text = source;
@@ -55,7 +55,7 @@ MigrationReport migrateSource(String source, String path) {
     RegExp(r'\.handlers\.setHandler\b'),
     (_) {
       handlersChanged++;
-      return '.subscribeEvents';
+      return '.subscribe';
     },
   );
 
@@ -120,7 +120,7 @@ Future<void> main(List<String> args) async {
     changedFiles++;
     print('${report.path}:');
     if (report.handlersChanged > 0) {
-      print('  setHandler: ${report.handlersChanged} — replace with subscribeEvents(selector, handler: ...)');
+      print('  setHandler: ${report.handlersChanged} — replace with subscribe(selector, handler: ...)');
     }
     if (report.removalsFound > 0) {
       print('  removeHandler: ${report.removalsFound} — store the subscription and cancel it');

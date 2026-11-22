@@ -154,7 +154,7 @@ void main() {
           exact: {EventAddress('orders.placed'): orderCodec()}));
       final key = EventKey<Order>('orders.placed');
       final received = <Order>[];
-      final sub = bus.subscribeEvents<Order>(key, onEvent: received.add);
+      final sub = bus.subscribe<Order>(key, onEvent: received.add);
 
       expect(bus.fire(key, Order('A-1')), isTrue);
       await pumpEventQueue();
@@ -176,9 +176,9 @@ void main() {
       final orders = <Order>[];
       final invoices = <Invoice>[];
       final orderSub =
-          bus.subscribeEvents<Order>(orderKey, onEvent: orders.add);
+          bus.subscribe<Order>(orderKey, onEvent: orders.add);
       final invoiceSub =
-          bus.subscribeEvents<Invoice>(invoiceKey, onEvent: invoices.add);
+          bus.subscribe<Invoice>(invoiceKey, onEvent: invoices.add);
 
       bus.fire(orderKey, Order('A-1'));
       await pumpEventQueue();
@@ -202,7 +202,7 @@ void main() {
         EventPattern('orders.*'): orderCodec(),
       }));
       final received = <Order>[];
-      final sub = bus.subscribeEvents<Order>(
+      final sub = bus.subscribe<Order>(
           EventPatternKey<Order>('orders.*'),
           onEvent: received.add);
 
@@ -220,7 +220,7 @@ void main() {
       // delivers locally and does not publish again.
       final key = EventKey<Order>('orders.placed');
       final exactSub =
-          bus.subscribeEvents<Order>(key, onEvent: (_) {});
+          bus.subscribe<Order>(key, onEvent: (_) {});
       bus.fire(key, Order('A-2'));
       await pumpEventQueue();
 
@@ -259,7 +259,7 @@ void main() {
       await start(EventCodecRegistry());
       final key = EventKey<Order>('orders');
       final received = <Order>[];
-      final sub = bus.subscribeEvents<Order>(key, onEvent: received.add);
+      final sub = bus.subscribe<Order>(key, onEvent: received.add);
 
       expect(bus.fire(key, Order('A-1')), isTrue);
       await pumpEventQueue();

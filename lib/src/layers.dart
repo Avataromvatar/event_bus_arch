@@ -3,11 +3,27 @@ part of event_arch;
 ///Layer init function. It runs INSIDE the layer isolate, so it must be
 ///top-level/static. It may be async: the layer is considered initialized only
 ///after it returns.
-typedef fnInitLayer = FutureOr<void> Function(Layer, Object? initialData);
+typedef LayerInit = FutureOr<void> Function(Layer, Object? initialData);
+
+///The description of one layer in a [Layers] chain.
+///
+///[init] runs inside that layer's isolate and must be top-level/static.
+///[initialData] is passed to it unchanged. [isModelBus] applies to that
+///layer's local [Layer.current] bus.
+class LayerSpec {
+  const LayerSpec({
+    required this.init,
+    this.initialData,
+    this.isModelBus = false,
+  });
+
+  final LayerInit init;
+  final Object? initialData;
+  final bool isModelBus;
+}
 
 class _LayerInitDto {
-  ///(fnInitLayer, Object?, bool - current bus isModel)
-  final List<(fnInitLayer, Object?, bool)> data;
+  final List<LayerSpec> data;
   final int index;
 
   ///`isModelBus` for every isolate bridge between the layers
@@ -67,8 +83,8 @@ class Layers {
   ///leading to the layer above and the [Layer.bottom] bus leading to the layer
   ///below, if it exists.
   ///
-  ///Each entry of [layers] is `(init function, initial data, isModelBus)`,
-  ///where the flag applies to that layer's [Layer.current] bus.
+  ///Each entry of [layers] is a [LayerSpec]: the init function, its initial
+  ///data and the `isModelBus` flag for that layer's [Layer.current] bus.
   ///
   ///[currentIsModelBus] applies to the [Layer.current] bus of the main isolate.
   ///[bridgeIsModelBus] applies to every [EventBusIsolate] that connects two
@@ -78,7 +94,7 @@ class Layers {
   ///The future completes when EVERY layer of the chain is initialized, including
   ///async init functions. An init failure of any layer surfaces here as well.
   ///[timeout] limits the wait (unlimited by default).
-  static Future<Layer> createLayers(List<(fnInitLayer, Object?, bool)> layers,
+  static Future<Layer> createLayers(List<LayerSpec> layers,
       {bool currentIsModelBus = true,
       bool bridgeIsModelBus = false,
       Duration? timeout}) async {
@@ -118,7 +134,7 @@ class Layers {
   ///restart and are not retried; calls on the bridge throw `StateError` while
   ///the chain is restarting.
   static LayersSupervisor supervise(
-    List<(fnInitLayer, Object?, bool)> layers, {
+    List<LayerSpec> layers, {
     bool currentIsModelBus = true,
     bool bridgeIsModelBus = false,
     Duration? timeout,
@@ -149,7 +165,7 @@ class LayersSupervisor {
   LayersSupervisor._(this._layers, this._currentIsModelBus,
       this._bridgeIsModelBus, this._timeout, this._policy);
 
-  final List<(fnInitLayer, Object?, bool)> _layers;
+  final List<LayerSpec> _layers;
   final bool _currentIsModelBus;
   final bool _bridgeIsModelBus;
   final Duration? _timeout;
@@ -413,7 +429,7 @@ Future<void> _initLayer(EventBus bus, Object? initData) async {
     return;
   }
   final Layer l = Layer(
-      current: EventBus(isModelBus: dto.data[index].$3),
+      current: EventBus(isModelBus: dto.data[index].isModelBus),
       top: bus,
       bottom: index + 1 < dto.data.length
           ? EventBusIsolate(
@@ -436,5 +452,5 @@ Future<void> _initLayer(EventBus bus, Object? initData) async {
     // wait not only for the next isolate to start, but for it to be initialized
     await (bottom as EventBusIsolate).waitInit;
   }
-  await dto.data[index].$1.call(l, dto.data[index].$2);
+  await dto.data[index].init.call(l, dto.data[index].initialData);
 }

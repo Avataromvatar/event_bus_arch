@@ -9,11 +9,11 @@ final noteKey = EventKey<String>('note');
 ///Runs in every worker isolate. `initialData` is the worker index.
 void poolWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
-  bus.subscribeEvents(jobsKey, handler: (dto, lastData) async {
+  bus.subscribe(jobsKey, handler: (dto, lastData) async {
     print('worker $index handled ${dto.data}');
     return index * 100 + dto.data;
   });
-  bus.subscribe(noteKey, onData: (note) => print('worker $index got note: $note'));
+  bus.subscribe(noteKey, onEvent: (note) => print('worker $index got note: $note'));
 }
 
 Future<void> main() async {

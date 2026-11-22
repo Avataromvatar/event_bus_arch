@@ -25,8 +25,8 @@ Future<void> main() async {
   print('|---|---:|---:|---:|---|');
 
   await _fireScenario('legacy listen', DeliveryMode.async, legacy: true);
-  await _fireScenario('subscribeEvents async', DeliveryMode.async);
-  await _fireScenario('subscribeEvents sync', DeliveryMode.sync);
+  await _fireScenario('subscribe async', DeliveryMode.async);
+  await _fireScenario('subscribe sync', DeliveryMode.sync);
   await _requestSequential();
   await _requestBurst(concurrency: 1);
   await _requestBurst(concurrency: 4);

@@ -68,7 +68,7 @@ final class EventKey<T> {
 
 `EventPatternKey<T>` is the same for a pattern address. `EventKey` is exact and rejects wildcard
 tokens; `EventPatternKey` accepts and validates them. A sealed `EventSelector<T>` base can unify
-the two for `subscribeEvents`/`listen`; `fire`/`request` accept only `EventKey`.
+the two for `subscribe`/`listen`; `fire`/`request` accept only `EventKey`.
 
 `Type` equality survives minification and obfuscation; `Type.toString()` does not. No code may
 use `'$T'`, `Type.toString()`, `runtimeType.toString()` or a user-class name string for identity,
@@ -104,9 +104,11 @@ Every method takes a key or selector, not a `paths` list and a `separator`:
 ```dart
 bool fire<T>(EventKey<T> key, T data, {arguments, correlationId});
 Future<dynamic> request<T>(EventKey<T> key, T data, {timeout, cancelToken, ...});
-EventSubscription<T> subscribeEvents<T>(EventSelector<T> selector, {...});
+EventSubscription<T> subscribe<T>(EventSelector<T> selector, {...});
 Stream<T> listen<T>(EventSelector<T> selector);
-T? currentData<T>(EventKey<T> key);
+T? currentData<T>(EventSelector<T> selector);
+bool remove<T>(EventSelector<T> selector);
+bool removeAddress(EventAddress address);
 bool haveListener<T>(EventSelector<T> selector);
 bool haveHandler<T>(EventSelector<T> selector);
 ```
@@ -163,7 +165,7 @@ There is no type token and no `typeTags`/`wireTypes`.
 
 `EventPattern` matches address tokens only; it never compares types. A pattern node is typed by
 its `EventPatternKey<T>`; delivery filters by `data is T`. `fire`/`request` reject pattern keys;
-`subscribeEvents`/`listen` accept an `EventSelector` (exact or pattern).
+`subscribe`/`listen` accept an `EventSelector` (exact or pattern).
 
 ### 8. Isolates, pools and layers
 
@@ -212,14 +214,14 @@ is built above this model.
 ```dart
 // before
 bus.fire<OrderPlaced>(order, paths: ['orders'], separator: '.');
-bus.subscribeEvents<OrderPlaced>(paths: ['orders', '*'], onEvent: ...);
+bus.subscribe<OrderPlaced>(EventPatternKey('orders.*'), onEvent: ...);
 
 // after
 final orderPlaced = EventKey<OrderPlaced>('orders.placed');
 final anyOrder = EventPatternKey<OrderPlaced>('orders.*');
 
 bus.fire(orderPlaced, order);
-bus.subscribeEvents(anyOrder, onEvent: ...);
+bus.subscribe(anyOrder, onEvent: ...);
 ```
 
 * Transport: replace `serializers`/`deserializers`/`typeTags` with typed codecs keyed by

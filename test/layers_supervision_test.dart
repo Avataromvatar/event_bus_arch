@@ -63,8 +63,8 @@ void main() {
     port.listen((message) => inits.add(message as String));
 
     final supervisor = Layers.supervise([
-      (initForwardingLayer, port.sendPort, false),
-      (initKillableLayer, port.sendPort, false),
+      LayerSpec(init: initForwardingLayer, initialData: port.sendPort, isModelBus: false),
+      LayerSpec(init: initKillableLayer, initialData: port.sendPort, isModelBus: false),
     ], policy: _policy);
 
     await supervisor.waitInit;
@@ -111,8 +111,8 @@ void main() {
     final port = ReceivePort();
     port.listen((_) {});
     final supervisor = Layers.supervise([
-      (initForwardingLayer, port.sendPort, false),
-      (initKillableLayer, port.sendPort, false),
+      LayerSpec(init: initForwardingLayer, initialData: port.sendPort, isModelBus: false),
+      LayerSpec(init: initKillableLayer, initialData: port.sendPort, isModelBus: false),
     ], policy: _policy);
     await supervisor.waitInit;
 
@@ -139,8 +139,8 @@ void main() {
     final port = ReceivePort();
     port.listen((_) {});
     final supervisor = Layers.supervise([
-      (initForwardingLayer, port.sendPort, false),
-      (initKillableLayer, port.sendPort, false),
+      LayerSpec(init: initForwardingLayer, initialData: port.sendPort, isModelBus: false),
+      LayerSpec(init: initKillableLayer, initialData: port.sendPort, isModelBus: false),
     ], policy: _policy);
     await supervisor.waitInit;
 
@@ -164,8 +164,8 @@ void main() {
     final port = ReceivePort();
     port.listen((_) {});
     final supervisor = Layers.supervise([
-      (initForwardingLayer, port.sendPort, false),
-      (initKillableLayer, port.sendPort, false),
+      LayerSpec(init: initForwardingLayer, initialData: port.sendPort, isModelBus: false),
+      LayerSpec(init: initKillableLayer, initialData: port.sendPort, isModelBus: false),
     ], policy: const SupervisionPolicy(
       maxRestarts: 0,
       window: Duration(minutes: 1),
@@ -189,7 +189,7 @@ void main() {
   });
 
   test('an initial chain init failure fails the supervisor', () async {
-    final supervisor = Layers.supervise([(failingLayer, null, false)]);
+    final supervisor = Layers.supervise([LayerSpec(init: failingLayer, isModelBus: false)]);
 
     await expectLater(
         supervisor.waitInit, throwsA(isA<EventBusException>()));

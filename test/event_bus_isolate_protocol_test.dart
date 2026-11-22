@@ -284,8 +284,8 @@ void main() {
   group('Layers', () {
     test('createLayers returns when the whole chain is initialized', () async {
       final layer = await Layers.createLayers([
-        (initMiddleLayer, null, true),
-        (initBottomLayer, null, true),
+        LayerSpec(init: initMiddleLayer, isModelBus: true),
+        LayerSpec(init: initBottomLayer, isModelBus: true),
       ]);
 
       // The chain: main -> middle -> bottom -> middle -> main. Each hop
@@ -310,13 +310,13 @@ void main() {
 
     test('a layer initialization error reaches createLayers', () async {
       await expectLater(
-        Layers.createLayers([(failingLayerInit, null, true)]),
+        Layers.createLayers([LayerSpec(init: failingLayerInit, isModelBus: true)]),
         throwsA(isA<EventBusException>()),
       );
     });
 
     test('close closes the layer buses and can be repeated', () async {
-      final layer = await Layers.createLayers([(initBottomLayer, null, true)]);
+      final layer = await Layers.createLayers([LayerSpec(init: initBottomLayer, isModelBus: true)]);
       final current = layer.current;
 
       await layer.close();

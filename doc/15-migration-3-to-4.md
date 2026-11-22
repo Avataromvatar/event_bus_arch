@@ -15,9 +15,9 @@ handler rewrite until the address rewrite lands).
 | Address | `Topic` = `'$T'` + `paths` joined by a separator: `int.sensor.temp` | `EventAddress('sensor.temp')`; the type is a separate key |
 | Key | static type parameter of each call | `EventKey<T>('sensor.temp')`, `EventPatternKey<T>('sensor.*')` |
 | Wildcards | `*`/`>` in `paths`, per-call `separator` | fixed `*`/`>` in `EventPatternKey`; no separator |
-| Handlers | `bus.handlers.setHandler<T>(handler: ...)`, `removeHandler`, `EventBusHandlers` | `bus.subscribeEvents(key, handler: ...)`, keep the `EventSubscription`, `cancel()` it |
+| Handlers | `bus.handlers.setHandler<T>(handler: ...)`, `removeHandler`, `EventBusHandlers` | `bus.subscribe(key, handler: ...)`, keep the `EventSubscription`, `cancel()` it |
 | Handler concurrency / queue | node-level | per subscription: `handlerConcurrency`, `requestQueueCapacity` |
-| Listener control | `listen`/`subscribe` only | `subscribeEvents(selector, onEvent:)` with buffer, overflow policy, pause/resume/resize |
+| Listener control | `listen`/`subscribe` only | `subscribe(selector, onEvent:)` with buffer, overflow policy, pause/resume/resize |
 | Listener + handler | separate registrations | one subscription can have both callbacks |
 | `fire` return | node accepted | listener, model storage, transport or known remote listener/model interest; a handler-only node does **not** count (D14) |
 | Errors | separate streams/raw objects | `EventBus.errors` of `EventBusError`; `recentErrors`, `suppressedErrors`, `EventBusErrorMonitor`; `EventBusError.address` |
@@ -47,7 +47,7 @@ Before:
 
 ```dart
 bus.fire<Order>(order, paths: ['orders', 'placed'], separator: '.');
-bus.subscribeEvents<Order>(paths: ['orders', '*'], onEvent: render);
+bus.subscribe<Order>(paths: ['orders', '*'], onEvent: render);
 
 final last = bus.currentData<Order>(paths: ['orders', 'placed']);
 ```
@@ -59,7 +59,7 @@ final orderPlaced = EventKey<Order>('orders.placed');
 final anyOrder = EventPatternKey<Order>('orders.*');
 
 bus.fire(orderPlaced, order);
-bus.subscribeEvents(anyOrder, onEvent: render);
+bus.subscribe(anyOrder, onEvent: render);
 
 final last = bus.currentData(orderPlaced);
 ```
@@ -96,7 +96,7 @@ After:
 
 ```dart
 final ordersKey = EventKey<Order>('orders');
-final orders = bus.subscribeEvents(ordersKey,
+final orders = bus.subscribe(ordersKey,
   handlerConcurrency: 2,
   requestQueueCapacity: 32,
   handler: (dto, last) async => await process(dto),
@@ -144,14 +144,14 @@ final updateKey = EventKey<Update>('state');
 
 // before: a main-side listener could see its own fire
 // after: it sees only events coming from the worker
-iso.subscribe(updateKey, onData: render);
+iso.subscribe(updateKey, onEvent: render);
 
 // to send to the worker:
 iso.fire(updateKey, Update(...));
 
 // local pub/sub:
 final local = EventBus();
-final sub = local.subscribeEvents(updateKey, onEvent: (_) {});
+final sub = local.subscribe(updateKey, onEvent: (_) {});
 ```
 
 ### Requests
@@ -224,13 +224,13 @@ final sub = bus.errors.listen((error) {
   `Stream<Object>` still compiles, but code that pattern-matched raw errors must switch to
   `EventBusError.error`.
 * `EventBusError.address` is the event address; `topic` remains as a compatibility alias.
-* Listener exceptions: use `subscribeEvents(onError:)` or the `errors` stream; a raw `listen`
+* Listener exceptions: use `subscribe(onError:)` or the `errors` stream; a raw `listen`
   still has its stream `onError`, but the bus-level contract is the error stream.
 
 Migration checklist:
 
 - [ ] give every event an explicit address and an `EventKey`/`EventPatternKey`;
-- [ ] replace every `setHandler`/`removeHandler` with a stored `subscribeEvents` subscription;
+- [ ] replace every `setHandler`/`removeHandler` with a stored `subscribe` subscription;
 - [ ] search for code that relied on `fire == true` for a handler-only key;
 - [ ] review every isolate `fire` that expected a local echo (use a local bus instead);
 - [ ] add timeouts to remote requests and decide whether to pass a `CancelToken`;
@@ -273,7 +273,7 @@ dart run tool/migrate_3_to_4.dart lib test
 ```
 
 * `bus.handlers.setHandler<T>(...)` is reported: replace it with
-  `bus.subscribeEvents(EventKey<T>('stable.address'), handler: ...)` and keep the returned
+  `bus.subscribe(EventKey<T>('stable.address'), handler: ...)` and keep the returned
   `EventSubscription`.
 * `removeHandler` is reported: cancelling the subscription replaces it.
 * `addAllHandlerFromOtherBus` / `removeAllHandlerPresentInOtherBus` are reported for manual work.

@@ -62,7 +62,7 @@ Use EventBus for local pub/sub and a transport for cross-process events.
 ## 3. Checks
 
 ```bash
-# Browser smoke tests: local bus, model, subscribeEvents, observability, capability guard
+# Browser smoke tests: local bus, model, subscribe, observability, capability guard
 dart test -p chrome test/web_smoke_test.dart
 
 # Compile the core for the web; writes build/web_check.js

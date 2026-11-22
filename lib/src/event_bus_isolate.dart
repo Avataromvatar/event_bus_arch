@@ -638,7 +638,7 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  bool remove<T>(EventKey<T> key) {
+  bool remove<T>(EventSelector<T> selector) {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
     }
@@ -646,22 +646,8 @@ class EventBusIsolate extends EventBusImpl {
       throw StateError(
           'EventBusIsolate is not initialized: await waitInit before remove');
     }
-    final removed = _removeSelectorLocally(key);
-    _link.removeSelector(key);
-    return removed;
-  }
-
-  @override
-  bool removePattern<T>(EventPatternKey<T> key) {
-    if (isDisposed) {
-      throw StateError('EventBusIsolate is disposed');
-    }
-    if (!_ready) {
-      throw StateError(
-          'EventBusIsolate is not initialized: await waitInit before remove');
-    }
-    final removed = _removeSelectorLocally(key);
-    _link.removeSelector(key);
+    final removed = _removeSelectorLocally(selector);
+    _link.removeSelector(selector);
     return removed;
   }
 
@@ -977,22 +963,12 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  bool remove<T>(EventKey<T> key) {
+  bool remove<T>(EventSelector<T> selector) {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
-    final removed = super.remove(key);
-    _link.removeSelector(key);
-    return removed;
-  }
-
-  @override
-  bool removePattern<T>(EventPatternKey<T> key) {
-    if (isDisposed) {
-      throw StateError('EventBus is disposed');
-    }
-    final removed = super.removePattern(key);
-    _link.removeSelector(key);
+    final removed = super.remove(selector);
+    _link.removeSelector(selector);
     return removed;
   }
 

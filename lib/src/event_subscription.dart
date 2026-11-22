@@ -27,7 +27,7 @@ enum DeliveryMode {
   sync,
 }
 
-///A consumer registration created by [EventBus.subscribeEvents].
+///A consumer registration created by [EventBus.subscribe].
 ///
 ///The subscription owns its delivery state: the buffer, the pause flag and the
 ///error routing. The node only fans events out to [offer]; it never inspects or

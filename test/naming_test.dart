@@ -71,7 +71,7 @@ void main() {
       await bus.dispose();
     });
 
-    test('subscribeEvents takes initialData', () async {
+    test('subscribe takes initialData', () async {
       final bus = EventBus(isModelBus: true);
       bus.subscribeEventsLegacy<int>(
           initialData: 3, handler: (dto, lastData) async {});
@@ -99,10 +99,10 @@ void main() {
   });
 
   group('Parameter names: Layers and logger', () {
-    test('createLayers takes init tuples, currentIsModelBus and timeout',
+    test('createLayers takes LayerSpec, currentIsModelBus and timeout',
         () async {
       final layer = await Layers.createLayers(
-        [(_initNameLayer, null, true)],
+        [LayerSpec(init: _initNameLayer, isModelBus: true)],
         currentIsModelBus: true,
         timeout: const Duration(seconds: 10),
       );

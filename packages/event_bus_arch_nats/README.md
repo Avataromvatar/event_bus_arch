@@ -3,7 +3,7 @@
 NATS transport for [`event_bus_arch`](https://pub.dev/packages/event_bus_arch).
 
 `EventBusNats.keys` is an `EventBus` whose nodes publish to and subscribe from a NATS server.
-Application code keeps using `fire`, `request`, `listen`, `subscribe` and `subscribeEvents`; the
+Application code keeps using `fire`, `request`, `listen`, `subscribe` and `subscribe`; the
 transport is configured with an `EventCodecRegistry` keyed by event address.
 
 The package is a thin NATS adapter over
@@ -63,7 +63,7 @@ Future<void> main() async {
   final received = Completer<int>();
   final subscription = subscriber.subscribe(
     EventPatternKey<int>('sensor.*'),
-    onData: (value) {
+    onEvent: (value) {
       print('received: $value');
       received.complete(value);
     },
@@ -110,7 +110,7 @@ The prefix is stripped before the codec is called, so the codec always receives 
   of the registry.
 - A codec may implement only one direction: a publisher needs `encode`, a subscriber needs `decode`.
 
-A node is created lazily by `listen`, `subscribeEvents` or `fire`/`request`. `fire` creates a node
+A node is created lazily by `listen`, `subscribe` or `fire`/`request`. `fire` creates a node
 only for an address present in the codec registry; for any other address it keeps local bus
 semantics and returns `false` when no node exists.
 

@@ -141,8 +141,8 @@ Snapshot on the same machine as the load benchmark (Dart 3.14.0, Windows, 12 CPU
 | scenario | events | elapsed ms | events/s | note |
 |---|---:|---:|---:|---|
 | legacy listen | 100000 | 193 | 518135 | callback count reached |
-| subscribeEvents async | 100000 | 145 | 689655 | callback count reached |
-| subscribeEvents sync | 100000 | 139 | 719424 | callback count reached |
+| subscribe async | 100000 | 145 | 689655 | callback count reached |
+| subscribe sync | 100000 | 139 | 719424 | callback count reached |
 | request sequential | 20000 | 91 | 219780 | one handler, concurrency 1 |
 | request burst | 2000 | 22 | 90909 | concurrency 1, queue 2000 |
 | request burst | 2000 | 20 | 100000 | concurrency 4, queue 2000 |
@@ -152,7 +152,7 @@ Snapshot on the same machine as the load benchmark (Dart 3.14.0, Windows, 12 CPU
 
 Notes:
 
-* The `subscribeEvents` path is slightly faster than the legacy `listen` path in this run because
+* The `subscribe` path is slightly faster than the legacy `listen` path in this run because
   the legacy path still goes through a broadcast controller plus a subscription wrapper. The sync
   mode is the cheapest, as expected, and is opt-in.
 * `request sequential` now includes the handler-subscription dispatch and the `_RequestEntry`

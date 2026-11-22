@@ -9,7 +9,7 @@ final stateKey = EventKey<int>('state');
 ///The 4.0 form of the 3.x sample used by the migration guide:
 ///handlers as subscriptions, handler errors, Scope/Command and an isolate.
 void migrationWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents(calcKey, handler: (dto, lastData) async {
+  bus.subscribe(calcKey, handler: (dto, lastData) async {
     if (dto.data < 0) throw ArgumentError.value(dto.data, 'value');
     return dto.data * 2;
   });
@@ -19,7 +19,7 @@ Future<void> main() async {
   final bus = EventBus();
 
   // A handler that replaces the old bus.handlers.setHandler.
-  final calc = bus.subscribeEvents(calcKey, handler: (dto, lastData) async {
+  final calc = bus.subscribe(calcKey, handler: (dto, lastData) async {
     if (dto.data < 0) throw ArgumentError.value(dto.data, 'value');
     return dto.data * 2;
   });

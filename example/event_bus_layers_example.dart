@@ -26,16 +26,16 @@ final chainKey = EventKey<TestData>('chain');
 ///MIDDLE layer. In WORKER ISOLATE
 class TestMiddleIsolateController {
   Layer layer;
-  late StreamSubscription<TestData> subscriptionTop;
-  late StreamSubscription<TestData> subscriptionBottom;
+  late EventSubscription<TestData> subscriptionTop;
+  late EventSubscription<TestData> subscriptionBottom;
   TestMiddleIsolateController(this.layer) {
     //Wait event from top layer
-    subscriptionTop = layer.top!.subscribe(chainKey, onData: (e) {
+    subscriptionTop = layer.top!.subscribe(chainKey, onEvent: (e) {
       //send new data to
       layer.bottom!.fire(chainKey, TestData(e.count + 1));
       print('FROM MIDDLE TO BOTTOM ${e.count}->${e.count + 1}');
     });
-    subscriptionBottom = layer.bottom!.subscribe(chainKey, onData: (e) {
+    subscriptionBottom = layer.bottom!.subscribe(chainKey, onEvent: (e) {
       layer.top!.fire(chainKey, TestData(e.count + 1));
       print('FROM MIDDLE TO TOP ${e.count}->${e.count + 1}');
     });
@@ -49,11 +49,11 @@ class TestMiddleIsolateController {
 ///Bottom layer. In WORKER ISOLATE
 class TestBottomIsolateController {
   Layer layer;
-  late StreamSubscription<TestData> subscriptionTop;
+  late EventSubscription<TestData> subscriptionTop;
 
   TestBottomIsolateController(this.layer) {
     //Wait event from top layer
-    subscriptionTop = layer.top!.subscribe(chainKey, onData: (e) {
+    subscriptionTop = layer.top!.subscribe(chainKey, onEvent: (e) {
       //send new data to
       layer.top!.fire(chainKey, TestData(e.count + 1));
       print('FROM BOTTOM TO MIDDLE ${e.count}->${e.count + 1}');
@@ -73,11 +73,11 @@ class TestIsolateProvider {
     ///Create Layer with deep 2
     ///top layer <-> isolate <-> middle layer <-> isolate <-> bottom layer
     Layers.createLayers(
-            [(_initMiddleLayers, null, true), (_initBottomLayers, null, true)])
+            [LayerSpec(init: _initMiddleLayers, isModelBus: true), LayerSpec(init: _initBottomLayers, isModelBus: true)])
         .then(
       (value) {
         layer = value;
-        layer.bottom!.subscribe(chainKey, onData: (e) {
+        layer.bottom!.subscribe(chainKey, onEvent: (e) {
           print('Get from middle ${e.count}');
         });
         _completer.complete();

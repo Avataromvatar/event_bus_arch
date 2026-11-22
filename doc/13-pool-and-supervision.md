@@ -143,7 +143,7 @@ stateDiagram-v2
 
 ```dart
 final supervisor = Layers.supervise(
-  [(_initMiddle, null, true), (_initBottom, null, true)],
+  [LayerSpec(init: _initMiddle, isModelBus: true), LayerSpec(init: _initBottom, isModelBus: true)],
   bridgeIsModelBus: false,
   policy: const SupervisionPolicy(maxRestarts: 3),
 );

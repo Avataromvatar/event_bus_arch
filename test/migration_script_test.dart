@@ -25,7 +25,7 @@ import 'package:rxdart/rxdart.dart';
     const source = '''
 void main() {
   final bus = EventBus();
-  bus.subscribeEvents<int>(handler: (dto, last) async => 1);
+  bus.subscribe<int>(handler: (dto, last) async => 1);
 }
 ''';
 

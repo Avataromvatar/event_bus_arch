@@ -167,7 +167,7 @@ keep registration order).
 `EventAddress` compares its string. `EventKey` compares `(address, type)`; `EventPatternKey`
 compares `(pattern, type)`. Consequences:
 
-* `bus.fire(EventKey<int>('p'), 1)` and `bus.subscribeEvents(EventKey<int>('p'))` address the
+* `bus.fire(EventKey<int>('p'), 1)` and `bus.subscribe(EventKey<int>('p'))` address the
   **same** node; `arguments` and `correlationId` are not part of the identity;
 * a new `EventKey<int>('p')` value finds the same node as any other instance with the same address
   and type;
@@ -231,7 +231,7 @@ abstract class SubscriptionHost<T> {    // implemented by every built-in node
 3. adds the value to the broadcast value stream (`listen`/`subscribe`) and calls `offer` on every
    `EventSubscription`.
 
-`EventSubscription<T>` is created by `subscribeEvents`:
+`EventSubscription<T>` is created by `subscribe`:
 
 | Capability | Fields / methods |
 |---|---|
@@ -273,15 +273,15 @@ abstract class EventBus {
   Stream<T> listen<T>(EventSelector<T> selector);
   StreamSubscription<T> subscribe<T>(EventSelector<T> selector, {...});
 
-  EventSubscription<T> subscribeEvents<T>(EventSelector<T> selector,
+  EventSubscription<T> subscribe<T>(EventSelector<T> selector,
       {EventCallback<T>? onEvent, Handler<T>? handler, T? initialData,
       int handlerConcurrency, int? requestQueueCapacity,
       int? bufferCapacity, BufferOverflow bufferOverflow,
       DeliveryMode deliveryMode, ...});
 
-  T? currentData<T>(EventKey<T> key);
+  T? currentData<T>(EventSelector<T> selector);
   bool remove<T>(EventKey<T> key);
-  bool removePattern<T>(EventPatternKey<T> key);
+  bool remove<T>(EventPatternKey<T> key);
   bool removeAddress(EventAddress address);
 
   factory EventBus({bool isModelBus = false, ObservabilityConfig? observability});
@@ -346,14 +346,14 @@ not the error stream. Errors have their own stream and are rate-limited (see [12
 
 ## 5. Lifecycle
 
-* `listen`/`subscribe`/`subscribeEvents` create a node if it did not exist (exact or pattern).
+* `listen`/`subscribe`/`subscribe` create a node if it did not exist (exact or pattern).
 * A handler subscription also creates/uses a node; the first handler interest is what makes a node
   an answering tier.
 * Cancelling the last subscription calls the private `_removeNode`. It removes and disposes the
   node **only if** it has no subscriptions, no `KeepAliveNode` pin, and the bus is not a model bus.
   A map entry is removed only when it still holds the same node instance, so a late cancellation of
   an old node cannot delete a newer one.
-* `remove(key)` removes one type node; `removePattern(patternKey)` removes one pattern type node;
+* `remove(key)` removes one type node; `remove(patternKey)` removes one pattern type node;
   `removeAddress(address)` removes every type node at an exact address. They forget `currentData`
   **even on a model bus and even with a `KeepAliveNode` pin**. All subscriptions of the removed
   nodes are cancelled (D13); a transport node cancels its broker subscription. A model bus creates

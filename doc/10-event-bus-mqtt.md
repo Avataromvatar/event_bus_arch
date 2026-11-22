@@ -12,7 +12,7 @@ in [09-event-bus-nats.md](09-event-bus-nats.md); this chapter covers what MQTT c
 ## 1. Scope
 
 `EventBusMqtt.keys` keeps the local API (`fire`, `request`, `listen`, `subscribe`,
-`subscribeEvents`, `currentData`) and adds an MQTT direction. The transport talks to an **MQTT 5**
+`subscribe`, `currentData`) and adds an MQTT direction. The transport talks to an **MQTT 5**
 broker only: it relies on user properties (`arguments`, origin, correlation), the response topic
 (request/reply) and `noLocal` (echo suppression), none of which exist in MQTT 3.1.1.
 

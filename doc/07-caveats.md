@@ -13,7 +13,7 @@ data; a listener on an unrelated type does not.
 
 ```dart
 final asNum = EventKey<num>('counter');
-bus.subscribeEvents(asNum, handler: (dto, last) async => dto.data);
+bus.subscribe(asNum, handler: (dto, last) async => dto.data);
 await bus.request(EventKey<int>('counter'), 1);   // answered — int is num
 await bus.request(EventKey<String>('counter'), 'x'); // NoHandlerException
 ```
@@ -33,7 +33,7 @@ published it, or a remote listener/model interest is known. It never invokes a h
 only a handler subscription returns `false`.
 
 ```dart
-bus.subscribeEvents(counterKey, handler: (dto, last) async => 1);
+bus.subscribe(counterKey, handler: (dto, last) async => 1);
 bus.fire(counterKey, 1);                // false — no listener
 ```
 
@@ -41,15 +41,15 @@ bus.fire(counterKey, 1);                // false — no listener
 
 They are the raw node-stream view. A paused raw subscription buffers **unboundedly** in the Dart
 stream, has no overflow policy or counters, and a throwing `onData` goes to the zone instead of
-`bus.errors`. Use `subscribeEvents` for buffers, pause policies, error routing, counters and
+`bus.errors`. Use `subscribe` for buffers, pause policies, error routing, counters and
 handlers.
 
 ```dart
 // dangerous under load: the stream queue is invisible and unbounded
-bus.subscribe(priceKey, onData: slowRender);
+bus.subscribe(priceKey, onEvent: slowRender);
 
 // bounded, observable
-bus.subscribeEvents(priceKey,
+bus.subscribe(priceKey,
   bufferCapacity: 1,
   bufferOverflow: BufferOverflow.latest,
   onEvent: slowRender,
@@ -79,11 +79,11 @@ local pub/sub.
 
 ```dart
 // does not echo back to the main-side listener
-iso.subscribe(refreshKey, onData: render);
+iso.subscribe(refreshKey, onEvent: render);
 iso.fire(refreshKey, 'refresh');
 
 // local pub/sub
-layer.current.subscribe(refreshKey, onData: render);
+layer.current.subscribe(refreshKey, onEvent: render);
 ```
 
 ## 7. Isolate data must be sendable
@@ -110,7 +110,7 @@ await sub.cancel();                 // node stays on a model bus
 bus.remove(counterKey);             // value and node are forgotten
 ```
 
-`removePattern(patternKey)` removes one pattern type node; `removeAddress(address)` removes every
+`remove(patternKey)` removes one pattern type node; `removeAddress(address)` removes every
 type node at an exact address.
 
 ## 10. Wildcards are local; brokers differ

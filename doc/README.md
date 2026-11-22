@@ -50,14 +50,14 @@ final bus = EventBus();                        // or EventBus(isModelBus: true)
 final helloKey = EventKey<String>('greeting.hello');
 
 // a listener with its own buffer
-final sub = bus.subscribeEvents(helloKey,
+final sub = bus.subscribe(helloKey,
   onEvent: (event) => print(event),
   bufferCapacity: 16,
   bufferOverflow: BufferOverflow.dropOldest,
 );
 
 // a handler answers requests; onEvent and handler may be combined
-bus.subscribeEvents(helloKey, handler: (dto, lastData) async {
+bus.subscribe(helloKey, handler: (dto, lastData) async {
   return 'processed: ${dto.data}';
 });
 
@@ -81,7 +81,7 @@ What you need to know right away:
 4. **`Scope.undo()` needs a history of at least two calls** (`maxLenForUndo >= 2`, default 10).
    `Scope`, `Command` and `FSM` live in `event_bus_arch_patterns`, not in the core package.
 5. **Wildcards are local.** `*` matches one token, `>` one or more trailing tokens. `listen`,
-   `subscribe` and `subscribeEvents` accept `EventPatternKey<T>`; `fire`/`request` require an exact
+   `subscribe` and `subscribe` accept `EventPatternKey<T>`; `fire`/`request` require an exact
    `EventKey<T>`, and a pattern handler can answer a concrete request.
 
 ## Package status

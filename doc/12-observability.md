@@ -176,7 +176,7 @@ classDiagram
 final orderKey = EventKey<Order>('orders');
 await bus.request(orderKey, order, correlationId: 'checkout-42');
 
-bus.subscribeEvents(orderKey, handler: (dto, last) async {
+bus.subscribe(orderKey, handler: (dto, last) async {
   print(dto.correlationId); // checkout-42
   return await process(dto);
 });

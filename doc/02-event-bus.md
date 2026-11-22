@@ -102,18 +102,18 @@ final priceKey = EventKey<Price>('market.btc');
 final stream = bus.listen(priceKey);
 stream.listen((price) => print(price));
 
-final subscription = bus.subscribe(priceKey, onData: (price) => print(price));
+final subscription = bus.subscribe(priceKey, onEvent: (price) => print(price));
 ```
 
 These are the raw node-stream views: they have no bounded buffer, overflow policy or counters.
-Use `subscribeEvents` when the consumer can be slow.
+Use `subscribe` when the consumer can be slow.
 
-## Receiving: `subscribeEvents`
+## Receiving: `subscribe`
 
-`subscribeEvents` returns an `EventSubscription<T>` with its own lifecycle and delivery state:
+`subscribe` returns an `EventSubscription<T>` with its own lifecycle and delivery state:
 
 ```dart
-final sub = bus.subscribeEvents(priceKey,
+final sub = bus.subscribe(priceKey,
   bufferCapacity: 8,
   bufferOverflow: BufferOverflow.latest,
   onEvent: (price) async {
@@ -137,7 +137,7 @@ and a `.stream` view. See [11](11-backpressure.md).
 A handler is a capability of a subscription, not a global registry:
 
 ```dart
-final orders = bus.subscribeEvents(orderPlaced,
+final orders = bus.subscribe(orderPlaced,
   handlerConcurrency: 1,          // one in-flight request by default
   requestQueueCapacity: 4,        // queued requests before BusyException
   handler: (dto, lastData) async {
@@ -157,7 +157,7 @@ await orders.cancel();            // removes the handler, fails its queued reque
 ### A subscription can be both
 
 ```dart
-final audit = bus.subscribeEvents(orderPlaced,
+final audit = bus.subscribe(orderPlaced,
   onEvent: (order) => log('fire: $order'),
   handler: (dto, lastData) async {
     log('request: ${dto.data}');
@@ -173,7 +173,7 @@ final audit = bus.subscribeEvents(orderPlaced,
 ```dart
 final sensorAny = EventPatternKey<Sensor>('sensor.*');
 
-bus.subscribeEvents(sensorAny, handler: (dto, lastData) async {
+bus.subscribe(sensorAny, handler: (dto, lastData) async {
   return dto.data.value * 2;
 });
 
@@ -189,9 +189,9 @@ A concrete request finds the pattern tier when the exact bucket has no accepting
 final last = bus.currentData(serviceKey);
 ```
 
-`currentData` takes an exact key and reads only that node. `currentDataFor(patternKey)` returns the
-last value delivered to the pattern node (the pattern's own type node), not a search across
-matching concrete nodes. On a model bus the value survives
+`currentData(selector)` accepts an exact key or a pattern key. For a pattern it returns the last
+value delivered to the pattern node (the pattern's own type node), not a search across matching
+concrete nodes. On a model bus the value survives
 until `remove`/`dispose`.
 
 The handler's `lastData` is the previous `currentData` of the handler's own node.
@@ -225,7 +225,7 @@ by `FSM` and `EventBusLogger`. See [12](12-observability.md).
 
 ```dart
 bus.remove(serviceKey);                 // one exact type node
-bus.removePattern(sensorAny);           // one pattern type node
+bus.remove(sensorAny);           // one pattern type node
 bus.removeAddress(EventAddress('service.status')); // every type at that address
 await bus.dispose();                    // the whole bus
 ```
@@ -254,7 +254,7 @@ try {
 final state = EventBus(isModelBus: true);
 state.fire(serviceKey, Status.ready);
 
-final sub = state.subscribeEvents(serviceKey,
+final sub = state.subscribe(serviceKey,
   initialData: state.currentData(serviceKey),
   onEvent: render,
 );
@@ -266,7 +266,7 @@ stored the value.
 ### A bounded pipeline
 
 ```dart
-final stage = bus.subscribeEvents(jobKey,
+final stage = bus.subscribe(jobKey,
   bufferCapacity: 16,
   bufferOverflow: BufferOverflow.reject,
   onEvent: process,

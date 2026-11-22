@@ -20,7 +20,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final key = EventKey<int>('counter');
       final log = <int>[];
-      bus.subscribeEvents<int>(key, handler: (dto, lastData) async {
+      bus.subscribe<int>(key, handler: (dto, lastData) async {
         log.add(dto.data);
       });
       final command = Command<int>(bus, key, maxLen: 10);
@@ -78,7 +78,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final key = EventKey<int>('counter');
       final seen = <int>[];
-      bus.subscribeEvents<int>(key, handler: (dto, lastData) async {
+      bus.subscribe<int>(key, handler: (dto, lastData) async {
         seen.add(dto.data);
       });
       final command = Command<int>(bus, key, maxLen: 5);
@@ -154,7 +154,7 @@ void main() {
       final scope = Scope<int>();
       final keyA = EventKey<int>('a');
       final keyB = EventKey<int>('b');
-      final handler = bus.subscribeEvents<int>(keyA,
+      final handler = bus.subscribe<int>(keyA,
           handler: (dto, lastData) async {});
       await scope.initScope(bus, keyA, maxLenForUndo: 10);
 
@@ -174,7 +174,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
       final key = EventKey<int>('a');
-      final handler = bus.subscribeEvents<int>(key,
+      final handler = bus.subscribe<int>(key,
           handler: (dto, lastData) async {});
       await scope.initScope(bus, key, maxLenForUndo: 10);
 

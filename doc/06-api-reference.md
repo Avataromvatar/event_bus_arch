@@ -39,7 +39,7 @@ typedef WorkerKeySelector = Object? Function(EventDTO dto);
 typedef MetricKeyBuilder = String Function(String address);
 typedef EventBusErrorFilter = bool Function(EventBusError error);
 
-typedef fnInitLayer = FutureOr<void> Function(Layer layer, Object? initialData);
+typedef LayerInit = FutureOr<void> Function(Layer layer, Object? initialData);
 typedef LoggerHandler = void Function(EventDTO dto, bool hasDelivered);
 ```
 
@@ -136,7 +136,7 @@ String toString();                // pattern.value
 ## EventSelector<T>
 
 `sealed class EventSelector<T>` — the base of `EventKey<T>` and `EventPatternKey<T>`. A bus method
-that can take a pattern (`listen`, `subscribe`, `subscribeEvents`, `have*`) accepts an
+that can take a pattern (`listen`, `subscribe`, `subscribe`, `have*`) accepts an
 `EventSelector<T>`; `fire`, `request` and `currentData` require an `EventKey<T>`.
 
 ```dart
@@ -256,12 +256,12 @@ abstract class SubscriptionHost<T> {
 ```
 
 Every built-in node implements it; a custom `EventNode` must implement it to work with
-`subscribeEvents`. Transport nodes delegate to their local node.
+`subscribe`. Transport nodes delegate to their local node.
 
 ## EventSubscription
 
 `class EventSubscription<T>` — a listener and/or handler registration created by
-`bus.subscribeEvents<T>(...)`. Unlike `listen`/`subscribe`, it owns its buffer, its request queue
+`bus.subscribe<T>(...)`. Unlike `listen`, it owns its buffer, its request queue
 and its delivery state, and can be paused, resumed, resized and cancelled.
 
 ```dart
@@ -356,10 +356,7 @@ Future<dynamic> request<T>(EventKey<T> key, T data,
      CancelToken? cancelToken, String? correlationId});
 
 Stream<T> listen<T>(EventSelector<T> selector);
-StreamSubscription<T> subscribe<T>(EventSelector<T> selector,
-    {void Function(T e)? onData, Function? onError,
-     void Function()? onDone, bool? cancelOnError});
-EventSubscription<T> subscribeEvents<T>(EventSelector<T> selector, {
+EventSubscription<T> subscribe<T>(EventSelector<T> selector, {
   EventCallback<T>? onEvent,            // listener
   Handler<T>? handler,                  // request responder
   T? initialData,
@@ -373,10 +370,8 @@ EventSubscription<T> subscribeEvents<T>(EventSelector<T> selector, {
   bool cancelOnError = false,
 });
 
-T? currentData<T>(EventKey<T> key);
-T? currentDataFor<T>(EventSelector<T> selector); // includes a pattern key
-bool remove<T>(EventKey<T> key);
-bool removePattern<T>(EventPatternKey<T> key);
+T? currentData<T>(EventSelector<T> selector);
+bool remove<T>(EventSelector<T> selector);
 bool removeAddress(EventAddress address);
 
 bool haveHandler<T>(EventSelector<T> selector);
@@ -392,10 +387,10 @@ listener/model interest; in both cases a handler subscription alone does not mak
 `request` throws `NoHandlerException` when no handler matches, `BusyException` when handlers exist
 but none has capacity, `RequestTimeoutException` on timeout and `RequestCanceledException` when its
 `CancelToken` is cancelled. It requires an `EventKey<T>`; an `EventPatternKey` does not compile.
-`currentData` reads only the exact node of that key; `currentDataFor(selector)` also reads a pattern node. `correlationId` is optional; it reaches
+`currentData(selector)` reads the exact node or the pattern node; a pattern value is the last value delivered to that pattern node. `correlationId` is optional; it reaches
 handlers and crosses isolates and transports.
 
-`remove(key)` removes one type node; `removePattern(patternKey)` removes one pattern type node;
+`remove(key)` removes one type node; `remove(patternKey)` removes one pattern type node;
 `removeAddress(address)` removes every type node at an exact address. They forget `currentData`
 even on a model bus and even for a transport node with a `KeepAliveNode` pin (the broker
 subscription is cancelled). Each returns whether something was removed. Active listeners receive
@@ -443,7 +438,7 @@ EventNode<T> createNodeForKey<T>({required EventKey<T> key, T? currentData});
 EventNode<T> createPatternNodeForKey<T>({required EventPatternKey<T> key, T? currentData});
 bool shouldCreateNodeOnSendKey<T>(EventKey<T> key);   // default: isModelBus
 
-bool remove<T>(EventKey<T> key);                // explicit eviction
+bool remove<T>(EventSelector<T> selector);      // explicit eviction
 Future<void> dispose();                         // idempotent; closes allEventStream and the nodes
 ```
 
@@ -455,7 +450,7 @@ no `KeepAliveNode` pin, and the bus is not model. A map entry is removed only wh
 the same node instance, so a late cancellation of an already removed node cannot delete its
 replacement.
 
-`remove`/`removePattern`/`removeAddress` are the explicit counterparts: they bypass the model-bus
+`remove`/`removeAddress` are the explicit counterparts: they bypass the model-bus
 rule and the `KeepAliveNode` pin, remove the node(s), and dispose them (cancelling handler
 subscriptions too). `EventBusIsolate` forwards the call to the other side of the bridge.
 
@@ -596,7 +591,7 @@ class EventBusIsolate extends EventBusImpl {
 }
 ```
 
-Inherits `listen`, `subscribe`, `subscribeEvents`, `currentData`, `haveHandler`, `haveListener`,
+Inherits `listen`, `subscribe`, `subscribe`, `currentData`, `haveHandler`, `haveListener`,
 `isModelBus`, `allEventStream`, `errors` and `metrics` from `EventBusImpl`; the worker side is not
 observable through this object.
 
@@ -625,9 +620,17 @@ class Layer {
 ## Layers
 
 ```dart
+class LayerSpec {
+  const LayerSpec({
+    required LayerInit init,      // top-level/static; runs in the layer isolate
+    Object? initialData,
+    bool isModelBus = false,      // flag for that layer's Layer.current bus
+  });
+}
+
 class Layers {
   static Future<Layer> createLayers(
-      List<(fnInitLayer, Object?, bool)> layers,      // (init function, data, isModelBus)
+      List<LayerSpec> layers,
       {bool currentIsModelBus = true,                 // flag for the current (top) bus
        bool bridgeIsModelBus = false,                 // flag for every isolate bridge
        Duration? timeout});                           // timeout for initializing the chain
@@ -636,8 +639,8 @@ class Layers {
 
 Returns the top `Layer` when **all** layers of the chain are initialized; an init error
 in any layer and an empty list come as an `EventBusException`. `bridgeIsModelBus` applies to
-the `EventBusIsolate` bridges between layers; the tuple flag and `currentIsModelBus` apply to
-each layer's `current` bus.
+the `EventBusIsolate` bridges between layers; `LayerSpec.isModelBus` and `currentIsModelBus`
+apply to each layer's `current` bus.
 Details are in [03-isolate-and-layers.md](03-isolate-and-layers.md#2-layers).
 
 ## LayersSupervisor
@@ -645,7 +648,7 @@ Details are in [03-isolate-and-layers.md](03-isolate-and-layers.md#2-layers).
 ```dart
 class Layers {
   static LayersSupervisor supervise(
-      List<(fnInitLayer, Object?, bool)> layers, {
+      List<LayerSpec> layers, {
       bool currentIsModelBus = true,
       bool bridgeIsModelBus = false,
       Duration? timeout,
@@ -892,7 +895,7 @@ is unavailable — that is a usage error, not a domain error.
   The patterns package has its own internal `_FSM`/`_FSMNode`; they are not exported there either.
 * The 3.x handler API is gone: `EventBusHandlers`, `setHandler`, `removeHandler`,
   `addAllHandlerFromOtherBus`, `removeAllHandlerPresentInOtherBus` do not exist. Use
-  `subscribeEvents(handler:)`.
+  `subscribe(handler:)`.
 * Pattern types are a separate package: `FSM`, `Scope`, `Command` live in
   `packages/event_bus_arch_patterns`, not in the core library.
 * Transport packages are separate: `packages/event_bus_arch_transport`, `packages/event_bus_arch_nats`,
@@ -910,6 +913,6 @@ is unavailable — that is a usage error, not a domain error.
 * `allEventStream` is a broadcast stream with no buffer; attach a listener before publishing if you
   need every event;
 * `listen`/`subscribe` are the raw node-stream view; they do not use `EventSubscription` (no
-  bounded buffer, overflow policy, counters or error routing). Use `subscribeEvents` when the
+  bounded buffer, overflow policy, counters or error routing). Use `subscribe` when the
   consumer needs those controls;
 * isolate APIs are VM-only; the web has the local bus, observability and the transport seam.

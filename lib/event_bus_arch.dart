@@ -8,6 +8,7 @@ import 'dart:math' as math;
 // import 'package:async/async.dart';
 
 part 'src/layers.dart';
+part 'src/event_address.dart';
 part 'src/topic.dart';
 part 'src/event_dto.dart';
 part 'src/event_bus_logger.dart';

@@ -57,7 +57,8 @@
       "Bash(python \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file build/stage7b-journal.md --project-dir \"e:/workspace/dart/event_bus_arch\")",
       "Bash(grep -n \"fnInitLayer\\\\|layers\\\\[\\\\|\\\\.data\\\\|\\\\$3\\\\|\\\\$1\\\\|\\\\$2\\\\|List<\\(fnInitLayer\" lib/src/layers.dart)",
       "Bash(grep -n \"fnInitLayer\\\\|\\\\.\\\\$[123]\\\\|List<LayerSpec>\" lib/src/layers.dart)",
-      "Bash(grep -rnE \"^\\\\s*\\\\\\([A-Za-z_][A-Za-z0-9_]*, \\(null|[A-Za-z0-9_.]+\\), \\(true|false\\)\\\\\\),?$\" test example packages doc README.md --include=\"*.dart\" --include=\"*.md\")"
+      "Bash(grep -rnE \"^\\\\s*\\\\\\([A-Za-z_][A-Za-z0-9_]*, \\(null|[A-Za-z0-9_.]+\\), \\(true|false\\)\\\\\\),?$\" test example packages doc README.md --include=\"*.dart\" --include=\"*.md\")",
+      "Bash(wc -l doc/decisions/*.md doc/*.md README.md packages/*/README.md)"
     ]
   }
 }

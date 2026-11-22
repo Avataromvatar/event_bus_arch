@@ -866,7 +866,7 @@ mixin EventBusMixin implements EventBus {
         (isModelBus && _eventsMap[key.address]?[key.type] != null);
     _addAllEvent(dto, accepted);
     if (observing) {
-      metrics.recordFire(_topicForSelector(key),
+      metrics.recordFire(key.address.value,
           accepted: accepted,
           elapsedMicros: DateTime.now().microsecondsSinceEpoch - started);
     }
@@ -1251,9 +1251,9 @@ mixin _EventBusHandlersMixin on EventBusMixin {
     _checkNotDisposed();
     if (cancelToken?.isCancelled ?? false) {
       if (_metricsEnabled) {
-        final topic = Topic.parse(key.address.value);
-        metrics.recordRequestStarted(topic);
-        metrics.recordRequestOutcome(topic, RequestOutcome.canceled, 0);
+        metrics.recordRequestStarted(key.address.value);
+        metrics.recordRequestOutcome(
+            key.address.value, RequestOutcome.canceled, 0);
       }
       throw RequestCanceledException(key.address.value);
     }
@@ -1277,11 +1277,10 @@ mixin _EventBusHandlersMixin on EventBusMixin {
   }) {
     final observing = _metricsEnabled;
     final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    final topic = Topic.parse(dto.address);
-    if (observing) metrics.recordRequestStarted(topic);
+    if (observing) metrics.recordRequestStarted(dto.address);
     void finish(RequestOutcome outcome) {
       if (observing) {
-        metrics.recordRequestOutcome(topic, outcome,
+        metrics.recordRequestOutcome(dto.address, outcome,
             DateTime.now().microsecondsSinceEpoch - started);
       }
     }

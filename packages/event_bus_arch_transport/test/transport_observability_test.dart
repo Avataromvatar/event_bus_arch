@@ -83,13 +83,18 @@ void main() {
     await expectLater(pending, throwsA(isA<TimeoutException>()));
 
     final snapshot = bus.metrics.snapshot();
-    final intTopic =
-        snapshot.topics.firstWhere((metrics) => metrics.key == 'int');
-    expect(intTopic.fired, 1);
-    // one incoming request from the broker and one outgoing remote request
-    expect(intTopic.requestsStarted, 2);
-    expect(intTopic.requestsCompleted, 1);
-    expect(intTopic.requestsTimeout, 1);
+    final firedTopic =
+        snapshot.topics.firstWhere((metrics) => metrics.key == 'int.a');
+    expect(firedTopic.fired, 1);
+    // one incoming request from the broker on int.a
+    expect(firedTopic.requestsStarted, 1);
+    expect(firedTopic.requestsCompleted, 1);
+
+    final remoteTopic =
+        snapshot.topics.firstWhere((metrics) => metrics.key == 'int.b');
+    // one outgoing remote request on int.b
+    expect(remoteTopic.requestsStarted, 1);
+    expect(remoteTopic.requestsTimeout, 1);
 
     await sub.cancel();
     await bus.dispose();

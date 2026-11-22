@@ -43,7 +43,12 @@ class EventBusError {
   final EventBusErrorKind kind;
   final EventBusErrorSource source;
 
-  ///The topic involved, when the error has one.
+  ///The event address involved, when the error has one.
+  ///
+  ///This is the E name for the legacy [topic] field; both hold the same string.
+  String? get address => topic;
+
+  ///The topic/address involved, when the error has one.
   final String? topic;
 
   ///The event involved; null unless payload capture is enabled.

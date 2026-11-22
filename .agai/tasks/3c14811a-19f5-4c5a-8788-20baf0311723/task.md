@@ -336,5 +336,59 @@ data: A-1
 - Этап 7: удалить compatibility-слой, переименовать `*Key` в `fire`/`request`/…,
   обновить docs/examples/tests.
 
+# Запись о работе над задачей
+
+### Задача
+
+- Репозиторий: e:/workspace/dart/event_bus_arch
+- ID и ссылка: 3c14811a-19f5-4c5a-8788-20baf0311723 (локальная запись, YouGile не подключён)
+- Название: Implement ADR-0009: event address and key model
+- Статус до / после: in progress / in progress (этап 6 из 7 — observability/errors)
+- Сессия: 8bf51fbe-78ce-4a9f-892c-cae0d060cd75
+
+### Участники
+
+| Плагин | Агент или скил | Участие |
+|---|---|---|
+| agai-sdlc | records, task-sync | учёт и журнал |
+| agai-dev | backend-developer | метрики по адресу, EventBusError.address, тесты |
+
+### Время и использование
+
+- Начало / завершение: 2026-11-22T23:10+04:00 / 2026-11-22T23:35+04:00
+- Активное время: ~25 минут (оценка)
+- Токены: недоступны в этой сессии
+- Стоимость: недоступна
+- Источники метрик: .agai/metrics/sessions/ (если хост предоставит)
+
+### Итог и доказательства
+
+Этап 6 (observability/errors) выполнен:
+
+- `MetricKeyBuilder` теперь `String Function(String address)`; ключ метрики по умолчанию — адрес.
+- `EventBusMetrics`: `recordFire`/`recordRequestStarted`/`recordRequestOutcome`/`recordOverflow`
+  принимают строковый адрес; `_entryFor`/`_keyFor` — по адресу.
+- Call sites обновлены: core, isolate (legacy — `topic.topic`, E — `key.address.value`),
+  transport (legacy — `topic.topic`, E remote request — `key.address.value`).
+- Snapshot подписок использует `subscription.selector` (строка + pattern flag).
+- `EventBusError.address` добавлен как E-имя; `topic` остаётся совместимым полем.
+- `transport_observability_test` обновлён под адресные ключи (`int.a`/`int.b`).
+
+Прогоны:
+- core **276**, patterns 20, transport 37, NATS 44 (+10 skipped), MQTT 33 (+7 skipped);
+- `dart analyze` — 19 info, ошибок/предупреждений нет.
+- Код не коммитился.
+
+### Открытые вопросы и дальнейшие действия
+
+- Этап 7 (финальная очистка, отдельный крупный проход):
+  1. Переименовать `*Key`-методы в финальные `fire`/`request`/`listen`/`subscribe`/
+     `subscribeEvents`/`currentData`/`have*`/`remove*`.
+  2. Переименовать старые методы в `*Legacy` (или удалить) и мигрировать ~780 старых
+     call sites в тестах/примерах.
+  3. Удалить `Topic`/`TopicPattern`/`defaultTopicPathSeparator`/`paths`/`separator`-совместимость
+     и старые тесты; переписать docs/00–15, README, CHANGELOG, примеры.
+  4. Финальный прогон + obfuscation-check.
+
 ## Ссылки
 Вверх: нет (локальная задача). ADR: doc/decisions/0009-event-key-and-address.md

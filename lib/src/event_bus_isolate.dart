@@ -569,7 +569,7 @@ class EventBusIsolate extends EventBusImpl {
         _link.fire(EventDTO<T>(data,
             topic: topic, arguments: arguments, correlationId: correlationId));
     if (observing) {
-      metrics.recordFire(topic,
+      metrics.recordFire(topic.topic,
           accepted: accepted,
           elapsedMicros: DateTime.now().microsecondsSinceEpoch - started);
     }
@@ -592,7 +592,7 @@ class EventBusIsolate extends EventBusImpl {
         _link.fire(EventDTO<T>.withKey(key, data,
             arguments: arguments, correlationId: correlationId));
     if (observing) {
-      metrics.recordFire(Topic.parse(key.address.value),
+      metrics.recordFire(key.address.value,
           accepted: accepted,
           elapsedMicros: DateTime.now().microsecondsSinceEpoch - started);
     }
@@ -612,11 +612,11 @@ class EventBusIsolate extends EventBusImpl {
       throw StateError(
           'EventBusIsolate is not initialized: await waitInit before request');
     }
-    final topic = Topic.parse(key.address.value);
     if (cancelToken?.isCancelled ?? false) {
       if (_metricsEnabled) {
-        metrics.recordRequestStarted(topic);
-        metrics.recordRequestOutcome(topic, RequestOutcome.canceled, 0);
+        metrics.recordRequestStarted(key.address.value);
+        metrics.recordRequestOutcome(
+            key.address.value, RequestOutcome.canceled, 0);
       }
       throw RequestCanceledException(key.address.value);
     }
@@ -629,11 +629,11 @@ class EventBusIsolate extends EventBusImpl {
     }
     final observing = _metricsEnabled;
     final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    if (observing) metrics.recordRequestStarted(topic);
+    if (observing) metrics.recordRequestStarted(key.address.value);
     void finish(RequestOutcome outcome) {
       if (observing) {
-        metrics.recordRequestOutcome(
-            topic, outcome, DateTime.now().microsecondsSinceEpoch - started);
+        metrics.recordRequestOutcome(key.address.value, outcome,
+            DateTime.now().microsecondsSinceEpoch - started);
       }
     }
 
@@ -679,8 +679,8 @@ class EventBusIsolate extends EventBusImpl {
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
     if (cancelToken?.isCancelled ?? false) {
       if (_metricsEnabled) {
-        metrics.recordRequestStarted(topic);
-        metrics.recordRequestOutcome(topic, RequestOutcome.canceled, 0);
+        metrics.recordRequestStarted(topic.topic);
+        metrics.recordRequestOutcome(topic.topic, RequestOutcome.canceled, 0);
       }
       throw RequestCanceledException(topic.topic);
     }
@@ -695,11 +695,11 @@ class EventBusIsolate extends EventBusImpl {
     }
     final observing = _metricsEnabled;
     final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    if (observing) metrics.recordRequestStarted(topic);
+    if (observing) metrics.recordRequestStarted(topic.topic);
     void finish(RequestOutcome outcome) {
       if (observing) {
         metrics.recordRequestOutcome(
-            topic, outcome, DateTime.now().microsecondsSinceEpoch - started);
+            topic.topic, outcome, DateTime.now().microsecondsSinceEpoch - started);
       }
     }
 

@@ -318,27 +318,46 @@ class TransportEventBus extends EventBusImpl {
     Duration? timeout,
     String? correlationId,
   ) async {
-    final dto = EventDTO<T>.withKey(key, data,
-        arguments: arguments, correlationId: correlationId);
-    final (override, bytes) = codec.encode!(dto);
-    final subject = override ?? _addresses.toSubject(key);
-    if (override != null) {
-      _addresses.validatePublishSubject(override);
+    final observing = isObservable && observabilityConfig.metrics;
+    final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
+    if (observing) metrics.recordRequestStarted(key.address.value);
+    try {
+      final dto = EventDTO<T>.withKey(key, data,
+          arguments: arguments, correlationId: correlationId);
+      final (override, bytes) = codec.encode!(dto);
+      final subject = override ?? _addresses.toSubject(key);
+      if (override != null) {
+        _addresses.validatePublishSubject(override);
+      }
+      final reply = await _connection.request(
+        subject,
+        bytes,
+        arguments: arguments,
+        correlationId: correlationId,
+        originId: _originId,
+        timeout: timeout,
+      );
+      final response = codec.decode!(
+        reply.data,
+        key.address,
+        arguments: reply.arguments,
+      );
+      if (observing) {
+        metrics.recordRequestOutcome(key.address.value, RequestOutcome.completed,
+            DateTime.now().microsecondsSinceEpoch - started);
+      }
+      return response.data;
+    } catch (error) {
+      if (observing) {
+        metrics.recordRequestOutcome(
+            key.address.value,
+            error is TimeoutException
+                ? RequestOutcome.timeout
+                : RequestOutcome.errored,
+            DateTime.now().microsecondsSinceEpoch - started);
+      }
+      rethrow;
     }
-    final reply = await _connection.request(
-      subject,
-      bytes,
-      arguments: arguments,
-      correlationId: correlationId,
-      originId: _originId,
-      timeout: timeout,
-    );
-    final response = codec.decode!(
-      reply.data,
-      key.address,
-      arguments: reply.arguments,
-    );
-    return response.data;
   }
 
   Future<dynamic> _requestTransport<T>(
@@ -350,19 +369,19 @@ class TransportEventBus extends EventBusImpl {
   ) async {
     final observing = isObservable && observabilityConfig.metrics;
     final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    if (observing) metrics.recordRequestStarted(topic);
+    if (observing) metrics.recordRequestStarted(topic.topic);
     try {
       final value = await _requestTransportInner<T>(
           topic, data, arguments, timeout, correlationId);
       if (observing) {
-        metrics.recordRequestOutcome(topic, RequestOutcome.completed,
+        metrics.recordRequestOutcome(topic.topic, RequestOutcome.completed,
             DateTime.now().microsecondsSinceEpoch - started);
       }
       return value;
     } catch (error) {
       if (observing) {
         metrics.recordRequestOutcome(
-            topic,
+            topic.topic,
             error is TimeoutException
                 ? RequestOutcome.timeout
                 : RequestOutcome.errored,

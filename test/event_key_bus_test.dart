@@ -206,6 +206,32 @@ void main() {
       await bus.dispose();
     });
 
+    test('metrics use the stable address', () async {
+      final bus = EventBus(
+          observability: const ObservabilityConfig(enabled: true));
+      final key = EventKey<Order>('orders.placed');
+
+      bus.fireKey(key, Order('A-1'));
+      final snapshot = bus.metrics.snapshot();
+
+      expect(snapshot.fired, 1);
+      expect(snapshot.topics.single.key, 'orders.placed');
+      expect(snapshot.topics.single.dropped, 1);
+
+      await bus.dispose();
+    });
+
+    test('EventBusError exposes address', () {
+      final error = EventBusError(
+        kind: EventBusErrorKind.listener,
+        topic: 'orders.placed',
+        error: StateError('boom'),
+      );
+
+      expect(error.address, 'orders.placed');
+      expect(error.topic, 'orders.placed');
+    });
+
     test('EventDTO.withKey carries the key and the stable address', () {
       final key = EventKey<int>('counter');
       final dto = EventDTO.withKey(key, 1);

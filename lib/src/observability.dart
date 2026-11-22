@@ -1,11 +1,11 @@
 part of event_arch;
 
-///Builds the metrics key of a topic.
+///Builds the metrics key of an event address.
 ///
-///The default key is the event type token only, so a dynamic path such as
-///`session.<id>` cannot grow the registry without bound. An application that
-///wants more detail can supply a builder and rely on [cardinalityLimit].
-typedef MetricKeyBuilder = String Function(Topic topic);
+///The default key is the address string. A dynamic address can grow the
+///registry; [ObservabilityConfig.cardinalityLimit] bounds it. An application
+///that wants a coarser key can supply a builder.
+typedef MetricKeyBuilder = String Function(String address);
 
 ///Observability switches, configured once at bus construction.
 ///
@@ -303,13 +303,13 @@ class EventBusMetrics {
 
   bool get isEnabled => _bus.observabilityConfig.enabled;
 
-  String _keyFor(Topic topic) {
+  String _keyFor(String address) {
     final builder = _bus.observabilityConfig.metricKeyBuilder;
-    return builder == null ? topic.type : builder(topic);
+    return builder == null ? address : builder(address);
   }
 
-  _MetricEntry _entryFor(Topic topic) {
-    final key = _keyFor(topic);
+  _MetricEntry _entryFor(String address) {
+    final key = _keyFor(address);
     final existing = _topics[key];
     if (existing != null) return existing;
     if (_topics.length >= _bus.observabilityConfig.cardinalityLimit) {
@@ -330,9 +330,9 @@ class EventBusMetrics {
     return _sampleCounter == 0;
   }
 
-  void recordFire(Topic topic,
+  void recordFire(String address,
       {required bool accepted, required int elapsedMicros}) {
-    final entry = _entryFor(topic);
+    final entry = _entryFor(address);
     entry.fired++;
     if (accepted) {
       entry.delivered++;
@@ -343,14 +343,14 @@ class EventBusMetrics {
     _notify();
   }
 
-  void recordRequestStarted(Topic topic) {
-    _entryFor(topic).requestsStarted++;
+  void recordRequestStarted(String address) {
+    _entryFor(address).requestsStarted++;
     _notify();
   }
 
   void recordRequestOutcome(
-      Topic topic, RequestOutcome outcome, int elapsedMicros) {
-    final entry = _entryFor(topic);
+      String address, RequestOutcome outcome, int elapsedMicros) {
+    final entry = _entryFor(address);
     switch (outcome) {
       case RequestOutcome.completed:
         entry.requestsCompleted++;
@@ -368,22 +368,14 @@ class EventBusMetrics {
     _notify();
   }
 
-  ///Counts a listener buffer overflow reported on [topicString].
-  void recordOverflow(String? topicString) {
-    if (topicString == null) {
+  ///Counts a listener buffer overflow reported on [address].
+  void recordOverflow(String? address) {
+    if (address == null) {
       _other.bufferOverflow++;
       _notify();
       return;
     }
-    Topic topic;
-    try {
-      topic = Topic.parse(topicString);
-    } catch (_) {
-      _other.bufferOverflow++;
-      _notify();
-      return;
-    }
-    _entryFor(topic).bufferOverflow++;
+    _entryFor(address).bufferOverflow++;
     _notify();
   }
 
@@ -414,8 +406,8 @@ class EventBusMetrics {
         final host = node as SubscriptionHost;
         for (final subscription in host.subscriptions) {
           subscriptions.add(SubscriptionMetricsSnapshot(
-            topic: subscription.topic.topic,
-            pattern: TopicPattern.isPattern(subscription.topic),
+            topic: subscription.selector.toString(),
+            pattern: subscription.selector is EventPatternKey,
             hasListener: subscription.hasListener,
             hasHandler: subscription.hasHandler,
             isCanceled: subscription.isCanceled,

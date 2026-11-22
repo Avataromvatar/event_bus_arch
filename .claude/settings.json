@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(agai-sdlc:records)",
+      "Skill(agai-sdlc:records:*)",
+      "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_create.py\" --help)",
+      "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_create.py\" --level task --title \"Проверка дефектов сторонней проверки event_bus_arch\" --effort-days 1 --duration-days 1 --parallel --project \"event_bus_arch\" --project-dir \"e:/workspace/dart/event_bus_arch\")",
+      "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_create.py\" --level task --role dev --title \"Проверка дефектов сторонней проверки event_bus_arch\" --effort-days 1 --duration-days 1 --parallel --project \"event_bus_arch\" --project-dir \"e:/workspace/dart/event_bus_arch\")",
+      "Read(//c/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/**)",
+      "Read(//c/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/templates/**)",
+      "Bash(find \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60\" -iname \"*task*\" -path \"*templ*\" 2>/dev/null | head -20)",
+      "Read(//c/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/**)",
+      "Bash(python3 -c \"import uuid; print\\(uuid.uuid4\\(\\)\\)\")",
+      "Bash(xargs wc -l)",
+      "Bash(dart --version)",
+      "Bash(dart test *)",
+      "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --help)",
+      "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 76bbb0e5-e2ce-435a-9955-8caae9d943d0 --section \"Журнал работы агента\" --text-file \".agai/agent-work/tasks/76bbb0e5-e2ce-435a-9955-8caae9d943d0-work-log.md\" --project-dir \"e:/workspace/dart/event_bus_arch\")"
+    ]
+  }
+}

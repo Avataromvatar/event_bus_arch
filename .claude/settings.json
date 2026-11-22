@@ -24,7 +24,8 @@
       "Bash(dart analyze *)",
       "Bash(dart pub *)",
       "Bash(dart run *)",
-      "Bash(dart format *)"
+      "Bash(dart format *)",
+      "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 76bbb0e5-e2ce-435a-9955-8caae9d943d0 --doc analysis=doc/artifacts/plans/2026-11-22-event-address-analysis.md --project-dir \"e:/workspace/dart/event_bus_arch\")"
     ]
   }
 }

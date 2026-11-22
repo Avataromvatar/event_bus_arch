@@ -11,7 +11,7 @@ seam and the rules every adapter follows; NATS and MQTT are in [09](09-event-bus
 
 | Package | Version | Role |
 |---|---|---|
-| `event_bus_arch_transport` | 0.2.0 | `TransportConnection`, `TransportEventBus`, `TransportEventNode`, the reconnecting base, subject mapping, codecs |
+| `event_bus_arch_transport` | 0.2.0 | `TransportConnection`, `TransportEventBus.keys`, `TransportKeyEventNode`, the reconnecting base, address mapping, typed codecs |
 | `event_bus_arch_nats` | 1.1.0 | NATS adapter (`dart_nats`, TCP; VM-only) |
 | `event_bus_arch_mqtt` | 0.2.0 | MQTT 5 adapter (`mqtt5_client`; VM client, `ws://`/`wss://` on the VM) |
 
@@ -46,30 +46,29 @@ abstract class TransportConnection {
 }
 ```
 
-`TransportEventBus` is an `EventBusImpl` whose nodes are `TransportEventNode`s. `createNode` asks the
-subject mapper for a subscription and resolves a serializer/deserializer from the registries.
-`fire` publishes through the serializer and delivers locally; an incoming message is delivered
-locally **without being published again**.
+`TransportEventBus.keys(...)` is an `EventBusImpl` whose nodes are `TransportKeyEventNode`s. A node
+resolves an `EventCodec` by address from `EventCodecRegistry`, publishes through it and delivers
+incoming messages locally **without publishing them again**.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Caller
     participant B as TransportEventBus
-    participant N as TransportEventNode
+    participant N as TransportKeyEventNode
     participant Conn as TransportConnection
     participant Broker as Broker
     participant H as Remote handler
 
-    C->>B: request(dto, correlationId: "c-1")
-    B->>N: encode with a serializer
-    N->>Conn: request(subject, bytes, correlationId)
+    C->>B: request(EventKey<Order>('orders'), dto, correlationId: "c-1")
+    B->>N: codec.encode(dto)
+    N->>Conn: request(subject "orders", bytes, correlationId)
     Conn->>Broker: publish + reply subject
     Broker->>H: deliver
     H-->>Broker: publish to reply subject (+ correlationId)
     Broker-->>Conn: response message
     Conn-->>N: TransportMessage(correlationId: "c-1")
-    N-->>B: decoded EventDTO
+    N-->>B: codec.decode(...) → EventDTO
     B-->>C: result
 ```
 
@@ -85,38 +84,71 @@ Key points:
   `timeout` bounds the wait; a busy responder sends no reply and the caller times out.
 * **One connection per bus** unless a shared connection manager is introduced; disposing a bus
   closes its connection.
+* **One publication per event.** Only the node whose exact key equals the DTO key publishes. A
+  pattern node or a supertype node delivers locally; it must not publish a second copy.
 
 ## 3. Address mapping
 
-The local topic is `type` plus `paths` (`Order.created.eu`). A `SubjectGrammar` defines the wire
-separator and wildcards:
+The local address is a dot-separated string: `orders.placed.v1`. An `EventAddressMapper` maps it to
+the broker grammar and back:
 
 | | Local | NATS | MQTT 5 |
 |---|---|---|---|
-| Separator | `.` | `.` | separate levels, mapped by the adapter |
+| Separator | `.` | `.` | `/` |
 | Single wildcard | `*` | `*` | `+` |
 | Rest wildcard | `>` (final, one or more) | `>` (final) | `#` (also zero levels) |
 | Metadata | DTO fields | headers | user properties |
 | Request/reply | in-process | reply subject | response topic |
 
-`TopicSubjectMapper` maps a topic to a subject and back, with an optional prefix and type tags. The
-type token is normalised for broker safety (`<` → `(`, `>` → `)`, commas/whitespace → `_`). MQTT's
-`#` matches zero levels while the core `>` needs at least one; `TransportEventNode` filters
-over-delivered messages so the two grammars agree.
-
-## 4. Serialization
-
 ```dart
-typedef EventDTOSerialization = (String?, Uint8List) Function(EventDTO dto);
-typedef EventDTODeserialization = EventDTO Function(
-  Uint8List data, String topic, {Map<String, String>? arguments});
+final addresses = NatsAddressMapper(prefix: 'app'); // or MqttAddressMapper(...)
+addresses.toSubject(EventKey<Order>('orders.placed'));
+addresses.toAddress('app.orders.placed');
 ```
 
-Register codecs by a key derived from the type token (and optionally paths). A topic without a
-serializer is local-only for `fire`; a topic without a deserializer is not subscribed on the wire.
-Codec failures become `EventBusError` of kind `serialization`/`deserialization` and never crash the
-connection. The deserializer returns a DTO; the node then attaches the wire correlation id with
-`copyWith`.
+MQTT's `#` matches zero levels while the core `>` needs at least one; `TransportKeyEventNode`
+filters over-delivered messages so the two grammars agree. A prefix is optional and is stripped
+from incoming subjects before the address is rebuilt.
+
+## 4. Typed codecs
+
+```dart
+typedef EventEncoder = (String?, Uint8List) Function(EventDTO dto);
+typedef EventDecoder = EventDTO Function(
+  Uint8List data,
+  EventAddress address, {
+  Map<String, String>? arguments,
+});
+```
+
+`EventCodec` pairs the two directions; a codec may implement only one. `EventCodecRegistry`
+resolves an exact codec first, then the most specific pattern codec.
+
+```dart
+final codecs = EventCodecRegistry(
+  exact: {
+    EventAddress('orders.placed.v1'): EventCodec(
+      encode: (dto) =>
+          (null, Uint8List.fromList(utf8.encode(jsonEncode(dto.data)))),
+      decode: (data, address, {arguments}) => EventDTO.withKey(
+        EventKey<Order>(address.value),
+        Order.fromJson(jsonDecode(utf8.decode(data))),
+        arguments: arguments,
+      ),
+    ),
+  },
+  patterns: {
+    EventPattern('orders.*'): EventCodec(decode: ...), // receive-only
+  },
+);
+```
+
+* A key without an encoder is local-only for `fire`; a key without a decoder is not subscribed on
+  the wire.
+* Codec failures become `EventBusError` of kind `serialization`/`deserialization` and never crash
+  the connection. The decoder returns a DTO; the node then attaches the wire correlation id with
+  `copyWith`.
+* The subject is the address; no type token and no `typeTags` are involved.
 
 ## 5. Reconnection
 
@@ -136,7 +168,8 @@ const ReconnectPolicy(
 
 ## 6. Platform support
 
-The seam and `TransportEventBus` compile and run on the web. The shipped broker connections do not:
+The seam and `TransportEventBus.keys` compile and run on the web. The shipped broker connections do
+not:
 
 * **NATS** — `dart_nats` is TCP-only; the adapter is VM-only. The NATS broker itself supports
   WebSocket, but the Dart client does not.
@@ -151,11 +184,11 @@ through a `SendPort` (the same reason `onInit` must be top-level).
 
 ## 7. Pitfalls
 
-1. **Wire-address stability.** The type token is the Dart type name; release-mode minification can
-   change `runtimeType` for local/anonymous types. Use explicit `typeTags`/stable topics for a
-   production wire format.
+1. **Wire-address stability.** The address is the wire contract. Put a version in it
+   (`orders.placed.v1`) and let the codec own the schema. Never derive it from `T.toString()` or
+   `runtimeType`: minification renames user classes.
 2. **Broker limits.** Payload limits, header limits, retained-message semantics and MQTT user
-   property size differ; a serializer that works locally may be too large for the broker.
+   property size differ; a codec that works locally may be too large for the broker.
 3. **Delivery guarantee.** NATS core is at-most-once, MQTT defaults to QoS 0; reconnects can lose
    the window between disconnect and resubscribe. The bus does not add broker-side durability.
 4. **Self-echo.** Keep the origin id stable for a bus; without it the bus cannot filter its own

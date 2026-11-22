@@ -10,10 +10,10 @@ void main() {
     test('delivers fire events to onEvent', () async {
       final bus = EventBus();
       final received = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
           paths: ['x'], onEvent: received.add);
 
-      expect(bus.fire<int>(1, paths: ['x']), isTrue);
+      expect(bus.fireLegacy<int>(1, paths: ['x']), isTrue);
       await pump();
       expect(received, [1]);
 
@@ -24,11 +24,11 @@ void main() {
     test('async mode delivers outside fire', () async {
       final bus = EventBus();
       final order = <String>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
           paths: ['x'], onEvent: (_) => order.add('event'));
 
       order.add('before');
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       order.add('after');
       expect(order, ['before', 'after']);
 
@@ -42,13 +42,13 @@ void main() {
     test('sync mode delivers inside fire', () async {
       final bus = EventBus();
       final order = <String>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
           paths: ['x'],
           deliveryMode: DeliveryMode.sync,
           onEvent: (_) => order.add('event'));
 
       order.add('before');
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       order.add('after');
       expect(order, ['before', 'event', 'after']);
 
@@ -61,7 +61,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final received = <int>[];
       final gates = <Completer<void>>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         bufferCapacity: 2,
         bufferOverflow: BufferOverflow.dropOldest,
@@ -73,13 +73,13 @@ void main() {
         },
       );
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       expect(received, [1]);
       expect(sub.isBusy, isTrue);
 
       for (var value = 2; value <= 5; value++) {
-        bus.fire<int>(value, paths: ['x']);
+        bus.fireLegacy<int>(value, paths: ['x']);
       }
       expect(sub.buffered, 2);
       expect(sub.dropped, 2);
@@ -103,12 +103,12 @@ void main() {
     test('pause holds events until resume', () async {
       final bus = EventBus();
       final received = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
           paths: ['x'], onEvent: received.add);
 
       sub.pause();
-      bus.fire<int>(1, paths: ['x']);
-      bus.fire<int>(2, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(2, paths: ['x']);
       await pump();
       expect(received, isEmpty);
       expect(sub.buffered, 2);
@@ -124,7 +124,7 @@ void main() {
     test('reject overflow drops the incoming event', () async {
       final bus = EventBus();
       final received = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         bufferCapacity: 0,
         bufferOverflow: BufferOverflow.reject,
@@ -132,7 +132,7 @@ void main() {
       );
 
       sub.pause();
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       expect(received, isEmpty);
       expect(sub.dropped, 1);
@@ -148,18 +148,18 @@ void main() {
     test('capacity 0 still delivers when the listener is idle', () async {
       final bus = EventBus();
       final received = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         bufferCapacity: 0,
         bufferOverflow: BufferOverflow.reject,
         onEvent: received.add,
       );
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       expect(received, [1]);
 
-      bus.fire<int>(2, paths: ['x']);
+      bus.fireLegacy<int>(2, paths: ['x']);
       await pump();
       expect(received, [1, 2]);
       expect(sub.dropped, 0);
@@ -172,7 +172,7 @@ void main() {
       final bus = EventBus();
       final received = <int>[];
       final gate = Completer<void>();
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         bufferCapacity: 0,
         bufferOverflow: BufferOverflow.reject,
@@ -182,12 +182,12 @@ void main() {
         },
       );
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       expect(received, [1]);
       expect(sub.isBusy, isTrue);
 
-      bus.fire<int>(2, paths: ['x']);
+      bus.fireLegacy<int>(2, paths: ['x']);
       expect(sub.dropped, 1);
 
       gate.complete();
@@ -202,7 +202,7 @@ void main() {
       final bus = EventBus();
       final received = <int>[];
       final gates = <Completer<void>>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         bufferCapacity: 1,
         bufferOverflow: BufferOverflow.dropNewest,
@@ -214,10 +214,10 @@ void main() {
         },
       );
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
-      bus.fire<int>(2, paths: ['x']);
-      bus.fire<int>(3, paths: ['x']);
+      bus.fireLegacy<int>(2, paths: ['x']);
+      bus.fireLegacy<int>(3, paths: ['x']);
       expect(sub.buffered, 1);
       expect(sub.dropped, 1);
 
@@ -236,7 +236,7 @@ void main() {
     test('resize shrinks the buffer by the current policy', () async {
       final bus = EventBus();
       final received = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         bufferCapacity: 3,
         onEvent: received.add,
@@ -244,7 +244,7 @@ void main() {
 
       sub.pause();
       for (var value = 1; value <= 4; value++) {
-        bus.fire<int>(value, paths: ['x']);
+        bus.fireLegacy<int>(value, paths: ['x']);
       }
       expect(sub.buffered, 3);
       expect(sub.dropped, 1);
@@ -264,10 +264,10 @@ void main() {
     test('the stream view receives delivered events', () async {
       final bus = EventBus();
       final events = <int>[];
-      final sub = bus.subscribeEvents<int>(paths: ['x'], onEvent: (_) {});
+      final sub = bus.subscribeEventsLegacy<int>(paths: ['x'], onEvent: (_) {});
       final view = sub.stream.listen(events.add);
 
-      bus.fire<int>(7, paths: ['x']);
+      bus.fireLegacy<int>(7, paths: ['x']);
       await pump();
       expect(events, [7]);
 
@@ -280,25 +280,25 @@ void main() {
   group('EventSubscription: lifecycle', () {
     test('subscription counts as a listener and keeps the node', () async {
       final bus = EventBus(isModelBus: true);
-      final sub = bus.subscribeEvents<int>(paths: ['x'], onEvent: (_) {});
-      expect(bus.haveListener<int>(paths: ['x']), isTrue);
+      final sub = bus.subscribeEventsLegacy<int>(paths: ['x'], onEvent: (_) {});
+      expect(bus.haveListenerLegacy<int>(paths: ['x']), isTrue);
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await sub.cancel();
-      expect(bus.haveListener<int>(paths: ['x']), isFalse);
+      expect(bus.haveListenerLegacy<int>(paths: ['x']), isFalse);
       // Model bus keeps the value after the subscription.
-      expect(bus.currentData<int>(paths: ['x']), 1);
+      expect(bus.currentDataLegacy<int>(paths: ['x']), 1);
 
       await bus.dispose();
     });
 
     test('cancel removes the node on a common bus', () async {
       final bus = EventBus();
-      final sub = bus.subscribeEvents<int>(paths: ['x'], onEvent: (_) {});
+      final sub = bus.subscribeEventsLegacy<int>(paths: ['x'], onEvent: (_) {});
 
       await sub.cancel();
-      expect(bus.haveListener<int>(paths: ['x']), isFalse);
-      expect(bus.fire<int>(1, paths: ['x']), isFalse);
+      expect(bus.haveListenerLegacy<int>(paths: ['x']), isFalse);
+      expect(bus.fireLegacy<int>(1, paths: ['x']), isFalse);
 
       await bus.dispose();
     });
@@ -306,10 +306,10 @@ void main() {
     test('removeTopic closes the subscription and calls onDone', () async {
       final bus = EventBus();
       var done = false;
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
           paths: ['x'], onEvent: (_) {}, onDone: () => done = true);
 
-      expect(bus.removeTopic<int>(paths: ['x']), isTrue);
+      expect(bus.removeTopicLegacy<int>(paths: ['x']), isTrue);
       await pump();
       expect(sub.isCanceled, isTrue);
       expect(done, isTrue);
@@ -319,7 +319,7 @@ void main() {
 
     test('a repeated cancel is safe', () async {
       final bus = EventBus();
-      final sub = bus.subscribeEvents<int>(paths: ['x'], onEvent: (_) {});
+      final sub = bus.subscribeEventsLegacy<int>(paths: ['x'], onEvent: (_) {});
 
       await sub.cancel();
       await sub.cancel();
@@ -332,11 +332,11 @@ void main() {
     test('listen delivers asynchronously', () async {
       final bus = EventBus();
       final order = <String>[];
-      final sub = bus.subscribe<int>(
+      final sub = bus.subscribeLegacy<int>(
           paths: ['x'], onData: (_) => order.add('event'));
 
       order.add('before');
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       order.add('after');
       expect(order, ['before', 'after']);
 
@@ -350,10 +350,10 @@ void main() {
     test('pause and resume propagate to the node stream', () async {
       final bus = EventBus();
       final received = <int>[];
-      final sub = bus.subscribe<int>(paths: ['x'], onData: received.add);
+      final sub = bus.subscribeLegacy<int>(paths: ['x'], onData: received.add);
 
       sub.pause();
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       expect(received, isEmpty);
 
@@ -369,19 +369,19 @@ void main() {
       final bus = EventBus();
       final first = <int>[];
       final second = <int>[];
-      final stream = bus.listen<int>(paths: ['x']);
+      final stream = bus.listenLegacy<int>(paths: ['x']);
       final sub1 = stream.listen(first.add);
       final sub2 = stream.listen(second.add);
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       expect(first, [1]);
       expect(second, [1]);
 
       await sub1.cancel();
-      expect(bus.haveListener<int>(paths: ['x']), isTrue);
+      expect(bus.haveListenerLegacy<int>(paths: ['x']), isTrue);
       await sub2.cancel();
-      expect(bus.haveListener<int>(paths: ['x']), isFalse);
+      expect(bus.haveListenerLegacy<int>(paths: ['x']), isFalse);
 
       await bus.dispose();
     });
@@ -393,7 +393,7 @@ void main() {
       final bus = EventBus();
       final errors = <Object>[];
       final received = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         onEvent: (event) {
           if (event == 1) throw StateError('boom');
@@ -402,8 +402,8 @@ void main() {
         onError: (error, stackTrace) => errors.add(error),
       );
 
-      bus.fire<int>(1, paths: ['x']);
-      bus.fire<int>(2, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(2, paths: ['x']);
       await pump();
       expect(errors, hasLength(1));
       expect(errors.single, isA<StateError>());
@@ -416,7 +416,7 @@ void main() {
     test('an asynchronous callback error reaches onError', () async {
       final bus = EventBus();
       final errors = <Object>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         onEvent: (event) async {
           await Future<void>.delayed(Duration.zero);
@@ -425,7 +425,7 @@ void main() {
         onError: (error, stackTrace) => errors.add(error),
       );
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       await pump();
       expect(errors, hasLength(1));
@@ -436,17 +436,17 @@ void main() {
 
     test('cancelOnError cancels the subscription', () async {
       final bus = EventBus();
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         cancelOnError: true,
         onEvent: (_) => throw StateError('boom'),
         onError: (_, __) {},
       );
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       expect(sub.isCanceled, isTrue);
-      expect(bus.haveListener<int>(paths: ['x']), isFalse);
+      expect(bus.haveListenerLegacy<int>(paths: ['x']), isFalse);
 
       await bus.dispose();
     });

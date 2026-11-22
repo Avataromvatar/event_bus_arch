@@ -12,31 +12,31 @@ class TestStrData {
   TestStrData(this.value);
 }
 
+///Addresses are explicit: the same string is the local identity and the wire
+///subject. A key carries the address and the static type together.
+final originKey = EventKey<TestStrData>('origin');
+final inboxKey = EventKey<TestStrData>('inbox');
+final calcKey = EventKey<TestIntData>('calc');
+
 Future<void> main() async {
   print('Main Isolate ${Isolate.current.hashCode}');
   var isolateBus = EventBusIsolate(onInit: _initIsolate, initialData: 'Test');
   await isolateBus.waitInit;
 
-  ///When subscribe or listen you can add paths for narrowing the address:
-  ///the topic is type + paths, so 'TestStrData.origin' is not 'TestStrData'
-  ///listen return Stream<T>
-  isolateBus.listen<TestStrData>(paths: ['origin']).listen((e) {
+  ///`listen` returns Stream<T>; the selector owns the address and the type.
+  isolateBus.listen(originKey).listen((e) {
     print(e.value);
   });
 
-  ///subscribe return StreamSubscription<T>
-  isolateBus.subscribe<TestStrData>(
-    onData: (e) {
-      print(e.value);
-    },
-  );
-  isolateBus.fire(TestStrData('Hello from main isolate'));
+  ///`subscribe` returns StreamSubscription<T>.
+  isolateBus.subscribe(inboxKey, onData: (e) {
+    print(e.value);
+  });
+  isolateBus.fire(inboxKey, TestStrData('Hello from main isolate'));
 
-  ///If you sethandler for event you can return a result
-  ///from the handler as the request response
-  ///You can send arguments in dto
-  var ret = await isolateBus.request<TestIntData>(TestIntData(1),
-      paths: ['calc'], arguments: {'multiplier': 10.toString()});
+  ///A handler answers a request and may read `dto.arguments`.
+  var ret = await isolateBus.request(calcKey, TestIntData(1),
+      arguments: {'multiplier': 10.toString()});
   print(ret);
   await Future.delayed(Duration(seconds: 1));
   await isolateBus.dispose();
@@ -45,21 +45,15 @@ Future<void> main() async {
 void _initIsolate(EventBus bus, Object? initialData) async {
   var name = initialData as String;
   print('Worker Isolate ${Isolate.current.hashCode}');
-  bus.subscribe<TestStrData>(
-    onData: (e) {
-      bus.fire(TestStrData('$name get ${e.value}'));
-      bus.fire(TestStrData(e.value), paths: ['origin']);
-    },
-  );
+  bus.subscribe(inboxKey, onData: (e) {
+    bus.fire(inboxKey, TestStrData('$name get ${e.value}'));
+    bus.fire(originKey, TestStrData(e.value));
+  });
 
-  ///sethandler what can return result
-  ///the handler answers on the address TestIntData.calc
-  bus.subscribeEvents<TestIntData>(
-    paths: ['calc'],
-    handler: (dto, lastData) async {
-      print('Arguments:${dto.arguments}');
-      var multStr = dto.arguments?['multiplier'] ?? '';
-      return dto.data.value * (int.tryParse(multStr) ?? 1);
-    },
-  );
+  ///The handler answers on the address `calc`.
+  bus.subscribeEvents(calcKey, handler: (dto, lastData) async {
+    print('Arguments:${dto.arguments}');
+    var multStr = dto.arguments?['multiplier'] ?? '';
+    return dto.data.value * (int.tryParse(multStr) ?? 1);
+  });
 }

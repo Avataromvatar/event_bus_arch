@@ -299,7 +299,7 @@ Future<_Result> _fireRun(
     duration: options.duration,
     clock: clock,
     send: (seq, at) {
-      if (!publisher.fire<LoadEvent>(LoadEvent(seq, at))) rejected++;
+      if (!publisher.fireLegacy<LoadEvent>(LoadEvent(seq, at))) rejected++;
     },
   );
   final generationUs = clock.elapsedMicroseconds - start;
@@ -332,7 +332,7 @@ Future<_Result> _requestRun(
 
   Future<void> one(int seq, int sentAt) {
     return requester
-        .request<RequestEvent>(
+        .requestLegacy<RequestEvent>(
       RequestEvent(seq),
       timeout: const Duration(seconds: 10),
     )
@@ -452,11 +452,11 @@ Future<void> _runShared(_Options options, Stopwatch clock) async {
 
   final fireSamples = <int>[];
   final fireSeen = <int>{};
-  final fireSubscription = subscriber.listen<LoadEvent>().listen((event) {
+  final fireSubscription = subscriber.listenLegacy<LoadEvent>().listen((event) {
     fireSeen.add(event.seq);
     fireSamples.add(max(0, clock.elapsedMicroseconds - event.sentAtUs));
   });
-  responder.subscribeEvents<RequestEvent>(
+  responder.subscribeEventsLegacy<RequestEvent>(
     handler: (dto, lastData) async => dto.data.seq,
   );
   await _waitForSubscriptions();
@@ -468,7 +468,7 @@ Future<void> _runShared(_Options options, Stopwatch clock) async {
         rate: 1000,
         duration: options.warmup,
         clock: clock,
-        send: (seq, at) => publisher.fire<LoadEvent>(LoadEvent(seq, at)),
+        send: (seq, at) => publisher.fireLegacy<LoadEvent>(LoadEvent(seq, at)),
       );
       await _waitUntilCount(() => fireSeen.length, warmupSent);
       fireSamples.clear();
@@ -687,7 +687,7 @@ Future<void> _isolatedWorker(List<dynamic> args) async {
         duration: Duration(microseconds: message.durationUs),
         clock: clock,
         send: (seq, at) {
-          if (!publisher.fire<LoadEvent>(LoadEvent(seq, at))) rejected++;
+          if (!publisher.fireLegacy<LoadEvent>(LoadEvent(seq, at))) rejected++;
         },
       );
       control.send(
@@ -701,7 +701,7 @@ Future<void> _isolatedWorker(List<dynamic> args) async {
 
       Future<void> one(int seq, int sentAt) {
         return requester
-            .request<RequestEvent>(
+            .requestLegacy<RequestEvent>(
           RequestEvent(seq),
           timeout: const Duration(seconds: 10),
         )
@@ -781,7 +781,7 @@ Future<void> _runIsolated(_Options options, Stopwatch clock) async {
     subscriber.errors.listen(mainErrors.add),
     responder.errors.listen(mainErrors.add),
   ];
-  final fireSubscription = subscriber.listen<LoadEvent>().listen((event) {
+  final fireSubscription = subscriber.listenLegacy<LoadEvent>().listen((event) {
     seen.add(event.seq);
     final offset = offsetUs;
     if (offset == null) return;
@@ -789,7 +789,7 @@ Future<void> _runIsolated(_Options options, Stopwatch clock) async {
     if (latency < 0) negatives++;
     samples.add(latency < 0 ? 0 : latency);
   });
-  responder.subscribeEvents<RequestEvent>(
+  responder.subscribeEventsLegacy<RequestEvent>(
     handler: (dto, lastData) async => dto.data.seq,
   );
   await _waitForSubscriptions();

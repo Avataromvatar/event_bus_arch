@@ -56,7 +56,7 @@ void main() {
     addTearDown(bus.dispose);
 
     expect(
-      bus.fire<int>(21, paths: ['sensor'], arguments: {'tenant': 'acme'}),
+      bus.fireLegacy<int>(21, paths: ['sensor'], arguments: {'tenant': 'acme'}),
       isTrue,
     );
     await Future<void>.delayed(Duration.zero);
@@ -67,7 +67,7 @@ void main() {
     expect(utf8.decode(published.data), '21');
     expect(published.arguments, {'tenant': 'acme'});
     expect(published.originId, bus.originId);
-    expect(bus.currentData<int>(paths: ['sensor']), 21);
+    expect(bus.currentDataLegacy<int>(paths: ['sensor']), 21);
   });
 
   test('fire throws when the connection is down', () async {
@@ -81,12 +81,12 @@ void main() {
     connection.setStatus(MqttConnectionStatus.disconnected);
 
     expect(
-      () => bus.fire<int>(21, paths: ['sensor']),
+      () => bus.fireLegacy<int>(21, paths: ['sensor']),
       throwsA(isA<MqttServerUnavailableException>()),
     );
 
     expect(connection.publishes, isEmpty);
-    expect(bus.currentData<int>(paths: ['sensor']), isNull);
+    expect(bus.currentDataLegacy<int>(paths: ['sensor']), isNull);
   });
 
   test('fire without a registration keeps the local semantics', () async {
@@ -97,8 +97,8 @@ void main() {
     );
     addTearDown(bus.dispose);
 
-    expect(bus.fire<String>('v', paths: ['x']), isFalse);
-    expect(bus.currentData<String>(paths: ['x']), isNull);
+    expect(bus.fireLegacy<String>('v', paths: ['x']), isFalse);
+    expect(bus.currentDataLegacy<String>(paths: ['x']), isNull);
   });
 
   test('delivers incoming messages to a listener', () async {
@@ -123,7 +123,7 @@ void main() {
 
     final received = Completer<int>();
     final subscription = bus
-        .listen<int>(paths: ['sensor', 'temp'])
+        .listenLegacy<int>(paths: ['sensor', 'temp'])
         .listen((value) => received.complete(value));
     addTearDown(subscription.cancel);
 
@@ -140,7 +140,7 @@ void main() {
     expect(await received.future.timeout(const Duration(seconds: 1)), 42);
     expect(seenTopic, 'int.sensor.temp');
     expect(seenArguments, {'tenant': 'acme'});
-    expect(bus.currentData<int>(paths: ['sensor', 'temp']), 42);
+    expect(bus.currentDataLegacy<int>(paths: ['sensor', 'temp']), 42);
   });
 
   test(
@@ -161,7 +161,7 @@ void main() {
 
       final received = Completer<int>();
       final subscription = bus
-          .listen<int>(paths: ['sensor', '*'])
+          .listenLegacy<int>(paths: ['sensor', '*'])
           .listen((value) => received.complete(value));
       addTearDown(subscription.cancel);
 
@@ -193,7 +193,7 @@ void main() {
     addTearDown(bus.dispose);
 
     final received = <int>[];
-    final subscription = bus.listen<int>(paths: ['>']).listen(received.add);
+    final subscription = bus.listenLegacy<int>(paths: ['>']).listen(received.add);
     addTearDown(subscription.cancel);
 
     expect(connection.subscribedSubjects, ['int/#']);
@@ -211,7 +211,7 @@ void main() {
 
     await Future<void>.delayed(Duration.zero);
     expect(received, [2]);
-    expect(bus.currentData<int>(paths: ['>']), 2);
+    expect(bus.currentDataLegacy<int>(paths: ['>']), 2);
   });
 
   test('uses the serializer subject override', () async {
@@ -225,7 +225,7 @@ void main() {
     );
     addTearDown(bus.dispose);
 
-    expect(bus.fire<int>(1, paths: ['sensor']), isTrue);
+    expect(bus.fireLegacy<int>(1, paths: ['sensor']), isTrue);
 
     expect(connection.publishes.single.subject, 'custom/subject');
   });
@@ -241,7 +241,7 @@ void main() {
       connection: connection,
     );
     final subscription = bus
-        .listen<int>(paths: ['sensor', 'temp'])
+        .listenLegacy<int>(paths: ['sensor', 'temp'])
         .listen((_) {});
     expect(connection.subscribedSubjects, ['int/sensor/temp']);
 
@@ -264,7 +264,7 @@ void main() {
     addTearDown(bus.dispose);
 
     expect(
-      () => bus.fire<int>(1, paths: ['sensor']),
+      () => bus.fireLegacy<int>(1, paths: ['sensor']),
       throwsA(isA<MqttSerializationException>()),
     );
   });
@@ -285,7 +285,7 @@ void main() {
       addTearDown(bus.dispose);
       final errorSubscription = bus.errors.listen(errors.add);
       addTearDown(errorSubscription.cancel);
-      final subscription = bus.listen<int>(paths: ['sensor']).listen((_) {});
+      final subscription = bus.listenLegacy<int>(paths: ['sensor']).listen((_) {});
       addTearDown(subscription.cancel);
 
       connection.deliver(
@@ -295,7 +295,7 @@ void main() {
 
       final reported = errors.single as EventBusError;
       expect(reported.error, isA<MqttDeserializationException>());
-      expect(bus.currentData<int>(paths: ['sensor']), isNull);
+      expect(bus.currentDataLegacy<int>(paths: ['sensor']), isNull);
     },
   );
 
@@ -349,7 +349,7 @@ void main() {
     );
     addTearDown(bus.dispose);
 
-    final pending = bus.request<int>(
+    final pending = bus.requestLegacy<int>(
       21,
       paths: ['sensor'],
       timeout: const Duration(seconds: 1),
@@ -387,7 +387,7 @@ void main() {
       connection: connection,
     );
     addTearDown(bus.dispose);
-    bus.subscribeEvents<int>(
+    bus.subscribeEventsLegacy<int>(
       paths: ['sensor'],
       handler: (dto, lastData) async => dto.data * 2,
     );
@@ -414,7 +414,7 @@ void main() {
     addTearDown(bus.dispose);
 
     expect(
-      () => bus.request<int>(1, paths: ['sensor']),
+      () => bus.requestLegacy<int>(1, paths: ['sensor']),
       throwsA(isA<NoHandlerException>()),
     );
   });
@@ -431,7 +431,7 @@ void main() {
       addTearDown(bus.dispose);
 
       expect(
-        () => bus.request<int>(1, paths: ['sensor']),
+        () => bus.requestLegacy<int>(1, paths: ['sensor']),
         throwsA(isA<EventBusTransportException>()),
       );
     },
@@ -446,7 +446,7 @@ void main() {
     addTearDown(bus.dispose);
 
     expect(
-      () => bus.request<int>(1, paths: ['sensor', '*']),
+      () => bus.requestLegacy<int>(1, paths: ['sensor', '*']),
       throwsA(isA<EventBusException>()),
     );
   });

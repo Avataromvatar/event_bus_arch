@@ -54,24 +54,24 @@ void main() {
     test('removes a pinned transport node and cancels its subscription',
         () async {
       // The node is created by listen and subscribes to the broker.
-      final sub = bus.subscribe<int>(paths: ['state'], onData: (_) {});
+      final sub = bus.subscribeLegacy<int>(paths: ['state'], onData: (_) {});
       expect(connection.subscribedSubjects, contains('int.state'));
-      expect(bus.currentData<int>(paths: ['state']), isNull);
+      expect(bus.currentDataLegacy<int>(paths: ['state']), isNull);
 
-      expect(bus.removeTopic<int>(paths: ['state']), isTrue);
+      expect(bus.removeTopicLegacy<int>(paths: ['state']), isTrue);
 
       expect(connection.subscribedSubjects, isNot(contains('int.state')));
-      expect(bus.haveListener<int>(paths: ['state']), isFalse);
+      expect(bus.haveListenerLegacy<int>(paths: ['state']), isFalse);
 
       // A model-like send recreates the node and its subscription.
-      expect(bus.fire<int>(2, paths: ['state']), isTrue);
+      expect(bus.fireLegacy<int>(2, paths: ['state']), isTrue);
       expect(connection.subscribedSubjects, contains('int.state'));
 
       await sub.cancel();
     });
 
     test('returns false for a topic without a node', () async {
-      expect(bus.removeTopic<int>(paths: ['missing']), isFalse);
+      expect(bus.removeTopicLegacy<int>(paths: ['missing']), isFalse);
     });
   });
 }

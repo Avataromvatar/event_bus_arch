@@ -1,306 +1,298 @@
 # 02. EventBus in practice
 
-[← 01. Architecture](01-architecture.md) · [Contents](README.md) · [Next: Isolates and layers →](03-isolate-and-layers.md)
+[← Table of contents](README.md) · [Next: Isolates and layers →](03-isolate-and-layers.md)
 
-This is the day-to-day guide: how to create a bus, publish, subscribe, answer requests and control
-the lifecycle. The internals are in [01](01-architecture.md); buffers and queues are in
-[11](11-backpressure.md).
+This is the practical guide: how to publish, receive, answer requests and pick addresses. The
+architectural details are in [01](01-architecture.md); every public member is in
+[06](06-api-reference.md).
 
 ## Creating a bus
 
 ```dart
-final bus = EventBus();                          // common: message pipe
-final model = EventBus(isModelBus: true);        // model: remembers currentData
-final observed = EventBus(observability: const ObservabilityConfig(enabled: true));
+final bus = EventBus();                        // common bus: a message pipe
+final state = EventBus(isModelBus: true);      // model bus: keeps currentData
+final observed = EventBus(
+  observability: const ObservabilityConfig(enabled: true),
+);
 ```
 
-`EventBus(...)` returns an `EventBusImpl`. `defaultTopicPathSeparator` is `.` unless the bus was
-created with `separator:`; it is fixed for the lifetime of the bus
-(`EventBus(separator: '/')`). Always call `await bus.dispose()` when the bus is no longer needed;
-it cancels all subscriptions and closes every node, stream and resource.
+`EventBus(...)` returns an `EventBusImpl`. There is no separator setting: addresses always use
+`.`. Always call `await bus.dispose()` when the bus is no longer needed; it is idempotent.
+
+An address is a string chosen by the application, and a key binds that string to a static type:
+
+```dart
+final orderPlaced = EventKey<Order>('orders.placed');
+final anyOrder = EventPatternKey<Order>('orders.*');
+final audit = EventKey<AuditEntry>('orders.placed');   // same address, different type node
+```
+
+`orders.placed` and `orders.placed.v1` are different addresses. Put a version in the address when
+the payload schema can change.
 
 ## Publishing: `fire`
 
 ```dart
-final accepted = bus.fire<Order>(order, paths: ['orders', 'new'],
-    arguments: {'source': 'checkout'}, correlationId: 'checkout-42');
+final accepted = bus.fire(orderPlaced, order,
+    arguments: {'priority': 'high'}, correlationId: 'job-42');
 ```
 
-* `fire` offers the event to the exact node (if it exists) and to every matching pattern node.
-  Handler subscriptions are not invoked.
-* It returns `true` when a listener accepted the event, a model bus stored it, a transport
-  accepted it for publishing, or the other side of an isolate bridge has a known listener/model
-  interest. A handler-only node does **not** count (D14).
-* `arguments` are call parameters, not part of the address. `correlationId` ties an event and its
-  consequences together; it is optional.
-* On a common bus a topic with no node is not created: `fire` returns `false` and only
-  `allEventStream` sees the event. A model bus creates the node and stores the value.
-* Wildcards are not allowed in `fire` itself: `paths: ['orders', '*']` throws `EventBusException`.
+* `fire` returns `true` when a listener accepted the event, a model node stored it, or a transport
+  published it. A handler-only subscription does not count (D14).
+* `fire` never invokes a handler.
+* `fire` requires an `EventKey<T>`; a pattern key does not compile. The address itself is already
+  concrete because the key holds it.
+* `arguments` travel in `dto.arguments`; `correlationId` travels in `dto.correlationId` and across
+  isolates and transport headers.
+* `fire` does not wait for listeners; their callbacks may run later.
 
 ### The model bus
 
 ```dart
 final state = EventBus(isModelBus: true);
-state.fire<Status>(Status.ready, paths: ['service']);
-print(state.currentData<Status>(paths: ['service'])); // Status.ready
+final serviceKey = EventKey<Status>('service.status');
+
+state.fire(serviceKey, Status.ready);
+print(state.currentData(serviceKey)); // Status.ready
 ```
 
-A model bus keeps the node and the last value even after its last listener cancels. Use it for
-state that a new subscriber should see immediately (via `currentData`), and the common bus for
-messages that only matter to current listeners.
+A model bus creates the node on `fire` and keeps the last value even when nobody is listening. A
+common bus returns `false` for a key with no node and does not store the value.
 
 ## Publishing: `request`
 
 ```dart
-final receipt = await bus.request<Receipt>(order, paths: ['orders', 'place'],
+final receipt = await bus.request(receiptKey, order,
+    arguments: {'priority': 'high'},
     timeout: const Duration(seconds: 2),
-    correlationId: 'checkout-42');
+    correlationId: 'job-42');
 ```
 
-* A request addresses a concrete topic. The bus resolves the exact node first, then the most
-  specific matching pattern. A request with wildcard paths throws `EventBusException`.
-* When no accepting handler exists, the future fails with `NoHandlerException`. When handlers exist
-  but none has a free slot, it fails with `BusyException` (or the request waits in a subscription
-  queue when it has one).
-* Listeners also receive the request event (they see `dto.data`), then the handler runs. This lets
-  a UI observe commands and their results.
-* The handler's second argument (`lastData`) is the previous `currentData` of the handler's node.
-* `timeout` and `CancelToken` cancel the caller's wait. A queued request is removed before dispatch;
-  a dispatched handler keeps running and its result is discarded.
-* `arguments` travel with the request; `correlationId` reaches the handler in `dto.correlationId`.
+`request` resolves one handler: the exact handler first, then the most specific matching pattern
+handler. It returns the handler's result. While the handler runs, listeners of the same key also
+receive the event, exactly like `fire`.
+
+`request` supports:
+
+* `timeout` — the future fails with `RequestTimeoutException`; a queued request is removed, a
+  dispatched handler keeps running and its result is discarded;
+* `cancelToken` — the future fails with `RequestCanceledException`; the same queue/dispatch rules
+  apply;
+* `correlationId` — reaches the handler and the error envelope.
 
 ### Exceptions
 
-| Exception | When |
+| Situation | Exception |
 |---|---|
-| `NoHandlerException` | No handler accepts the topic/data |
-| `BusyException` | Handlers exist, but no capacity (all paused/busy/queue full) |
-| `RequestTimeoutException` | The caller's timeout expired |
-| `RequestCanceledException` | The `CancelToken` was cancelled |
-| the handler's own error | Returned unchanged from the request future |
+| No handler for the key | `NoHandlerException` |
+| A handler exists but has no free slot/queue room | `BusyException` |
+| The timeout expired | `RequestTimeoutException` |
+| The caller cancelled | `RequestCanceledException` |
+| The handler threw | the handler's own error, rethrown at the caller |
+| The bus is disposed | `StateError` |
+
+Each exception exposes `address` (and the compatibility alias `topic`).
 
 ## Receiving: `listen` and `subscribe`
 
-These are the stream-style compatibility APIs. They are a thin facade over the node's broadcast
-stream:
+`listen` returns a plain `Stream<T>`; `subscribe` returns a `StreamSubscription<T>`.
 
 ```dart
-final stream = bus.listen<Price>(paths: ['market', 'btc']);
-final sub = bus.subscribe<Price>(
-  paths: ['market', 'btc'],
-  onData: (price) => print(price),
-);
-await sub.cancel();
+final priceKey = EventKey<Price>('market.btc');
+final stream = bus.listen(priceKey);
+stream.listen((price) => print(price));
+
+final subscription = bus.subscribe(priceKey, onData: (price) => print(price));
 ```
 
-They keep exact/pattern matching, model-bus `currentData`, `haveListener`, inbound delivery across
-an isolate or transport bridge, and `fire` acceptance — but they do **not** use the
-`EventSubscription` machinery added in 4.0. The gap is deliberate (ADR-0001, item 9) and the
-facade is planned for removal in 5.0.0.
-
-| Feature | `listen` / `subscribe` | `subscribeEvents` |
-|---|---|---|
-| Per-listener bounded buffer | no — only the Dart stream's invisible queue | yes, `bufferCapacity` |
-| Overflow policy (`latest`, drop, reject) | no | yes, `bufferOverflow` |
-| Counters (`buffered`, `dropped`, `delivered`) | no | yes |
-| `resize`, `.stream` view, `initialData` | no | yes |
-| `DeliveryMode.sync` | no; delivery is async | yes |
-| Listener error routing | **no** — a throwing `onData` goes to the zone and can crash the app | caught and reported through `errors` |
-| Pause semantics | `StreamSubscription.pause()`; the stream buffers **unboundedly** for that listener | `pause()` applies the buffer/overflow policy |
-| Handler (`request`) capability | no | yes, with a queue and `handlerConcurrency` |
-| Per-subscription metrics | no | yes |
-| Isolate/transport interest and inbound delivery | yes | yes |
-
-A listened stream is broadcast and has no replay: a listener created after `fire` sees nothing (the
-value may still be in `currentData` on a model bus). A handler-only topic does not answer a request
-if its only subscription is a legacy listener.
-
-Use `subscribeEvents` for anything that needs backpressure, error handling, counters or request
-answering; use `listen`/`subscribe` only for a small print/log listener in legacy code.
+These are the raw node-stream views: they have no bounded buffer, overflow policy or counters.
+Use `subscribeEvents` when the consumer can be slow.
 
 ## Receiving: `subscribeEvents`
 
-For anything beyond a one-line listener, use the control API. It returns an `EventSubscription<T>`
-that owns its buffer, pause state, handler queue and counters:
+`subscribeEvents` returns an `EventSubscription<T>` with its own lifecycle and delivery state:
 
 ```dart
-final sub = bus.subscribeEvents<Price>(
-  paths: ['market', 'btc'],
+final sub = bus.subscribeEvents(priceKey,
   bufferCapacity: 8,
   bufferOverflow: BufferOverflow.latest,
-  onEvent: (price) async => await render(price),
+  onEvent: (price) async {
+    await render(price);
+  },
+  onError: (error, stackTrace) => print('listener error: $error'),
 );
 
-sub.pause();
-sub.resume();
-sub.resize(16);                       // change capacity and/or policy
-print('${sub.buffered} buffered, ${sub.dropped} dropped');
-final view = sub.stream;              // a broadcast view of delivered events
+bus.fire(priceKey, Price(42));
+...
 await sub.cancel();
 ```
 
-Options:
-
-| Option | Default | Meaning |
-|---|---|---|
-| `bufferCapacity` | `null` (unbounded) | How many events wait while the callback runs or the subscription is paused |
-| `bufferOverflow` | `dropOldest` | `latest`, `dropOldest`, `dropNewest`, `reject` |
-| `deliveryMode` | `async` | `async` (microtask) or `sync` (inline in `fire`) |
-| `initialData` | — | Seed `currentData` of the node |
-| `onError`, `cancelOnError` | — | Listener errors and optional auto-cancel |
-
-`BufferOverflow.reject` makes `fire` report that this listener did not accept the event; the other
-policies drop silently (with counters/errors).
+A listener subscription is a consumer with a bounded buffer. `BufferOverflow` decides what happens
+when the buffer is full: `latest`, `dropOldest`, `dropNewest` or `reject`. The subscription also
+supports `pause()`, `resume()`, `resize(capacity)`, counters (`delivered`, `dropped`, `buffered`)
+and a `.stream` view. See [11](11-backpressure.md).
 
 ## Handlers as subscriptions
 
-A handler is a capability of an `EventSubscription`:
+A handler is a capability of a subscription, not a global registry:
 
 ```dart
-final orders = bus.subscribeEvents<Order>(
-  paths: ['orders'],
-  handlerConcurrency: 2,
-  requestQueueCapacity: 32,
-  handler: (dto, lastData) async => await place(dto),
+final orders = bus.subscribeEvents(orderPlaced,
+  handlerConcurrency: 1,          // one in-flight request by default
+  requestQueueCapacity: 4,        // queued requests before BusyException
+  handler: (dto, lastData) async {
+    // lastData is the PREVIOUS value of this node; dto.data is the current one
+    return await _placeOrder(dto.data);
+  },
 );
+
+...
+await orders.cancel();            // removes the handler, fails its queued requests
 ```
 
-* `handlerConcurrency` (default 1) bounds concurrent invocations; the rest wait in this
-  subscription's FIFO.
-* `requestQueueCapacity` defaults to `bus.requestQueueCapacity` (64). `0` means "reject immediately
-  when no slot is free", producing `BusyException`.
-* `inFlight`, `bufferedRequests`, `isHandlerBusy`, `hasRequestCapacity` expose the state;
-  `pause()` stops new requests from being selected.
-* Two subscriptions on one topic compete; dispatch is round-robin inside the resolved tier.
-* The exact tier never falls back to a pattern tier: if the exact handlers are saturated, the
-  request is busy even when a pattern handler is free.
-* A handler error is returned to the caller **and** reported through `errors` (kind `handler`).
+`handlerConcurrency` lets one subscription answer several requests in parallel;
+`requestQueueCapacity` bounds the FIFO. Without free capacity the request fails with
+`BusyException` (an exact tier never falls back to a pattern tier).
 
 ### A subscription can be both
 
 ```dart
-final audit = bus.subscribeEvents<Order>(
-  paths: ['orders'],
-  onEvent: (order) => log(order),
-  handler: (dto, last) async => await handle(dto),
+final audit = bus.subscribeEvents(orderPlaced,
+  onEvent: (order) => log('fire: $order'),
+  handler: (dto, lastData) async {
+    log('request: ${dto.data}');
+    return 'ok';
+  },
 );
 ```
 
-`fire` reaches `onEvent`; `request` reaches the handler and also offers the event to listeners.
+`fire` calls only `onEvent`; `request` calls the handler and also offers the value to `onEvent`.
 
 ### Pattern handlers
 
 ```dart
-bus.subscribeEvents<Sensor>(
-  paths: ['sensor', '*'],
-  handler: (dto, last) async => dto.data.value,
-);
+final sensorAny = EventPatternKey<Sensor>('sensor.*');
+
+bus.subscribeEvents(sensorAny, handler: (dto, lastData) async {
+  return dto.data.value * 2;
+});
+
+await bus.request(EventKey<Sensor>('sensor.temp'), Sensor(21)); // 42
 ```
 
-A concrete `request<Sensor>(..., paths: ['sensor', 'temp'])` finds the pattern tier when the exact
-tier has no accepting handler. More literal tokens win; ties keep registration order.
+A concrete request finds the pattern tier when the exact bucket has no accepting handler.
+`>` patterns work the same way and match one or more trailing tokens.
 
 ## `currentData`
 
 ```dart
-final last = bus.currentData<Status>(paths: ['service']);
+final last = bus.currentData(serviceKey);
 ```
 
-It is the last value delivered to the node, synchronously updated by `fire`/`request` delivery. On
-a common bus the value lives only while the node has a subscription or a transport pin; on a model
-bus it survives until `removeTopic`/`dispose`.
+`currentData` takes an exact key and reads only that node. For a pattern use
+`currentData(patternKey)` — it returns the last value delivered to the pattern node (the pattern's
+own type node), not a search across matching concrete nodes. On a model bus the value survives
+until `remove`/`dispose`.
+
+The handler's `lastData` is the previous `currentData` of the handler's own node.
 
 ## Availability checks
 
 ```dart
-bus.haveListener<Status>(paths: ['service']);       // a listener (or matching pattern) exists
-bus.haveHandler<Status>(paths: ['service']);        // a handler exists, even if paused
-bus.haveAvailableHandler<Status>(paths: ['service']); // one could accept a request now
+bus.haveListener(serviceKey);          // a listener exists
+bus.haveHandler(serviceKey);           // a handler exists, even if paused
+bus.haveAvailableHandler(serviceKey);  // one could accept a request now
 ```
 
-Use `haveAvailableHandler` before `request` when you want to avoid a `BusyException`; use
-`haveHandler` for routing decisions that tolerate a busy responder.
+Each accepts an exact key or a pattern key; a pattern check asks about that pattern node.
+A concrete listener check also counts a matching pattern listener.
 
 ## Errors and all events
 
 ```dart
-final errSub = bus.errors.listen((error) => log(error));
-final trace = bus.allEventStream.listen((event) {
-  final (dto, delivered) = event;
-  log('${dto.topic} $delivered ${dto.correlationId}');
+final errors = bus.errors.listen((error) {
+  print('${error.kind} on ${error.address}: ${error.error}');
 });
+final monitor = EventBusErrorMonitor();
+monitor.add(bus);
 ```
 
-`errors` carries `EventBusError` data events. `allEventStream` carries `(EventDTO, delivered)` for
-every `fire` and `request`; `delivered` means a node accepted it. The two streams are independent.
-See [12](12-observability.md) for rate limits, the monitor and metrics.
+`errors` carries `EventBusError` data events, rate-limited per `(kind, address)`. It never carries
+stream errors. `allEventStream` reports every `fire`/`request` with an `accepted` flag; it is used
+by `FSM` and `EventBusLogger`. See [12](12-observability.md).
 
 ## Cleanup
 
 ```dart
-await sub.cancel();     // remove a subscription, drop its buffer and queue
-bus.removeTopic<Status>(paths: ['service']); // evict the node explicitly
-await bus.dispose();    // close every node, stream and resource
+bus.remove(serviceKey);                 // one exact type node
+bus.removePattern(sensorAny);           // one pattern type node
+bus.removeAddress(EventAddress('service.status')); // every type at that address
+await bus.dispose();                    // the whole bus
 ```
 
-`removeTopic` works even on a model bus and cancels all subscriptions of the topic (D13). After
-`dispose`, every bus method throws `StateError`.
+`remove` works even on a model bus and cancels all subscriptions of the removed node (D13). A
+transport node also cancels its broker subscription. A model bus creates the node again on the next
+`fire`, `request` or `listen`.
 
 ## Recipes
 
 ### Request-response with a timeout
 
 ```dart
-final result = await bus.request<Receipt>(
-  order,
-  paths: ['orders', 'place'],
-  timeout: const Duration(seconds: 2),
-  correlationId: 'checkout-42',
-);
+try {
+  final result = await bus.request(receiptKey, order,
+      timeout: const Duration(milliseconds: 500));
+  print(result);
+} on RequestTimeoutException catch (error) {
+  print('no answer on ${error.address}');
+}
 ```
 
 ### State store with late subscribers
 
 ```dart
 final state = EventBus(isModelBus: true);
-state.fire<Status>(Status.ready, paths: ['service']);
+state.fire(serviceKey, Status.ready);
 
-final sub = state.subscribeEvents<Status>(
-  paths: ['service'],
-  onEvent: (status) => render(status),
+final sub = state.subscribeEvents(serviceKey,
+  initialData: state.currentData(serviceKey),
+  onEvent: render,
 );
-render(state.currentData<Status>(paths: ['service'])); // immediate value
 ```
+
+A late subscriber can read `currentData` or pass it as `initialData`; the model bus has already
+stored the value.
 
 ### A bounded pipeline
 
 ```dart
-final stage = bus.subscribeEvents<Job>(
-  paths: ['jobs'],
-  bufferCapacity: 32,
-  bufferOverflow: BufferOverflow.dropOldest,
-  onEvent: (job) async => await process(job),
+final stage = bus.subscribeEvents(jobKey,
+  bufferCapacity: 16,
+  bufferOverflow: BufferOverflow.reject,
+  onEvent: process,
 );
-bus.fire<Job>(job, paths: ['jobs']); // false when a `reject` policy refuses it
+
+final accepted = bus.fire(jobKey, job); // false when the reject policy refused it
 ```
 
 ### Sending across an isolate
 
 ```dart
-final iso = EventBusIsolate(onInit: workerInit);
+final iso = EventBusIsolate(onInit: _worker);
 await iso.waitInit;
-final result = await iso.request<int>(21); // worker handler's answer
-iso.fire<String>('refresh');               // one-way to the worker
+
+final result = await iso.request(workKey, 21); // the worker handler's answer
+iso.fire(refreshKey, 'refresh');               // one-way to the worker
 ```
 
-See [03](03-isolate-and-layers.md) for the directional rules and recovery.
+`EventBusIsolate` uses the same keys; the address string crosses the boundary unchanged. See
+[03](03-isolate-and-layers.md).
 
 ## What's next
 
 | Document | Content |
 |---|---|
-| [03-isolate-and-layers.md](03-isolate-and-layers.md) | Working through isolates and multi-layer schemes |
-| [11-backpressure.md](11-backpressure.md) | Buffers, queues, pause and credits in depth |
-| [12-observability.md](12-observability.md) | Errors, metrics, correlation |
-| [04-fsm.md](04-fsm.md) | Finite state machine on top of the bus |
-| [06-api-reference.md](06-api-reference.md) | Full API reference |
+| [03-isolate-and-layers.md](03-isolate-and-layers.md) | Isolates, layers, interest sync |
+| [11-backpressure.md](11-backpressure.md) | Buffers, overflow policies, queues, credits |
+| [12-observability.md](12-observability.md) | Errors, metrics, correlation ids |
+| [06-api-reference.md](06-api-reference.md) | Every public type and member |

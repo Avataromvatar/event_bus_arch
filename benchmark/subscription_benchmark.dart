@@ -52,9 +52,9 @@ Future<void> _fireScenario(
   }
 
   if (legacy) {
-    bus.subscribe<int>(paths: ['x'], onData: (_) => count());
+    bus.subscribeLegacy<int>(paths: ['x'], onData: (_) => count());
   } else {
-    bus.subscribeEvents<int>(
+    bus.subscribeEventsLegacy<int>(
       paths: ['x'],
       deliveryMode: mode,
       onEvent: (_) => count(),
@@ -63,7 +63,7 @@ Future<void> _fireScenario(
 
   final clock = Stopwatch()..start();
   for (var i = 0; i < events; i++) {
-    bus.fire<int>(i, paths: ['x']);
+    bus.fireLegacy<int>(i, paths: ['x']);
   }
   await completer.future;
   clock.stop();
@@ -75,14 +75,14 @@ Future<void> _fireScenario(
 
 Future<void> _requestSequential({int events = 20000}) async {
   final bus = EventBus();
-  bus.subscribeEvents<int>(
+  bus.subscribeEventsLegacy<int>(
     paths: ['x'],
     handler: (dto, lastData) async => dto.data,
   );
 
   final clock = Stopwatch()..start();
   for (var i = 0; i < events; i++) {
-    await bus.request<int>(i, paths: ['x']);
+    await bus.requestLegacy<int>(i, paths: ['x']);
   }
   clock.stop();
 
@@ -93,7 +93,7 @@ Future<void> _requestSequential({int events = 20000}) async {
 
 Future<void> _requestBurst({required int concurrency, int events = 2000}) async {
   final bus = EventBus();
-  bus.subscribeEvents<int>(
+  bus.subscribeEventsLegacy<int>(
     paths: ['x'],
     handlerConcurrency: concurrency,
     requestQueueCapacity: events,
@@ -106,7 +106,7 @@ Future<void> _requestBurst({required int concurrency, int events = 2000}) async 
   final clock = Stopwatch()..start();
   final futures = <Future<dynamic>>[];
   for (var i = 0; i < events; i++) {
-    futures.add(bus.request<int>(i, paths: ['x']));
+    futures.add(bus.requestLegacy<int>(i, paths: ['x']));
   }
   await Future.wait(futures);
   clock.stop();
@@ -119,7 +119,7 @@ Future<void> _requestBurst({required int concurrency, int events = 2000}) async 
 Future<void> _busyScenario({int events = 2000}) async {
   final bus = EventBus();
   final gate = Completer<void>();
-  bus.subscribeEvents<int>(
+  bus.subscribeEventsLegacy<int>(
     paths: ['x'],
     requestQueueCapacity: 0,
     handler: (dto, lastData) async {
@@ -132,7 +132,7 @@ Future<void> _busyScenario({int events = 2000}) async {
   final clock = Stopwatch()..start();
   final checks = <Future<void>>[];
   for (var i = 0; i < events; i++) {
-    checks.add(bus.request<int>(i, paths: ['x']).then<void>(
+    checks.add(bus.requestLegacy<int>(i, paths: ['x']).then<void>(
       (_) {},
       onError: (Object error) {
         if (error is BusyException) busy++;
@@ -153,7 +153,7 @@ Future<void> _memoryScenario({required int? capacity, int subscriptions = 1000})
   final bus = EventBus();
   final subs = <EventSubscription<int>>[];
   for (var i = 0; i < subscriptions; i++) {
-    final sub = bus.subscribeEvents<int>(
+    final sub = bus.subscribeEventsLegacy<int>(
       paths: ['x'],
       bufferCapacity: capacity,
       onEvent: (_) {},
@@ -164,7 +164,7 @@ Future<void> _memoryScenario({required int? capacity, int subscriptions = 1000})
 
   final rssBefore = ProcessInfo.currentRss;
   for (var i = 0; i < 100; i++) {
-    bus.fire<int>(i, paths: ['x']);
+    bus.fireLegacy<int>(i, paths: ['x']);
   }
   final rssAfter = ProcessInfo.currentRss;
 

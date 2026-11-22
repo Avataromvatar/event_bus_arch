@@ -11,15 +11,15 @@ import 'package:test/test.dart';
 void lifecycleWorker(EventBus bus, Object? initialData) {
   final port = initialData as SendPort;
   port.send('init');
-  bus.subscribe<String>(
+  bus.subscribeLegacy<String>(
       paths: ['echo'],
-      onData: (e) => bus.fire<String>('echo: $e', paths: ['echo']));
-  bus.subscribeEvents<int>(
+      onData: (e) => bus.fireLegacy<String>('echo: $e', paths: ['echo']));
+  bus.subscribeEventsLegacy<int>(
       paths: ['slow'], handler: (dto, lastData) async {
     await Future<void>.delayed(const Duration(milliseconds: 500));
     return dto.data;
   });
-  bus.subscribeEvents<int>(handler: (dto, lastData) async => dto.data * 2);
+  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async => dto.data * 2);
 }
 
 void main() {
@@ -34,8 +34,8 @@ void main() {
     expect(inits, ['init']);
 
     final received = <String>[];
-    final sub = iso.subscribe<String>(paths: ['echo'], onData: received.add);
-    expect(iso.fire<String>('one', paths: ['echo']), isTrue);
+    final sub = iso.subscribeLegacy<String>(paths: ['echo'], onData: received.add);
+    expect(iso.fireLegacy<String>('one', paths: ['echo']), isTrue);
     await Future<void>.delayed(const Duration(milliseconds: 100));
     expect(received, ['echo: one']);
 
@@ -44,11 +44,11 @@ void main() {
     expect(iso.isInit, isTrue);
 
     // the same main-side subscription is still alive
-    expect(iso.fire<String>('two', paths: ['echo']), isTrue);
+    expect(iso.fireLegacy<String>('two', paths: ['echo']), isTrue);
     await Future<void>.delayed(const Duration(milliseconds: 100));
     expect(received, ['echo: one', 'echo: two']);
     // the new worker's handler interest was re-synchronised
-    expect(await iso.request<int>(21), 42);
+    expect(await iso.requestLegacy<int>(21), 42);
 
     await sub.cancel();
     await iso.dispose();
@@ -62,7 +62,7 @@ void main() {
         EventBusIsolate(onInit: lifecycleWorker, initialData: port.sendPort);
     await iso.waitInit;
 
-    final pending = iso.request<int>(1, paths: ['slow']);
+    final pending = iso.requestLegacy<int>(1, paths: ['slow']);
     final failed = expectLater(pending, throwsA(isA<EventBusException>()));
     await Future<void>.delayed(const Duration(milliseconds: 20));
 

@@ -26,7 +26,7 @@ void main() {
   group('EventBus: node creation hooks', () {
     test('listen passes the topic to createNode', () async {
       final bus = HookedBus();
-      final subscription = bus.listen<String>(paths: ['a', 'b']).listen((_) {});
+      final subscription = bus.listenLegacy<String>(paths: ['a', 'b']).listen((_) {});
       addTearDown(bus.dispose);
 
       expect(bus.createdTopics.single.topic, 'String.a.b');
@@ -37,7 +37,7 @@ void main() {
       final bus = HookedBus();
       addTearDown(bus.dispose);
 
-      bus.subscribeEvents<int>(paths: ['x'], handler: (dto, last) async {});
+      bus.subscribeEventsLegacy<int>(paths: ['x'], handler: (dto, last) async {});
 
       expect(bus.createdTopics.single.topic, 'int.x');
     });
@@ -48,20 +48,20 @@ void main() {
 
       // The node is created and stores the value, but no listener accepted it,
       // so fire reports false on a common bus (D14).
-      expect(bus.fire<String>('v', paths: ['x']), isFalse);
+      expect(bus.fireLegacy<String>('v', paths: ['x']), isFalse);
       await Future<void>.delayed(Duration.zero);
 
       expect(bus.createdTopics.single.topic, 'String.x');
-      expect(bus.currentData<String>(paths: ['x']), 'v');
+      expect(bus.currentDataLegacy<String>(paths: ['x']), 'v');
     });
 
     test('fire does not create a node by default', () {
       final bus = HookedBus();
       addTearDown(bus.dispose);
 
-      expect(bus.fire<String>('v', paths: ['x']), isFalse);
+      expect(bus.fireLegacy<String>('v', paths: ['x']), isFalse);
       expect(bus.createdTopics, isEmpty);
-      expect(bus.currentData<String>(paths: ['x']), isNull);
+      expect(bus.currentDataLegacy<String>(paths: ['x']), isNull);
     });
   });
 }

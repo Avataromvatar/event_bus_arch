@@ -24,8 +24,8 @@ subscription's own buffer, queue and pause state implement backpressure.
 | `onError`, `cancelOnError` | — | A listener exception is reported as an `EventBusError`; with `cancelOnError` the subscription is cancelled after the first one |
 
 ```dart
-final sub = bus.subscribeEvents<Price>(
-  paths: ['market', 'btc'],
+final priceKey = EventKey<Price>('market.btc');
+final sub = bus.subscribeEvents(priceKey,
   bufferCapacity: 8,
   bufferOverflow: BufferOverflow.latest, // keep the newest 8
   onEvent: (price) async => await render(price),
@@ -70,8 +70,8 @@ into another concurrent callback. `isBusy` exposes that state.
 A handler is a capability of the same subscription:
 
 ```dart
-final sub = bus.subscribeEvents<Order>(
-  paths: ['orders'],
+final orderKey = EventKey<Order>('orders');
+final sub = bus.subscribeEvents(orderKey,
   handlerConcurrency: 2,
   requestQueueCapacity: 32,
   handler: (dto, lastData) async => await process(dto),
@@ -118,8 +118,8 @@ caller receives exactly one outcome: `RequestTimeoutException`, `RequestCanceled
 Both callbacks may be set on one subscription:
 
 ```dart
-final sub = bus.subscribeEvents<Command>(
-  paths: ['commands'],
+final commandKey = EventKey<Command>('commands');
+final sub = bus.subscribeEvents(commandKey,
   onEvent: (command) => log(command),      // fire reaches this
   handler: (dto, last) async => execute(dto), // request reaches this
 );

@@ -48,7 +48,7 @@ void main() {
     await bus.waitConnected();
 
     String? seen;
-    final sub = bus.subscribeEvents<int>(
+    final sub = bus.subscribeEventsLegacy<int>(
         paths: ['a'], handler: (dto, lastData) async {
       seen = dto.correlationId;
       return 7;
@@ -67,14 +67,14 @@ void main() {
         connection.publishes.singleWhere((publish) => publish.subject == '_INBOX.1');
     expect(response.correlationId, 'corr-in');
 
-    expect(bus.fire<int>(5, paths: ['a'], correlationId: 'corr-fire'), isTrue);
+    expect(bus.fireLegacy<int>(5, paths: ['a'], correlationId: 'corr-fire'), isTrue);
     final published = connection.publishes
         .where((publish) => publish.subject == 'int.a')
         .toList();
     expect(published, hasLength(1));
     expect(published.single.correlationId, 'corr-fire');
 
-    final pending = bus.request<int>(6,
+    final pending = bus.requestLegacy<int>(6,
         paths: ['b'],
         correlationId: 'corr-req',
         timeout: const Duration(milliseconds: 20));

@@ -6,13 +6,13 @@ void main() {
     test('subscribeEvents creates and cancels a handler', () async {
       final bus = EventBus();
 
-      final handler = bus.subscribeEvents<String>(
+      final handler = bus.subscribeEventsLegacy<String>(
           handler: (dto, lastData) async => 'ok');
-      expect(bus.haveHandler<String>(), true);
-      expect(await bus.request<String>('x'), 'ok');
+      expect(bus.haveHandlerLegacy<String>(), true);
+      expect(await bus.requestLegacy<String>('x'), 'ok');
 
       await handler.cancel();
-      expect(bus.haveHandler<String>(), false);
+      expect(bus.haveHandlerLegacy<String>(), false);
       await bus.dispose();
     });
 
@@ -37,17 +37,17 @@ void main() {
       final bus = EventBus();
       await bus.dispose();
 
-      expect(() => bus.fire<String>('x'), throwsStateError);
-      await expectLater(bus.request<String>('x'), throwsStateError);
+      expect(() => bus.fireLegacy<String>('x'), throwsStateError);
+      await expectLater(bus.requestLegacy<String>('x'), throwsStateError);
     });
 
     test('listen and subscribeEvents after dispose throw StateError', () async {
       final bus = EventBus();
       await bus.dispose();
 
-      expect(() => bus.listen<String>(), throwsStateError);
+      expect(() => bus.listenLegacy<String>(), throwsStateError);
       expect(
-          () => bus.subscribeEvents<String>(
+          () => bus.subscribeEventsLegacy<String>(
               handler: (dto, lastData) async {}),
           throwsStateError);
     });
@@ -55,7 +55,7 @@ void main() {
     test('dispose closes the node streams', () async {
       final bus = EventBus();
       var done = false;
-      bus.subscribe<String>(onData: (_) {}, onDone: () => done = true);
+      bus.subscribeLegacy<String>(onData: (_) {}, onDone: () => done = true);
 
       await bus.dispose();
       await Future<void>.delayed(Duration.zero);
@@ -68,30 +68,30 @@ void main() {
     test('initialData is applied to an already existing node as well',
         () async {
       final bus = EventBus(isModelBus: true);
-      final first = bus.subscribeEvents<int>(
+      final first = bus.subscribeEventsLegacy<int>(
           initialData: 1, handler: (dto, lastData) async {});
-      await bus.request<int>(2);
-      expect(bus.currentData<int>(), 2);
+      await bus.requestLegacy<int>(2);
+      expect(bus.currentDataLegacy<int>(), 2);
 
       await first.cancel();
-      bus.subscribeEvents<int>(
+      bus.subscribeEventsLegacy<int>(
           initialData: 10, handler: (dto, lastData) async {});
 
-      expect(bus.currentData<int>(), 10);
+      expect(bus.currentDataLegacy<int>(), 10);
       await bus.dispose();
     });
 
     test('initialData is applied to a topic with paths', () async {
       final bus = EventBus(isModelBus: true);
 
-      bus.subscribeEvents<int>(
+      bus.subscribeEventsLegacy<int>(
           initialData: 5,
           paths: ['counter'],
           handler: (dto, lastData) async {});
 
-      expect(bus.currentData<int>(paths: ['counter']), 5);
+      expect(bus.currentDataLegacy<int>(paths: ['counter']), 5);
       // another topic of the same type is untouched
-      expect(bus.currentData<int>(), null);
+      expect(bus.currentDataLegacy<int>(), null);
       await bus.dispose();
     });
   });

@@ -6,14 +6,14 @@ import 'package:test/test.dart';
 ///Answers requests on `counter`; the response carries the worker index.
 void keyWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
-  bus.subscribeEventsKey<int>(EventKey<int>('counter'),
+  bus.subscribeEvents<int>(EventKey<int>('counter'),
       handler: (dto, lastData) async => '$index:${dto.data}');
 }
 
 ///Reports fires on `counter` to the SendPort from initialData.
 void keyPortWorker(EventBus bus, Object? initialData) {
   final port = initialData as SendPort;
-  bus.subscribeEventsKey<int>(EventKey<int>('counter'),
+  bus.subscribeEvents<int>(EventKey<int>('counter'),
       onEvent: (value) => port.send(value));
 }
 
@@ -26,7 +26,7 @@ void main() {
     );
     await pool.waitInit;
 
-    final result = await pool.requestKey(EventKey<int>('counter'), 7);
+    final result = await pool.request(EventKey<int>('counter'), 7);
     expect(result, anyOf('0:7', '1:7'));
 
     await pool.close();
@@ -41,7 +41,7 @@ void main() {
     );
     await pool.waitInit;
 
-    expect(pool.fireKey(EventKey<int>('counter'), 7), isTrue);
+    expect(pool.fire(EventKey<int>('counter'), 7), isTrue);
     expect(await port.first.timeout(const Duration(seconds: 2)), 7);
 
     port.close();
@@ -57,8 +57,8 @@ void main() {
     );
     await pool.waitInit;
 
-    final first = await pool.requestKey(EventKey<int>('counter'), 1);
-    final second = await pool.requestKey(EventKey<int>('counter'), 2);
+    final first = await pool.request(EventKey<int>('counter'), 1);
+    final second = await pool.request(EventKey<int>('counter'), 2);
     expect(first.toString().split(':').first,
         second.toString().split(':').first);
 

@@ -14,8 +14,8 @@ import 'package:event_bus_arch/event_bus_arch.dart';
 void main() async {
   final bus = EventBus(
       observability: const ObservabilityConfig(enabled: true));
-  final sub = bus.subscribeEvents<int>(onEvent: (_) {});
-  bus.fire<int>(1, correlationId: 'web-check');
+  final sub = bus.subscribeEventsLegacy<int>(onEvent: (_) {});
+  bus.fireLegacy<int>(1, correlationId: 'web-check');
   print('web build ok; isolates: ${EventBusCapabilities.isolateSupported}');
   await sub.cancel();
   await bus.dispose();

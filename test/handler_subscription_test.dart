@@ -9,17 +9,17 @@ void main() {
   group('handler subscription: basics', () {
     test('answers a request and cancels the responder', () async {
       final bus = EventBus();
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         handler: (dto, lastData) async => dto.data * 2,
       );
 
-      expect(bus.haveHandler<int>(paths: ['x']), isTrue);
-      expect(await bus.request<int>(21, paths: ['x']), 42);
+      expect(bus.haveHandlerLegacy<int>(paths: ['x']), isTrue);
+      expect(await bus.requestLegacy<int>(21, paths: ['x']), 42);
 
       await sub.cancel();
-      expect(bus.haveHandler<int>(paths: ['x']), isFalse);
-      await expectLater(bus.request<int>(1, paths: ['x']),
+      expect(bus.haveHandlerLegacy<int>(paths: ['x']), isFalse);
+      await expectLater(bus.requestLegacy<int>(1, paths: ['x']),
           throwsA(isA<NoHandlerException>()));
       await bus.dispose();
     });
@@ -27,17 +27,17 @@ void main() {
     test('a dual subscription listens to fire and answers requests', () async {
       final bus = EventBus();
       final received = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         onEvent: received.add,
         handler: (dto, lastData) async => dto.data + 1,
       );
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       expect(received, [1]);
 
-      expect(await bus.request<int>(2, paths: ['x']), 3);
+      expect(await bus.requestLegacy<int>(2, paths: ['x']), 3);
       await pump();
       expect(received, [1, 2]);
 
@@ -48,7 +48,7 @@ void main() {
     test('fire does not invoke a handler-only subscription', () async {
       final bus = EventBus();
       var called = false;
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         handler: (dto, lastData) async {
           called = true;
@@ -56,7 +56,7 @@ void main() {
         },
       );
 
-      bus.fire<int>(1, paths: ['x']);
+      bus.fireLegacy<int>(1, paths: ['x']);
       await pump();
       expect(called, isFalse);
 
@@ -70,7 +70,7 @@ void main() {
       final bus = EventBus();
       final gates = <Completer<void>>[];
       final started = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         requestQueueCapacity: 2,
         handler: (dto, lastData) async {
@@ -82,10 +82,10 @@ void main() {
         },
       );
 
-      final first = bus.request<int>(1, paths: ['x']);
-      final second = bus.request<int>(2, paths: ['x']);
-      final third = bus.request<int>(3, paths: ['x']);
-      final fourth = bus.request<int>(4, paths: ['x']);
+      final first = bus.requestLegacy<int>(1, paths: ['x']);
+      final second = bus.requestLegacy<int>(2, paths: ['x']);
+      final third = bus.requestLegacy<int>(3, paths: ['x']);
+      final fourth = bus.requestLegacy<int>(4, paths: ['x']);
       final fourthCheck =
           expectLater(fourth, throwsA(isA<BusyException>()));
 
@@ -119,7 +119,7 @@ void main() {
       final bus = EventBus();
       final gates = <Completer<void>>[];
       final started = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         handlerConcurrency: 2,
         requestQueueCapacity: 0,
@@ -132,9 +132,9 @@ void main() {
         },
       );
 
-      final first = bus.request<int>(1, paths: ['x']);
-      final second = bus.request<int>(2, paths: ['x']);
-      final third = bus.request<int>(3, paths: ['x']);
+      final first = bus.requestLegacy<int>(1, paths: ['x']);
+      final second = bus.requestLegacy<int>(2, paths: ['x']);
+      final third = bus.requestLegacy<int>(3, paths: ['x']);
       final thirdCheck = expectLater(third, throwsA(isA<BusyException>()));
 
       await pump();
@@ -154,20 +154,20 @@ void main() {
 
     test('pause rejects requests until resume', () async {
       final bus = EventBus();
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         handler: (dto, lastData) async => dto.data,
       );
 
       sub.pause();
-      expect(bus.haveHandler<int>(paths: ['x']), isTrue);
-      expect(bus.haveAvailableHandler<int>(paths: ['x']), isFalse);
-      await expectLater(bus.request<int>(1, paths: ['x']),
+      expect(bus.haveHandlerLegacy<int>(paths: ['x']), isTrue);
+      expect(bus.haveAvailableHandlerLegacy<int>(paths: ['x']), isFalse);
+      await expectLater(bus.requestLegacy<int>(1, paths: ['x']),
           throwsA(isA<BusyException>()));
 
       sub.resume();
-      expect(bus.haveAvailableHandler<int>(paths: ['x']), isTrue);
-      expect(await bus.request<int>(2, paths: ['x']), 2);
+      expect(bus.haveAvailableHandlerLegacy<int>(paths: ['x']), isTrue);
+      expect(await bus.requestLegacy<int>(2, paths: ['x']), 2);
 
       await sub.cancel();
       await bus.dispose();
@@ -176,7 +176,7 @@ void main() {
     test('haveAvailableHandler follows queue capacity', () async {
       final bus = EventBus();
       final gate = Completer<void>();
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         requestQueueCapacity: 0,
         handler: (dto, lastData) async {
@@ -185,15 +185,15 @@ void main() {
         },
       );
 
-      final first = bus.request<int>(1, paths: ['x']);
+      final first = bus.requestLegacy<int>(1, paths: ['x']);
       await pump();
-      expect(bus.haveHandler<int>(paths: ['x']), isTrue);
-      expect(bus.haveAvailableHandler<int>(paths: ['x']), isFalse);
+      expect(bus.haveHandlerLegacy<int>(paths: ['x']), isTrue);
+      expect(bus.haveAvailableHandlerLegacy<int>(paths: ['x']), isFalse);
 
       gate.complete();
       expect(await first, 1);
       await pump();
-      expect(bus.haveAvailableHandler<int>(paths: ['x']), isTrue);
+      expect(bus.haveAvailableHandlerLegacy<int>(paths: ['x']), isTrue);
 
       await sub.cancel();
       await bus.dispose();
@@ -205,7 +205,7 @@ void main() {
       final bus = EventBus();
       final exactGate = Completer<void>();
       final patternStarted = <int>[];
-      final exact = bus.subscribeEvents<int>(
+      final exact = bus.subscribeEventsLegacy<int>(
         paths: ['a', 'b'],
         requestQueueCapacity: 0,
         handler: (dto, lastData) async {
@@ -213,7 +213,7 @@ void main() {
           return 'exact:${dto.data}';
         },
       );
-      final pattern = bus.subscribeEvents<int>(
+      final pattern = bus.subscribeEventsLegacy<int>(
         paths: ['a', '*'],
         handler: (dto, lastData) async {
           patternStarted.add(dto.data);
@@ -221,17 +221,17 @@ void main() {
         },
       );
 
-      final first = bus.request<int>(1, paths: ['a', 'b']);
+      final first = bus.requestLegacy<int>(1, paths: ['a', 'b']);
       await pump();
-      await expectLater(bus.request<int>(2, paths: ['a', 'b']),
+      await expectLater(bus.requestLegacy<int>(2, paths: ['a', 'b']),
           throwsA(isA<BusyException>()));
       expect(patternStarted, isEmpty);
 
       exactGate.complete();
       expect(await first, 'exact:1');
 
-      expect(await bus.request<int>(3, paths: ['a', 'b']), 'exact:3');
-      expect(await bus.request<int>(4, paths: ['a', 'c']), 'pattern:4');
+      expect(await bus.requestLegacy<int>(3, paths: ['a', 'b']), 'exact:3');
+      expect(await bus.requestLegacy<int>(4, paths: ['a', 'c']), 'pattern:4');
       expect(patternStarted, [4]);
 
       await exact.cancel();
@@ -243,14 +243,14 @@ void main() {
       final bus = EventBus();
       final first = <int>[];
       final second = <int>[];
-      final sub1 = bus.subscribeEvents<int>(
+      final sub1 = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         handler: (dto, lastData) async {
           first.add(dto.data);
           return dto.data;
         },
       );
-      final sub2 = bus.subscribeEvents<int>(
+      final sub2 = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         handler: (dto, lastData) async {
           second.add(dto.data);
@@ -259,7 +259,7 @@ void main() {
       );
 
       for (var value = 1; value <= 4; value++) {
-        expect(await bus.request<int>(value, paths: ['x']), value);
+        expect(await bus.requestLegacy<int>(value, paths: ['x']), value);
       }
 
       expect(first, [1, 3]);
@@ -275,7 +275,7 @@ void main() {
     test('a timed-out request fails and frees its handler slot', () async {
       final bus = EventBus();
       final gate = Completer<void>();
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         handler: (dto, lastData) async {
           await gate.future;
@@ -284,7 +284,7 @@ void main() {
       );
 
       await expectLater(
-        bus.request<int>(1,
+        bus.requestLegacy<int>(1,
             paths: ['x'], timeout: const Duration(milliseconds: 20)),
         throwsA(isA<RequestTimeoutException>()),
       );
@@ -303,7 +303,7 @@ void main() {
       final bus = EventBus();
       final gates = <Completer<void>>[];
       final started = <int>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         requestQueueCapacity: 1,
         handler: (dto, lastData) async {
@@ -315,10 +315,10 @@ void main() {
         },
       );
 
-      final first = bus.request<int>(1, paths: ['x']);
+      final first = bus.requestLegacy<int>(1, paths: ['x']);
       final token = CancelToken();
       final second =
-          bus.request<int>(2, paths: ['x'], cancelToken: token);
+          bus.requestLegacy<int>(2, paths: ['x'], cancelToken: token);
       await pump();
       expect(started, [1]);
 
@@ -339,7 +339,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final gates = <Completer<void>>[];
       final seen = <int?>[];
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         requestQueueCapacity: 1,
         handler: (dto, lastData) async {
@@ -351,10 +351,10 @@ void main() {
         },
       );
 
-      final first = bus.request<int>(1, paths: ['x']);
+      final first = bus.requestLegacy<int>(1, paths: ['x']);
       await pump();
-      final second = bus.request<int>(2, paths: ['x']);
-      bus.fire<int>(99, paths: ['x']);
+      final second = bus.requestLegacy<int>(2, paths: ['x']);
+      bus.fireLegacy<int>(99, paths: ['x']);
 
       gates[0].complete();
       expect(await first, 1);
@@ -374,8 +374,8 @@ void main() {
       final received = <int>[];
       final gate = Completer<void>();
       final listener =
-          bus.subscribeEvents<int>(paths: ['x'], onEvent: received.add);
-      final handlerSub = bus.subscribeEvents<int>(
+          bus.subscribeEventsLegacy<int>(paths: ['x'], onEvent: received.add);
+      final handlerSub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         requestQueueCapacity: 0,
         handler: (dto, lastData) async {
@@ -384,9 +384,9 @@ void main() {
         },
       );
 
-      final first = bus.request<int>(1, paths: ['x']);
+      final first = bus.requestLegacy<int>(1, paths: ['x']);
       await pump();
-      await expectLater(bus.request<int>(2, paths: ['x']),
+      await expectLater(bus.requestLegacy<int>(2, paths: ['x']),
           throwsA(isA<BusyException>()));
       await pump();
       expect(received, [1]);
@@ -404,7 +404,7 @@ void main() {
         () async {
       final bus = EventBus();
       final gate = Completer<void>();
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
         paths: ['x'],
         requestQueueCapacity: 1,
         handler: (dto, lastData) async {
@@ -413,8 +413,8 @@ void main() {
         },
       );
 
-      final first = bus.request<int>(1, paths: ['x']);
-      final second = bus.request<int>(2, paths: ['x']);
+      final first = bus.requestLegacy<int>(1, paths: ['x']);
+      final second = bus.requestLegacy<int>(2, paths: ['x']);
       final secondCheck =
           expectLater(second, throwsA(isA<NoHandlerException>()));
       await pump();

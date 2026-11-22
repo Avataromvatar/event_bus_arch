@@ -10,7 +10,7 @@ Future<void> pump() async {
 
 ///Reports the correlation id it received; used across the isolate bridge.
 void correlationWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<String>(
+  bus.subscribeEventsLegacy<String>(
       handler: (dto, lastData) async => dto.correlationId ?? 'none');
 }
 
@@ -20,8 +20,8 @@ void main() {
       final bus = EventBus();
       expect(bus.isObservable, isFalse);
 
-      final sub = bus.subscribeEvents<int>(onEvent: (_) {});
-      bus.fire<int>(1);
+      final sub = bus.subscribeEventsLegacy<int>(onEvent: (_) {});
+      bus.fireLegacy<int>(1);
       await pump();
 
       final snapshot = bus.metrics.snapshot();
@@ -38,7 +38,7 @@ void main() {
           observability: const ObservabilityConfig(enabled: true, metrics: false));
       expect(bus.isObservable, isTrue);
 
-      bus.fire<int>(1);
+      bus.fireLegacy<int>(1);
       final snapshot = bus.metrics.snapshot();
       expect(snapshot.fired, 0);
       expect(snapshot.topics, isEmpty);
@@ -51,11 +51,11 @@ void main() {
     test('fire counts delivered and dropped events per type token', () async {
       final bus = EventBus(
           observability: const ObservabilityConfig(enabled: true));
-      final sub = bus.subscribeEvents<int>(onEvent: (_) {});
+      final sub = bus.subscribeEventsLegacy<int>(onEvent: (_) {});
 
-      expect(bus.fire<int>(1), isTrue);
-      expect(bus.fire<int>(2), isTrue);
-      expect(bus.fire<String>('nobody'), isFalse);
+      expect(bus.fireLegacy<int>(1), isTrue);
+      expect(bus.fireLegacy<int>(2), isTrue);
+      expect(bus.fireLegacy<String>('nobody'), isFalse);
       await pump();
 
       final snapshot = bus.metrics.snapshot();
@@ -78,7 +78,7 @@ void main() {
     test('request outcomes are counted per topic', () async {
       final bus = EventBus(
           observability: const ObservabilityConfig(enabled: true));
-      final sub = bus.subscribeEvents<int>(handler: (dto, lastData) async {
+      final sub = bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
         if (dto.data == 0) throw StateError('boom');
         if (dto.data == 1) {
           await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -86,20 +86,20 @@ void main() {
         return dto.data;
       });
 
-      expect(await bus.request<int>(2), 2); // completed
-      await expectLater(bus.request<int>(0), throwsStateError); // errored
+      expect(await bus.requestLegacy<int>(2), 2); // completed
+      await expectLater(bus.requestLegacy<int>(0), throwsStateError); // errored
       await expectLater(
-        bus.request<int>(1, timeout: const Duration(milliseconds: 10)),
+        bus.requestLegacy<int>(1, timeout: const Duration(milliseconds: 10)),
         throwsA(isA<RequestTimeoutException>()),
       );
       await expectLater(
-        bus.request<String>('x'),
+        bus.requestLegacy<String>('x'),
         throwsA(isA<NoHandlerException>()),
       );
 
       final preCancelled = CancelToken()..cancel();
       await expectLater(
-        bus.request<int>(5, cancelToken: preCancelled),
+        bus.requestLegacy<int>(5, cancelToken: preCancelled),
         throwsA(isA<RequestCanceledException>()),
       );
 
@@ -124,12 +124,12 @@ void main() {
     test('subscription state appears in the snapshot', () async {
       final bus = EventBus(
           observability: const ObservabilityConfig(enabled: true));
-      final sub = bus.subscribeEvents<int>(handler: (dto, lastData) async {
+      final sub = bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
         await Future<void>.delayed(const Duration(milliseconds: 50));
         return dto.data;
       });
 
-      final pending = bus.request<int>(1);
+      final pending = bus.requestLegacy<int>(1);
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       final subscribed = bus.metrics.snapshot().subscriptions
@@ -147,14 +147,14 @@ void main() {
     test('queue depth and queue-wait latency are captured', () async {
       final bus = EventBus(
           observability: const ObservabilityConfig(enabled: true));
-      final sub = bus.subscribeEvents<int>(handler: (dto, lastData) async {
+      final sub = bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
         await Future<void>.delayed(const Duration(milliseconds: 30));
         return dto.data;
       });
 
-      final first = bus.request<int>(1);
+      final first = bus.requestLegacy<int>(1);
       await Future<void>.delayed(const Duration(milliseconds: 5));
-      final second = bus.request<int>(2);
+      final second = bus.requestLegacy<int>(2);
       await Future<void>.delayed(const Duration(milliseconds: 5));
 
       final pending = bus.metrics.snapshot().subscriptions
@@ -179,9 +179,9 @@ void main() {
           observability:
               const ObservabilityConfig(enabled: true, cardinalityLimit: 1));
 
-      bus.fire<int>(1);
-      bus.fire<String>('x');
-      bus.fire<double>(1.0);
+      bus.fireLegacy<int>(1);
+      bus.fireLegacy<String>('x');
+      bus.fireLegacy<double>(1.0);
 
       final snapshot = bus.metrics.snapshot();
       expect(snapshot.droppedMetricSeries, 2);
@@ -200,7 +200,7 @@ void main() {
           observability:
               const ObservabilityConfig(enabled: true, sampleRate: 0));
 
-      bus.fire<int>(1);
+      bus.fireLegacy<int>(1);
       final topic = bus.metrics.snapshot().topics.single;
       expect(topic.fired, 1);
       expect(topic.dispatchLatency.count, 0);
@@ -213,8 +213,8 @@ void main() {
           observability: const ObservabilityConfig(enabled: true));
       final first = bus.metrics.changes.first.timeout(const Duration(seconds: 2));
 
-      bus.fire<int>(1);
-      bus.fire<int>(2);
+      bus.fireLegacy<int>(1);
+      bus.fireLegacy<int>(2);
 
       final snapshot = await first;
       expect(snapshot.fired, 2);
@@ -227,10 +227,10 @@ void main() {
           observability: const ObservabilityConfig(
               enabled: true, capturePayloads: true));
       final errorFuture = bus.errors.first;
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
           paths: ['boom'], onEvent: (_) => throw StateError('listener'));
 
-      bus.fire<int>(7, paths: ['boom']);
+      bus.fireLegacy<int>(7, paths: ['boom']);
       final error = await errorFuture.timeout(const Duration(seconds: 1));
 
       expect(error.kind, EventBusErrorKind.listener);
@@ -245,10 +245,10 @@ void main() {
       final bus = EventBus(
           observability: const ObservabilityConfig(enabled: true));
       final errorFuture = bus.errors.first;
-      final sub = bus.subscribeEvents<int>(
+      final sub = bus.subscribeEventsLegacy<int>(
           paths: ['boom'], onEvent: (_) => throw StateError('listener'));
 
-      bus.fire<int>(7, paths: ['boom']);
+      bus.fireLegacy<int>(7, paths: ['boom']);
       final error = await errorFuture.timeout(const Duration(seconds: 1));
 
       expect(error.event, isNull);
@@ -261,17 +261,17 @@ void main() {
     test('reaches handlers, allEventStream and error envelopes', () async {
       final bus = EventBus(
           observability: const ObservabilityConfig(enabled: true));
-      final sub = bus.subscribeEvents<int>(handler: (dto, lastData) async {
+      final sub = bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
         if (dto.data == 0) throw StateError('boom');
         return dto.correlationId;
       });
 
-      expect(await bus.request<int>(1, correlationId: 'request-1'),
+      expect(await bus.requestLegacy<int>(1, correlationId: 'request-1'),
           'request-1');
 
       final errorFuture = bus.errors.first;
       await expectLater(
-        bus.request<int>(0, correlationId: 'request-2'),
+        bus.requestLegacy<int>(0, correlationId: 'request-2'),
         throwsStateError,
       );
       final error = await errorFuture.timeout(const Duration(seconds: 1));
@@ -281,7 +281,7 @@ void main() {
       final all = bus.allEventStream.listen((event) {
         seen.add(event.$1.correlationId);
       });
-      bus.fire<int>(2, correlationId: 'fire-1');
+      bus.fireLegacy<int>(2, correlationId: 'fire-1');
       await pump();
       expect(seen, contains('fire-1'));
 
@@ -297,7 +297,7 @@ void main() {
       );
       await iso.waitInit;
 
-      expect(await iso.request<String>('x', correlationId: 'iso-1'), 'iso-1');
+      expect(await iso.requestLegacy<String>('x', correlationId: 'iso-1'), 'iso-1');
 
       final snapshot = iso.metrics.snapshot();
       final topic =

@@ -11,7 +11,8 @@ its operators. The isolation APIs are VM-only; see `EventBusCapabilities` below.
 ## Contents
 
 * [Typedefs](#typedefs)
-* [Topic](#topic) / [TopicImpl](#topicimpl) / [TopicPattern](#topicpattern)
+* [EventAddress](#eventaddress) / [EventPattern](#eventpattern)
+* [EventKey](#eventkeyt) / [EventPatternKey](#eventpatternkeyt) / [EventSelector](#eventselectort)
 * [EventDTO](#eventdto) / [EventDTOImpl](#eventdtoimpl)
 * [EventNode](#eventnode) / [EventSubscription](#eventsubscription)
 * [EventBus](#eventbus) / [EventBusImpl](#eventbusimpl) / [EventBusMixin](#eventbusmixin)
@@ -35,159 +36,172 @@ typedef Node<T> = EventNode<T>;
 
 typedef WorkerInit = FutureOr<void> Function(EventBus bus, Object? initialData);
 typedef WorkerKeySelector = Object? Function(EventDTO dto);
-typedef MetricKeyBuilder = String Function(Topic topic);
+typedef MetricKeyBuilder = String Function(String address);
 typedef EventBusErrorFilter = bool Function(EventBusError error);
 
 typedef fnInitLayer = FutureOr<void> Function(Layer layer, Object? initialData);
 typedef LoggerHandler = void Function(EventDTO dto, bool hasDelivered);
 ```
 
-## Topic
+## EventAddress
 
-`abstract class Topic` — the event address. The format, the separator and the equality rules are
-in [01-architecture.md](01-architecture.md#1-topic--the-event-address).
-
-```dart
-// Getters
-String get type;                        // the first token: 'String'
-List<String> get paths;                 // the path tokens: ['a', 'b']; empty when there is none
-String get separator;                   // joins type and paths: '.' by default
-String get topic;                       // the routing key: 'String.a.b'
-
-// Creation
-static Topic create<T>({List<String>? paths, String separator = '.'});
-factory Topic.fromParametr({Type? type, List<String>? paths, String separator = '.'});
-factory Topic.parse(String str, {String separator = '.'});   // == fromString
-factory Topic.fromString(String topic, {String separator = '.'});
-
-Topic copy({List<String>? paths, String? separator});   // the type is kept
-String toString();                                      // returns topic
-```
+`final class EventAddress` — the event identity. The format, the grammar and the equality rules
+are in [01-architecture.md](01-architecture.md#1-eventaddress-and-keys--the-event-identity).
 
 ```dart
-Topic.create<String>();                              // String
-Topic.create<String>(paths: ['a', 'b']);             // String.a.b
-Topic.create<String>(paths: ['a', 'b'], separator: '/');  // String/a/b
-Topic.parse('String.a.b');                           // type String, paths ['a', 'b']
-Topic.fromParametr(type: MyEvent, paths: ['p']);     // MyEvent.p
+EventAddress(String value);          // validates and throws EventBusException
+factory EventAddress.parse(String value);
+
+static const String separator = '.';        // the grammar rule, not a setting
+static const String singleWildcard = '*';   // one token
+static const String tailWildcard = '>';     // one or more trailing tokens
+
+final String value;                 // the identity string
+List<String> get tokens;            // split on '.'; unmodifiable
 ```
 
-The type token is normalised: `<` → `(`, `>` → `)`, commas/whitespace → `_`, repeated `_`
-collapsed. `List<int>` therefore becomes `List(int)`.
-
-**Equality is by `topic`** — the type, the separator and the paths in the string form.
-`arguments` live on the [EventDTO](#eventdto) and are not part of the address, so two calls that
-differ only in `arguments` reach the same handler. The comparison is `other is Topic`, so any
-implementation with the same routing key is equal.
-
-`Topic.parse` splits the string by `separator` and rejects an empty type with an
-`EventBusException` (`Topic.parse('')`, `Topic.parse('.a')`). `Topic.fromParametr` throws the same
-exception when `type` is null. `copy` keeps the type and replaces only what is passed.
-
-## TopicImpl
-
-`class TopicImpl implements Topic` — the only implementation, returned by all factories.
+An exact address rejects an empty string, empty tokens (`a..b`, `.a`, `a.`) and wildcards.
+`EventAddress` compares by `value`. `arguments` live on the [EventDTO](#eventdto) and are not part
+of the address, so two calls that differ only in `arguments` reach the same handler.
 
 ```dart
-TopicImpl(String type, {String separator = '.', List<String> paths = const []});
-
-String get topic;          // 'String.a.b', or just the type when paths is empty
-Topic copy({List<String>? paths, String? separator});
-bool operator ==(Object other);   // other is Topic && other.topic == topic
-int get hashCode;                 // Object.hashAll([topic])
-String toString();                // returns topic
+EventAddress('orders.placed.v1').tokens;   // ['orders', 'placed', 'v1']
+EventAddress('orders.*');                  // throws EventBusException
 ```
 
-`paths` is held as passed, not copied. Do not mutate the list you handed in: the routing key and
-the hash are computed from it on every access, so a mutation changes the address of a topic that
-is already a key in the node maps.
+## EventPattern
 
-## TopicPattern
-
-`abstract final class TopicPattern` — the canonical local wildcard rules. Both the bus and every
-transport use them; a transport only maps the symbols to its broker's grammar.
+`final class EventPattern` — a wildcard pattern over addresses.
 
 ```dart
-static const String single = '*';   // exactly one path token
-static const String tail = '>';     // one or more trailing tokens, must be last
+EventPattern(String value);                 // validates and throws EventBusException
+factory EventPattern.parse(String value);
 
-static bool isPattern(Topic topic);          // any path contains '*' or '>'
-static void validate(Topic topic);           // '>' last, wildcard is a whole token
-static bool matches(Topic pattern, Topic topic);
-static int specificity(Topic pattern);       // number of literal path tokens
+final String value;
+List<String> get tokens;                    // unmodifiable
+bool get hasWildcard;
+int get specificity;                        // number of literal tokens
+bool matches(EventAddress address);
+
+static const String singleWildcard = '*';
+static const String tailWildcard = '>';
 ```
+
+A wildcard must occupy a whole token (`sen*or` is rejected); `>` must be the last token. A
+pattern cannot be an exact address: `EventPattern('orders.placed')` is valid syntactically, but it
+matches only that address and should usually be an `EventKey` instead.
 
 ```dart
-final pattern = Topic.fromString('int.sensor.*');
-TopicPattern.matches(pattern, Topic.fromString('int.sensor.temp'));   // true
-TopicPattern.matches(pattern, Topic.fromString('int.sensor.a.b'));    // false
-TopicPattern.matches(Topic.fromString('int.>'), Topic.fromString('int.sensor')); // true
-TopicPattern.matches(Topic.fromString('int.>'), Topic.fromString('int'));        // false
+EventPattern('sensor.*').matches(EventAddress('sensor.temp'));   // true
+EventPattern('sensor.*').matches(EventAddress('sensor.a.b'));    // false
+EventPattern('sensor.>').matches(EventAddress('sensor.a.b'));    // true
 ```
 
-A wildcard must occupy a whole token (`sen*or` is rejected by `validate`). Only the paths can
-contain wildcards; the type token is always concrete. `specificity` is used to pick the most
-specific handler or pattern node; ties keep insertion order.
+## EventKey<T>
+
+`final class EventKey<T> extends EventSelector<T>` — an exact address plus the static type.
+
+```dart
+EventKey(String address);
+EventKey.fromAddress(EventAddress address);
+
+final EventAddress address;
+Type get type;              // captured from T; stable under minification
+bool accepts(Object? data); // data is T
+bool operator ==(Object other);   // (address, type)
+int get hashCode;                 // Object.hash(address, type)
+String toString();                // address.value
+```
+
+The type is not part of the address. Two keys with the same address and different types are
+different nodes with separate `currentData`.
+
+## EventPatternKey<T>
+
+`final class EventPatternKey<T> extends EventSelector<T>` — a wildcard pattern plus the type.
+
+```dart
+EventPatternKey(String pattern);
+EventPatternKey.fromPattern(EventPattern pattern);
+
+final EventPattern pattern;
+Type get type;
+bool matches(EventAddress address);
+bool accepts(Object? data); // data is T
+bool operator ==(Object other);   // (pattern, type)
+int get hashCode;                 // Object.hash(pattern, type)
+String toString();                // pattern.value
+```
+
+## EventSelector<T>
+
+`sealed class EventSelector<T>` — the base of `EventKey<T>` and `EventPatternKey<T>`. A bus method
+that can take a pattern (`listen`, `subscribe`, `subscribeEvents`, `have*`) accepts an
+`EventSelector<T>`; `fire`, `request` and `currentData` require an `EventKey<T>`.
+
+```dart
+Type get type;
+bool accepts(Object? data) => data is T;
+```
 
 ## EventDTO
 
 ```dart
 abstract class EventDTO<T> {
-  Topic get topic;
+  EventKey<T> get key;
+  String get address;                    // key.address.value
   T get data;
   Map<String, String>? get arguments;    // parameters of this call; not part of the address
   String? get correlationId;             // optional cross-boundary correlation
 
-  EventDTO<T> copyWith({T? data, Topic? topic,
+  EventDTO<T> copyWith({T? data, EventKey<T>? key,
       Map<String, String>? arguments, String? correlationId});
 
-  static EventDTO<T> create<T>(T data, {List<String>? paths, String? separator,
-      Map<String, String>? arguments, String? correlationId});
-
-  factory EventDTO(T data, {Topic? topic, List<String>? paths, String? separator,
-      Map<String, String>? arguments, String? correlationId});
+  static EventDTO<T> create<T>(T data, {EventKey<T>? key, ...}); // compatibility
+  factory EventDTO.withKey(EventKey<T> key, T data,
+      {Map<String, String>? arguments, String? correlationId});
 
   Map<String, dynamic> toJson();
 }
 ```
 
-The factory creates `EventDTOImpl`. If `topic` is not passed, it is built from `T` and the
-`paths`/`separator` parameters; `separator` defaults to `'.'` when not given.
-
-There is no completer: a handler returns its result, `request` awaits it, and `fire` has no
-result channel. `arguments` and `correlationId` reach the handler on the DTO it is given, including
-across an isolate and a transport.
+New code uses `EventDTO.withKey(key, data, ...)`. There is no completer: a handler returns its
+result, `request` awaits it, and `fire` has no result channel. `arguments` and `correlationId`
+reach the handler on the DTO it is given, including across an isolate and a transport.
 
 ## EventDTOImpl
 
 ```dart
 class EventDTOImpl<T> implements EventDTO<T> {
-  EventDTOImpl(Topic topic, T data, {Map<String, String>? arguments, String? correlationId});
+  EventDTOImpl.withKey(EventKey<T> key, T data,
+      {Map<String, String>? arguments, String? correlationId});
 
-  Topic topic;
+  EventKey<T> key;
   T data;
   Map<String, String>? arguments;
   final String? correlationId;
 
   static EventDTO<T> fromJson<T>(Map<String, dynamic> json,
-      {T Function(String topic, dynamic data)? dataConverter});
+      {EventKey<T>? key,
+       T Function(String address, dynamic data)? dataConverter});
 
-  Map<String, dynamic> toJson();     // {'topic': ..., 'data': ..., maybe 'correlationId'}
-  bool operator ==(Object other);    // by (topic, data)
-  int get hashCode;                  // Object.hashAll([topic, data])
-  String toString();                 // 'EventDTO(<topic>, data: <data>)'
+  Map<String, dynamic> toJson();     // {'topic': address, 'data': ..., maybe 'correlationId'}
+  bool operator ==(Object other);    // by (address, data)
+  int get hashCode;                  // Object.hash(address, data)
+  String toString();                 // 'EventDTO(<address>, data: <data>)'
 }
 ```
 
-`toJson` returns the data **as is**, without `jsonEncode`: encoding is the caller's
-job, so an arbitrary object in `data` no longer breaks either `toJson` or `toString`.
-`arguments` are **not** part of the JSON form; `correlationId` is included when non-null and
-restored by `fromJson`. Carry `arguments` in your own envelope if a wire format has to preserve them.
+`toJson` returns the data **as is**, without `jsonEncode`: encoding is the caller's job, so an
+arbitrary object in `data` no longer breaks either `toJson` or `toString`. `arguments` are **not**
+part of the JSON form; `correlationId` is included when non-null and restored by `fromJson`.
+`fromJson` accepts either the `address` field or the legacy `topic` field as the address. Carry
+`arguments` in your own envelope if a wire format has to preserve them.
 
 ## EventNode
 
-`abstract class EventNode<T>` — the topic cell: the current value, the listener stream and the
-subscriptions of one topic. A handler is a capability of an `EventSubscription`, not a node-level
+`abstract class EventNode<T>` — one `(address, Type)` cell: the current value, the listener stream
+and the subscriptions of that key. A handler is a capability of an `EventSubscription`, not a node-level
 registration.
 
 ```dart
@@ -294,7 +308,7 @@ Delivery:
   Requests are dispatched to a free slot or queued up to `requestQueueCapacity`; beyond that the
   bus throws `BusyException`. `pause()` stops request dispatch; in-flight handlers continue.
 * `cancel()` clears the buffers, fails queued requests with `NoHandlerException`, and closes the
-  `.stream` view. `onDone` is called only when the node is disposed (`dispose`, `removeTopic`).
+  `.stream` view. `onDone` is called only when the node is disposed (`dispose`, `remove`).
 * Listener errors go to the subscription-level `onError` and to `bus.errors` (kind `listener`);
   `cancelOnError` also cancels the subscription. `capturePayloads` puts the event into the error
   envelope.
@@ -311,7 +325,7 @@ class CancelToken {
 }
 
 class BusyException extends EventBusException;          // no slot / queue room / all paused
-class RequestTimeoutException extends EventBusException; // topic + timeout
+class RequestTimeoutException extends EventBusException; // address + timeout
 class RequestCanceledException extends EventBusException;
 ```
 
@@ -323,13 +337,11 @@ cancellation wins.
 The abstract bus interface. The factory always returns `EventBusImpl`.
 
 ```dart
-factory EventBus({bool isModelBus = false, ObservabilityConfig? observability,
-                  String separator = '.'});
+factory EventBus({bool isModelBus = false, ObservabilityConfig? observability});
 
 bool get isModelBus;
 bool get isObservable;                         // observabilityConfig.enabled
 EventBusMetrics get metrics;                   // snapshot / changes
-String get defaultTopicPathSeparator;          // '.'; the fallback for every address parameter
 Future<void> dispose();                        // idempotent; after it the bus throws StateError
 bool get isDisposed;
 Stream<(EventDTO, bool)> get allEventStream;   // (event, whether a listener accepted it)
@@ -337,18 +349,17 @@ Stream<EventBusError> get errors;              // bus failures as data
 List<EventBusError> get recentErrors;          // bounded (100)
 int get suppressedErrors;                      // rate-limited errors
 
-bool fire<T>(T data, {List<String>? paths, String? separator,
-                      Map<String, String>? arguments, String? correlationId});
-Future<dynamic> request<T>(T data, {List<String>? paths, String? separator,
-                                    Map<String, String>? arguments, Duration? timeout,
-                                    CancelToken? cancelToken, String? correlationId});
+bool fire<T>(EventKey<T> key, T data,
+    {Map<String, String>? arguments, String? correlationId});
+Future<dynamic> request<T>(EventKey<T> key, T data,
+    {Map<String, String>? arguments, Duration? timeout,
+     CancelToken? cancelToken, String? correlationId});
 
-Stream<T> listen<T>({List<String>? paths, String? separator});
-StreamSubscription<T> subscribe<T>({List<String>? paths, String? separator,
-                                    void Function(T e)? onData, Function? onError,
-                                    void Function()? onDone, bool? cancelOnError});
-EventSubscription<T> subscribeEvents<T>({
-  List<String>? paths, String? separator,
+Stream<T> listen<T>(EventSelector<T> selector);
+StreamSubscription<T> subscribe<T>(EventSelector<T> selector,
+    {void Function(T e)? onData, Function? onError,
+     void Function()? onDone, bool? cancelOnError});
+EventSubscription<T> subscribeEvents<T>(EventSelector<T> selector, {
   EventCallback<T>? onEvent,            // listener
   Handler<T>? handler,                  // request responder
   T? initialData,
@@ -361,12 +372,15 @@ EventSubscription<T> subscribeEvents<T>({
   void Function()? onDone,
   bool cancelOnError = false,
 });
-T? currentData<T>({List<String>? paths, String? separator});
-bool removeTopic<T>({List<String>? paths, String? separator});
 
-bool haveHandler<T>({List<String>? paths, String? separator});
-bool haveAvailableHandler<T>({List<String>? paths, String? separator});
-bool haveListener<T>({List<String>? paths, String? separator});
+T? currentData<T>(EventKey<T> key);
+bool remove<T>(EventKey<T> key);
+bool removePattern<T>(EventPatternKey<T> key);
+bool removeAddress(EventAddress address);
+
+bool haveHandler<T>(EventSelector<T> selector);
+bool haveAvailableHandler<T>(EventSelector<T> selector);
+bool haveListener<T>(EventSelector<T> selector);
 ```
 
 `fire` returns true when at least one listener accepted the event, a model bus stored it, or a
@@ -376,47 +390,37 @@ listener/model interest; in both cases a handler subscription alone does not mak
 
 `request` throws `NoHandlerException` when no handler matches, `BusyException` when handlers exist
 but none has capacity, `RequestTimeoutException` on timeout and `RequestCanceledException` when its
-`CancelToken` is cancelled. Wildcard paths are rejected with `EventBusException`.
-`currentData` reads the exact node, or the pattern node when the address contains wildcards.
-`correlationId` is optional; it reaches handlers and crosses isolates and transports.
+`CancelToken` is cancelled. It requires an `EventKey<T>`; an `EventPatternKey` does not compile.
+`currentData` reads only the exact node of that key. `correlationId` is optional; it reaches
+handlers and crosses isolates and transports.
 
-`removeTopic` removes the node and forgets `currentData` even on a model bus and even for a
-transport node with a `KeepAliveNode` pin (the broker subscription is cancelled). It returns
-whether a node was removed. Active listeners receive `done`; handler subscriptions are cancelled
-with the node. A model bus recreates the node on the next `fire`, `request` or `listen`.
+`remove(key)` removes one type node; `removePattern(patternKey)` removes one pattern type node;
+`removeAddress(address)` removes every type node at an exact address. They forget `currentData`
+even on a model bus and even for a transport node with a `KeepAliveNode` pin (the broker
+subscription is cancelled). Each returns whether something was removed. Active listeners receive
+`done`; handler subscriptions are cancelled with the node. A model bus recreates the node on the
+next `fire`, `request` or `listen`.
 
-Every method that takes an address resolves `separator ?? defaultTopicPathSeparator`. The fallback
-is fixed when the bus is created:
+`haveListener`, `haveHandler` and `haveAvailableHandler` accept an exact or a pattern selector.
+A concrete listener check also counts a matching pattern listener; `haveHandler` counts a paused
+handler; `haveAvailableHandler` answers whether a request could be accepted now.
 
-```dart
-final bus = EventBus(separator: '/');
-bus.subscribeEvents<int>(paths: ['a', 'b'], handler: ...);   // int/a/b
-bus.fire<int>(1, paths: ['a', 'b']);                         // int/a/b — delivered
-```
-
-`defaultTopicPathSeparator` is a **final field** on `EventBusImpl`; it has no setter, so a bus
-cannot change its addressing after nodes exist. `requestQueueCapacity` remains a mutable field on
-`EventBusMixin`.
-
-After `dispose` the `fire`/`request`/`listen`/`subscribe`/`subscribeEvents`/`removeTopic` methods
-throw `StateError`.
+After `dispose` the public bus methods throw `StateError`.
 
 ## EventBusImpl
 
 ```dart
 class EventBusImpl with EventBusMixin, /* internal dispatch mixin */ {
   EventBusImpl(bool isModelBus,
-      {ObservabilityConfig observability = ObservabilityConfig.disabled,
-      String separator = '.'});
+      {ObservabilityConfig observability = ObservabilityConfig.disabled});
   bool get isModelBus;
   ObservabilityConfig get observabilityConfig;
-  String get defaultTopicPathSeparator;       // final, set by `separator`
 }
 ```
 
-All behavior comes from the mixins; the class's own code only stores the model flag, the
-observability config and the final separator. The dispatch mixin is private: request resolution,
-tier selection, round-robin and the request lifecycle.
+All behavior comes from the mixins; the class's own code only stores the model flag and the
+observability config. The dispatch mixin is private: request resolution, tier selection,
+round-robin and the request lifecycle.
 
 ## EventBusMixin
 
@@ -434,31 +438,33 @@ int get suppressedErrors;
 void reportError(EventBusError error);          // transport/isolate seam
 
 // Hooks for transports:
-EventNode<T> createNode<T>({required Topic topic, T? currentData});
-bool shouldCreateNodeOnSend(Topic topic);       // default: isModelBus
+EventNode<T> createNodeForKey<T>({required EventKey<T> key, T? currentData});
+EventNode<T> createPatternNodeForKey<T>({required EventPatternKey<T> key, T? currentData});
+bool shouldCreateNodeOnSendKey<T>(EventKey<T> key);   // default: isModelBus
 
-bool removeTopic<T>({List<String>? paths, String? separator});   // explicit eviction
+bool remove<T>(EventKey<T> key);                // explicit eviction
 Future<void> dispose();                         // idempotent; closes allEventStream and the nodes
 ```
 
-Inside there are `_eventsMap` (concrete topics), `_patternMap` (topics with `*`/`>`), a
-broadcast `_allEventStream` and a broadcast `_errorsController`. Automatic cleanup is private:
-`_removeNode` removes the node from both maps and disposes it only if it has no legacy stream
-listeners, no subscriptions (listener or handler), no `KeepAliveNode` pin, and the bus is not
-model. A map entry is removed only when it still holds the same node instance, so a late
-cancellation of an already removed node cannot delete its replacement.
+Inside there are `_eventsMap` (`Map<EventAddress, Map<Type, EventNode>>`), `_patternMap`
+(`Map<EventPattern, Map<Type, EventNode>>`), a broadcast `_allEventStream` and a broadcast
+`_errorsController`. Automatic cleanup is private: `_removeNode` removes the node from its bucket
+and disposes it only if it has no legacy stream listeners, no subscriptions (listener or handler),
+no `KeepAliveNode` pin, and the bus is not model. A map entry is removed only when it still holds
+the same node instance, so a late cancellation of an already removed node cannot delete its
+replacement.
 
-`removeTopic` is the explicit counterpart: it bypasses the model-bus rule and the `KeepAliveNode`
-pin, removes the node from whichever map holds it, and disposes it (cancelling handler
+`remove`/`removePattern`/`removeAddress` are the explicit counterparts: they bypass the model-bus
+rule and the `KeepAliveNode` pin, remove the node(s), and dispose them (cancelling handler
 subscriptions too). `EventBusIsolate` forwards the call to the other side of the bridge.
 
-`createNode` and `shouldCreateNodeOnSend` are the transport seam: a transport bus overrides them
-to create a broker-backed node for topics it knows and to create one on `fire` when a serializer
-or deserializer is registered. Local buses keep the defaults.
+`createNodeForKey`, `createPatternNodeForKey` and `shouldCreateNodeOnSendKey` are the transport
+seam: a transport bus overrides them to create a broker-backed node for keys it knows and to
+create one on `fire` when a codec is registered. Local buses keep the defaults.
 
-Request resolution order is exact topic → most specific matching pattern; competition happens
-only inside the resolved tier. `handlerTopicFor` and `handleIncomingRequest` are public because
-transports and isolate bridges live outside this library.
+Request resolution order is exact bucket → most specific matching pattern; competition happens
+only inside the resolved tier. `handleIncomingRequest` is public because transports and isolate
+bridges live outside this library.
 
 ## EventBusError
 
@@ -477,18 +483,22 @@ class EventBusError {
     required EventBusErrorKind kind,
     required Object error,
     EventBusErrorSource source = EventBusErrorSource.core,
-    String? topic,
+    String? topic,                    // legacy spelling
+    String? address,                  // preferred; wins when both are passed
     EventDTO? event,                  // null unless payload capture is enabled
     String? correlationId,            // when the envelope came from a request DTO
     StackTrace? stackTrace,
     Map<String, String> context = const {},
     DateTime? timestamp,
   });
+
+  String? get address => topic;       // the event address
+  final String? topic;                // compatibility alias
 }
 ```
 
 The stream never carries stream errors: a listener without `onError` does not receive unhandled
-errors for bus failures. Rate limit: 10 per `(kind, topic)` per second; the rest increments
+errors for bus failures. Rate limit: 10 per `(kind, address)` per second; the rest increments
 `suppressedErrors`. `recentErrors` keeps the last 100.
 
 ## EventBusErrorMonitor
@@ -514,8 +524,8 @@ Future<void> dispose();
 ```
 
 `EventBusErrorSnapshot` exposes `total`, `suppressed`, `byKind`, `byTopic` (key `__none__` for an
-error without a topic) and `recent`. The monitor filters before counting; each bus keeps its own
-per-`(kind, topic)` limit from ADR-0004.
+error without an address) and `recent`. The monitor filters before counting; each bus keeps its own
+per-`(kind, address)` limit from ADR-0004.
 
 ## EventBusMetrics / ObservabilityConfig
 
@@ -546,9 +556,9 @@ abstract interface class EventBusMetricsExporter {
 
 `EventBusMetricsSnapshot` has `timestamp`, `fired`, `delivered`, `dropped`,
 `droppedMetricSeries`, `topics` (`TopicMetricsSnapshot`) and `subscriptions`
-(`SubscriptionMetricsSnapshot`). Each topic has event/request counters and dispatch/request
+(`SubscriptionMetricsSnapshot`). Each address has event/request counters and dispatch/request
 latency; each subscription has buffer/queue depth, in-flight, concurrency and queue-wait latency.
-The metric key defaults to `Topic.type`; `cardinalityLimit` routes new keys to `__other__`.
+The metric key defaults to the address string; `cardinalityLimit` routes new keys to `__other__`.
 `sampleRate` controls histogram samples only; counters are exact. See
 [12](12-observability.md).
 
@@ -561,7 +571,6 @@ class EventBusIsolate extends EventBusImpl {
     Object? initialData,
     bool isModelBus = false,   // model bus on both the main side and in the worker
     ObservabilityConfig observability = ObservabilityConfig.disabled,
-    String separator = '.',    // used on both sides of the bridge
   });
 
   final FutureOr<void> Function(EventBus isolateBu, Object? initialData) onInit;
@@ -570,13 +579,13 @@ class EventBusIsolate extends EventBusImpl {
   bool get isDisposed;
 
   @override
-  bool fire<T>(T data, {List<String>? paths, String? separator,
-                        Map<String, String>? arguments, String? correlationId}); // outbound only
+  bool fire<T>(EventKey<T> key, T data,
+      {Map<String, String>? arguments, String? correlationId}); // outbound only
 
   @override
-  Future<dynamic> request<T>(T data, {List<String>? paths, String? separator,
-                                      Map<String, String>? arguments, Duration? timeout,
-                                      CancelToken? cancelToken, String? correlationId});
+  Future<dynamic> request<T>(EventKey<T> key, T data,
+      {Map<String, String>? arguments, Duration? timeout,
+       CancelToken? cancelToken, String? correlationId});
 
   Future<bool> restart();                                     // new worker, same main-side bus
   Future<bool> ping({Duration timeout = const Duration(seconds: 2)}); // liveness check
@@ -676,7 +685,6 @@ class WorkerPool {
     Object? Function(int index)? initialDataFor,
     bool isModelBus = false,
     WorkerKeySelector? keySelector,
-    String separator = '.',     // fallback for calls and every worker bus
   });
 
   Future<void> get waitInit;
@@ -688,11 +696,11 @@ class WorkerPool {
   Stream<EventBusError> get errors;
   WorkerPoolMetrics get metrics;
 
-  bool fire<T>(T data, {List<String>? paths, String? separator,
-      Map<String, String>? arguments, String? correlationId});
-  Future<dynamic> request<T>(T data, {List<String>? paths, String? separator,
-      Map<String, String>? arguments, Duration? timeout,
-      CancelToken? cancelToken, String? correlationId});
+  bool fire<T>(EventKey<T> key, T data,
+      {Map<String, String>? arguments, String? correlationId});
+  Future<dynamic> request<T>(EventKey<T> key, T data,
+      {Map<String, String>? arguments, Duration? timeout,
+       CancelToken? cancelToken, String? correlationId});
   Future<void> close();
   Future<void> dispose();
 }
@@ -746,8 +754,10 @@ mixin class FSM<T> {
   T get lastState;
 
   void initFSM(EventBus bus, T currentState, {T? lastState});
-  void addFSMTransition<E>(T fromState, T toState, {FSMHandler<T, E>? handler,
-      FSMFilter<T, E>? filter, List<String>? eventPaths});
+  void addFSMTransition<E>(T fromState, T toState, {
+      required EventSelector<E> selector,
+      FSMHandler<T, E>? handler,
+      FSMFilter<T, E>? filter});
   void changeState(T newState);
   @Deprecated('Use changeState') void changeStateByEvent(T newState);
 
@@ -756,10 +766,10 @@ mixin class FSM<T> {
 }
 ```
 
-`addFSMTransition` registers the transition under `Topic.create<E>(paths: eventPaths)`, so the
-event has to be published with the same type and paths to match. `arguments` never take part in
-the lookup. `eventPaths` are exact: wildcard transitions are not matched. Both `fire` and
-`request` feed `allEventStream`, so either can drive a transition.
+`addFSMTransition` registers the transition under an `EventSelector<E>`: an exact `EventKey<E>` or
+an `EventPatternKey<E>`. The payload must be an `E` at delivery time. An exact selector beats a
+pattern; among patterns the most specific wins. `arguments` never take part in the lookup. Both
+`fire` and `request` feed `allEventStream`, so either can drive a transition.
 
 Details and transition rules — [04-fsm.md](04-fsm.md).
 
@@ -773,10 +783,9 @@ mixin class Scope<T> {
   EventBus? get scopeBus;     // throws EventBusException if not initialized
   (T?, Map<String, String>?)? get lastCall;   // (data, arguments)
 
-  Future<void> initScope(EventBus bus, {
+  Future<void> initScope(EventBus bus, EventKey<T> key, {
       T? initialData,
       bool initialDataNeedExecute = true,
-      List<String>? paths,
       int maxLenForUndo = 10,       // history depth; undo needs >= 2
       void Function(T newData)? onUpdate});
   Future<dynamic> call(T newData, {Map<String, String>? arguments});
@@ -795,22 +804,22 @@ subscription; `disposeScope()` cancels only the scope's own subscription (there 
 
 ```dart
 abstract class Command<T> {
-  factory Command(EventBus busBinded, {List<String>? paths, int maxLen = 10});
+  factory Command(EventBus busBinded, EventKey<T> key, {int maxLen = 10});
 
   Future<dynamic> execute(T data, {Map<String, String>? arguments});
   Future<dynamic> undo();                 // publishes the previous value; null if there is nothing to roll back
   EventBus get bindedBus;
+  EventKey<T> get key;
   int get queueLength;                    // history depth
-  List<String>? get paths;
   (T data, Map<String, String>? arguments)? get lastCall;
 }
 
 class CommandImpl<T> implements Command<T> {
-  CommandImpl(EventBus bus, {List<String>? paths, int maxLen = 10});
+  CommandImpl(EventBus bus, EventKey<T> key, {int maxLen = 10});
 }
 ```
 
-`execute` calls `request` when the bus has a handler for the topic, otherwise `fire` and returns
+`execute` calls `request` when the bus has a handler for the key, otherwise `fire` and returns
 `null`. `maxLen` is the call history depth; values less than 1 are clamped to 1. For a meaningful
 `undo` you need at least two calls in the history, so the practical minimum is 2.
 `maxLen` is a field of `CommandImpl`, not a member of the `Command<T>` interface.
@@ -827,8 +836,8 @@ mixin class EventBusLogger {
 
 `add` subscribes to the `allEventStream` of the given bus; a repeated `add` for the same bus returns
 `false`. When `allEventStream` closes, the subscription is removed automatically (`onDone`).
-The default handler prints `Event:<topic> hasListeners <bool>`, where `<topic>` is the routing key
-and the boolean means "the event reached a node".
+The default handler prints `Event:<address> hasListeners <bool>`, where `<address>` is the event
+address and the boolean means "the event reached a node".
 
 ## EventBusCapabilities
 
@@ -853,18 +862,22 @@ class EventBusException implements Exception {
 }
 
 class NoHandlerException extends EventBusException {
-  NoHandlerException(String topic);   // 'no request handler for "<topic>"'
-  final String topic;
+  NoHandlerException(String address);   // 'no request handler for "<address>"'
+  String get address;                   // same string as `topic`
+  final String topic;                   // compatibility alias
 }
 
 class BusyException extends EventBusException;          // handlers exist, no capacity
-class RequestTimeoutException extends EventBusException; // topic + timeout
-class RequestCanceledException extends EventBusException; // topic
+class RequestTimeoutException extends EventBusException; // address + timeout
+class RequestCanceledException extends EventBusException; // address
 ```
 
-`EventBusException` is used in `Topic` (an address that cannot be parsed or built),
+`NoHandlerException`, `BusyException`, `RequestTimeoutException` and `RequestCanceledException`
+all expose `address`; `topic` remains as a compatibility alias with the same string.
+
+`EventBusException` is used in `EventAddress`/`EventPattern` (an address that cannot be parsed or built),
 `Scope`/`Command` (access before initialization), `EventBusIsolate` (exchange problems), and for
-wildcard paths passed to `fire`/`request`. `NoHandlerException` is thrown by `request` when no
+a pattern passed where `fire`/`request` need an exact key does not compile. `NoHandlerException` is thrown by `request` when no
 handler accepts the value; `BusyException` when handlers exist but none has capacity;
 `RequestTimeoutException`/`RequestCanceledException` cover the two cancellation paths. All extend
 `EventBusException`. `StateError` is thrown when a closed (`disposed`) bus is used or an isolate API
@@ -886,7 +899,7 @@ is unavailable — that is a usage error, not a domain error.
 
 ## What is missing from the API
 
-* no wildcard paths in `fire`/`request` — only listeners, nodes and handlers may use patterns;
+* no wildcard keys in `fire`/`request` — only listeners, nodes and handlers may use patterns;
 * no regular expressions or partial-token wildcards: `*` and `>` are whole tokens;
 * no event replay for new subscribers — use `currentData` and the model bus for that;
 * no handler priorities: subscriptions on the same tier compete round-robin; the exact tier never
@@ -895,7 +908,7 @@ is unavailable — that is a usage error, not a domain error.
   `WorkerPool.maxInFlightPerWorker` for flow control;
 * `allEventStream` is a broadcast stream with no buffer; attach a listener before publishing if you
   need every event;
-* `listen`/`subscribe` are a compatibility facade over the raw node stream; they do not use
-  `EventSubscription` (no bounded buffer, overflow policy, counters or error routing). They are
-  removed in 5.0.0; use `subscribeEvents` for those controls;
+* `listen`/`subscribe` are the raw node-stream view; they do not use `EventSubscription` (no
+  bounded buffer, overflow policy, counters or error routing). Use `subscribeEvents` when the
+  consumer needs those controls;
 * isolate APIs are VM-only; the web has the local bus, observability and the transport seam.

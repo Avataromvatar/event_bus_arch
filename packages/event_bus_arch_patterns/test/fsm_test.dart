@@ -37,7 +37,7 @@ void main() {
       final bus = EventBus();
       final machine = TestMachine(bus);
 
-      bus.fire(EventA());
+      bus.fireLegacy(EventA());
       await pumpEventQueue();
 
       expect(machine.state, TestState.b);
@@ -49,13 +49,13 @@ void main() {
     test('dispose unsubscribes the machine from the bus', () async {
       final bus = EventBus();
       final machine = TestMachine(bus);
-      bus.fire(EventA());
+      bus.fireLegacy(EventA());
       await pumpEventQueue();
       expect(machine.state, TestState.b);
 
       machine.dispose();
       machine.changeState(TestState.a);
-      bus.fire(EventA());
+      bus.fireLegacy(EventA());
       await pumpEventQueue();
 
       expect(machine.state, TestState.a);
@@ -68,7 +68,7 @@ void main() {
       final machine = TestMachine(bus);
       machine.initFSM(bus, TestState.a);
 
-      bus.fire(EventA());
+      bus.fireLegacy(EventA());
       await pumpEventQueue();
 
       expect(machine.log.length, 1);
@@ -89,10 +89,10 @@ void main() {
       machine.initFSM(bus, TestState.a);
 
       machine.changeState(TestState.a);
-      bus.fire(EventB());
+      bus.fireLegacy(EventB());
       await Future<void>.delayed(const Duration(milliseconds: 5));
-      bus.fire(EventB());
-      bus.fire(EventB());
+      bus.fireLegacy(EventB());
+      bus.fireLegacy(EventB());
       // the transition handler waits 30 ms of real time
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
@@ -115,9 +115,9 @@ void main() {
           throw StateError('handler failed');
         });
 
-        bus.fire(EventA());
+        bus.fireLegacy(EventA());
         await pumpEventQueue();
-        bus.fire(EventB());
+        bus.fireLegacy(EventB());
         await pumpEventQueue();
         await bus.dispose();
       }, (error, stackTrace) => errors.add(error));

@@ -154,16 +154,16 @@ void main() {
           exact: {EventAddress('orders.placed'): orderCodec()}));
       final key = EventKey<Order>('orders.placed');
       final received = <Order>[];
-      final sub = bus.subscribeEventsKey<Order>(key, onEvent: received.add);
+      final sub = bus.subscribeEvents<Order>(key, onEvent: received.add);
 
-      expect(bus.fireKey(key, Order('A-1')), isTrue);
+      expect(bus.fire(key, Order('A-1')), isTrue);
       await pumpEventQueue();
 
       expect(connection.publishes, hasLength(1));
       expect(connection.publishes.single.subject, 'orders.placed');
       expect(utf8.decode(connection.publishes.single.data), 'A-1');
       expect(received.single.id, 'A-1');
-      expect(bus.currentDataKey(key)?.id, 'A-1');
+      expect(bus.currentData(key)?.id, 'A-1');
 
       await sub.cancel();
     });
@@ -176,17 +176,17 @@ void main() {
       final orders = <Order>[];
       final invoices = <Invoice>[];
       final orderSub =
-          bus.subscribeEventsKey<Order>(orderKey, onEvent: orders.add);
+          bus.subscribeEvents<Order>(orderKey, onEvent: orders.add);
       final invoiceSub =
-          bus.subscribeEventsKey<Invoice>(invoiceKey, onEvent: invoices.add);
+          bus.subscribeEvents<Invoice>(invoiceKey, onEvent: invoices.add);
 
-      bus.fireKey(orderKey, Order('A-1'));
+      bus.fire(orderKey, Order('A-1'));
       await pumpEventQueue();
       expect(connection.publishes, hasLength(1));
       expect(orders, hasLength(1));
       expect(invoices, isEmpty);
 
-      bus.fireKey(invoiceKey, Invoice('I-1'));
+      bus.fire(invoiceKey, Invoice('I-1'));
       await pumpEventQueue();
       expect(connection.publishes, hasLength(2));
       expect(invoices, hasLength(1));
@@ -202,7 +202,7 @@ void main() {
         EventPattern('orders.*'): orderCodec(),
       }));
       final received = <Order>[];
-      final sub = bus.subscribeEventsKey<Order>(
+      final sub = bus.subscribeEvents<Order>(
           EventPatternKey<Order>('orders.*'),
           onEvent: received.add);
 
@@ -220,8 +220,8 @@ void main() {
       // delivers locally and does not publish again.
       final key = EventKey<Order>('orders.placed');
       final exactSub =
-          bus.subscribeEventsKey<Order>(key, onEvent: (_) {});
-      bus.fireKey(key, Order('A-2'));
+          bus.subscribeEvents<Order>(key, onEvent: (_) {});
+      bus.fire(key, Order('A-2'));
       await pumpEventQueue();
 
       expect(connection.publishes, hasLength(1));
@@ -237,7 +237,7 @@ void main() {
           exact: {EventAddress('orders'): orderCodec()}));
       final key = EventKey<Order>('orders');
 
-      final future = bus.requestKey(key, Order('A-1'));
+      final future = bus.request(key, Order('A-1'));
       await pumpEventQueue();
 
       expect(connection.requests, hasLength(1));
@@ -259,9 +259,9 @@ void main() {
       await start(EventCodecRegistry());
       final key = EventKey<Order>('orders');
       final received = <Order>[];
-      final sub = bus.subscribeEventsKey<Order>(key, onEvent: received.add);
+      final sub = bus.subscribeEvents<Order>(key, onEvent: received.add);
 
-      expect(bus.fireKey(key, Order('A-1')), isTrue);
+      expect(bus.fire(key, Order('A-1')), isTrue);
       await pumpEventQueue();
 
       expect(connection.publishes, isEmpty);

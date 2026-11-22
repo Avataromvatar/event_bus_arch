@@ -18,7 +18,6 @@ class EventBusIsolate extends EventBusImpl {
     Object? initialData,
     bool isModelBus = false,
     ObservabilityConfig observability = ObservabilityConfig.disabled,
-    String separator = '.',   // used on both sides of the bridge
   });
 
   Future<bool> get waitInit;   // onInit finished AND interests exchanged
@@ -72,24 +71,28 @@ sequenceDiagram
 final iso = EventBusIsolate(onInit: _worker);
 await iso.waitInit;
 
-iso.subscribe<String>(onData: (e) => print('from worker: $e')); // inbound listener
-iso.fire<String>('ping');                                        // outbound
-final doubled = await iso.request<int>(21);                      // worker handler
+final pingKey = EventKey<String>('ping');
+final workKey = EventKey<int>('work');
+
+iso.subscribe(pingKey, onData: (e) => print('from worker: $e')); // inbound listener
+iso.fire(pingKey, 'ping');                                        // outbound
+final doubled = await iso.request(workKey, 21);                   // worker handler
 ```
 
 ### Model bus
 
 `EventBusIsolate(isModelBus: true)` makes **both** buses of the bridge model buses: the main-side
 bus and the bus inside the worker. A model bus keeps the node and `currentData` after its last
-listener cancels. Model interest is exchanged too, so the other side knows the topic is retained
+listener cancels. Model interest is exchanged too, so the other side knows the address is retained
 even without a listener. Firing a value does not update the sender's local model; the receiving
 side stores what it receives.
 
 ### Forgetting a topic
 
-`removeTopic` removes the node on this side, cancels its subscriptions and forwards a delete to the
-other side; both sides forget the topic. A handler registered on the other side stays. A model bus
-recreates the node on the next `fire`, `request` or `listen`.
+``remove(key)`, `removePattern(patternKey)` and `removeAddress(address)` remove the node(s) on this
+side, cancel their subscriptions and forward a delete to the other side; both sides forget the
+address. A handler registered on the other side stays. A model bus recreates the node on the next
+`fire`, `request` or `listen`.
 
 ### Shutdown, liveness and restart
 
@@ -107,8 +110,8 @@ See [13](13-pool-and-supervision.md) for supervised pools and chains.
 
 ### Exchange limits
 
-* Only sendable objects can cross the isolate boundary; DTOs carry `arguments` and `correlationId`.
-* A request id correlates answers; concurrent requests of the same type each get their own result.
+* Only sendable objects can cross the isolate boundary; DTOs carry the key, `arguments` and `correlationId`.
+* A request id correlates answers; concurrent requests of the same key each get their own result.
 * A handler error is rethrown at the caller; an in-flight request fails with `EventBusException` if
   the worker dies or the bridge is disposed.
 * `waitInit` surfaces a spawn or `onInit` error as `EventBusException`; the bus remains usable for
@@ -124,8 +127,9 @@ final layer = await Layers.createLayers([
   (_initBottom, null, true),
 ], bridgeIsModelBus: false);
 
-layer.bottom!.subscribe<Ping>(onData: (e) => print(e.count));
-layer.bottom!.fire(Ping(0));
+final pingKey = EventKey<Ping>('ping');
+layer.bottom!.subscribe(pingKey, onData: (e) => print(e.count));
+layer.bottom!.fire(pingKey, Ping(0));
 await layer.close();
 ```
 
@@ -161,31 +165,34 @@ Future<void> main() async {
     (_initBottom, null, true),
   ]);
 
+  final pingKey = EventKey<Ping>('ping');
   final answer = await layer.bottom!
-      .listen<Ping>()
+      .listen(pingKey)
       .firstWhere((p) => p.count == 3);
 
-  layer.bottom!.fire(Ping(0));
+  layer.bottom!.fire(pingKey, Ping(0));
   print('result: ${answer.count}'); // 3
   await layer.close();
 }
 
 Future<void> _initMiddle(Layer layer, Object? _) async {
   await Future<void>.delayed(const Duration(milliseconds: 20));
-  layer.top!.subscribe<Ping>(
-      onData: (e) => layer.bottom!.fire(Ping(e.count + 1)));
-  layer.bottom!.subscribe<Ping>(
-      onData: (e) => layer.top!.fire(Ping(e.count + 1)));
+  final pingKey = EventKey<Ping>('ping');
+  layer.top!.subscribe(pingKey,
+      onData: (e) => layer.bottom!.fire(pingKey, Ping(e.count + 1)));
+  layer.bottom!.subscribe(pingKey,
+      onData: (e) => layer.top!.fire(pingKey, Ping(e.count + 1)));
 }
 
 Future<void> _initBottom(Layer layer, Object? _) async {
   await Future<void>.delayed(const Duration(milliseconds: 20));
-  layer.top!.subscribe<Ping>(
-      onData: (e) => layer.top!.fire(Ping(e.count + 1)));
+  final pingKey = EventKey<Ping>('ping');
+  layer.top!.subscribe(pingKey,
+      onData: (e) => layer.top!.fire(pingKey, Ping(e.count + 1)));
 }
 ```
 
-The same topic is used in both directions on purpose: because a bridge `fire` is outbound only, a
+The same key is used in both directions on purpose: because a bridge `fire` is outbound only, a
 listener cannot receive its own fire, so the chain terminates at the test listener instead of
 looping.
 

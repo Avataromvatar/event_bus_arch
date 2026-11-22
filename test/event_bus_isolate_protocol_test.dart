@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 void silentWorker(EventBus bus, Object? initialData) {}
 
 void doublingWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<int>(handler: (dto, lastData) async {
+  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
     return dto.data * 2;
   });
 }
@@ -16,14 +16,14 @@ void doublingWorker(EventBus bus, Object? initialData) {
 ///Asynchronous initialization: handlers do not appear immediately.
 Future<void> slowInitWorker(EventBus bus, Object? initialData) async {
   await Future<void>.delayed(const Duration(milliseconds: 50));
-  bus.subscribeEvents<String>(handler: (dto, lastData) async {
+  bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {
     return 'ready: ${dto.data}';
   });
 }
 
 ///Responses arrive in a different order than the requests.
 void slowByValueWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<int>(handler: (dto, lastData) async {
+  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
     await Future<void>.delayed(
         Duration(milliseconds: dto.data == 1 ? 200 : 10));
     return dto.data;
@@ -31,7 +31,7 @@ void slowByValueWorker(EventBus bus, Object? initialData) {
 }
 
 void throwingWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<int>(handler: (dto, lastData) async {
+  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
     throw StateError('worker boom');
   });
 }
@@ -39,9 +39,9 @@ void throwingWorker(EventBus bus, Object? initialData) {
 ///An event from the worker to main. The trigger and the echo use different
 ///paths so the worker does not receive its own echo.
 void echoWorker(EventBus bus, Object? initialData) {
-  bus.subscribe<String>(
+  bus.subscribeLegacy<String>(
       paths: ['in'],
-      onData: (e) => bus.fire<String>('echo: $e', paths: ['out']));
+      onData: (e) => bus.fireLegacy<String>('echo: $e', paths: ['out']));
 }
 
 Future<void> failingInitWorker(EventBus bus, Object? initialData) async {
@@ -50,14 +50,14 @@ Future<void> failingInitWorker(EventBus bus, Object? initialData) async {
 
 ///Answers with the arguments of the call, so a lost arguments map is visible.
 void argumentWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<String>(handler: (dto, lastData) async {
+  bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {
     return 'multiplier=${dto.arguments?['multiplier']}';
   });
 }
 
 ///A handler addressed by paths, not by the type alone.
 void pathWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<int>(
+  bus.subscribeEventsLegacy<int>(
       paths: ['counter'],
       handler: (dto, lastData) async {
         return dto.data * 2;
@@ -66,14 +66,14 @@ void pathWorker(EventBus bus, Object? initialData) {
 
 ///A request responder registered on a wildcard path.
 void patternHandlerWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<int>(
+  bus.subscribeEventsLegacy<int>(
       paths: ['sensor', '*'], handler: (dto, lastData) async => dto.data * 2);
 }
 
 ///A pattern listener that echoes events back to main.
 void patternEchoWorker(EventBus bus, Object? initialData) {
-  bus.subscribe<String>(
-      paths: ['*'], onData: (e) => bus.fire<String>('echo: $e'));
+  bus.subscribeLegacy<String>(
+      paths: ['*'], onData: (e) => bus.fireLegacy<String>('echo: $e'));
 }
 
 Future<void> failingLayerInit(Layer layer, Object? initialData) async {
@@ -90,16 +90,16 @@ class LayerPing {
 Future<void> initMiddleLayer(Layer layer, Object? _) async {
   // if createLayers does not wait for initialization, the first event is lost
   await Future<void>.delayed(const Duration(milliseconds: 20));
-  layer.top!.subscribe<LayerPing>(
-      onData: (e) => layer.bottom!.fire(LayerPing(e.count + 1)));
-  layer.bottom!.subscribe<LayerPing>(
-      onData: (e) => layer.top!.fire(LayerPing(e.count + 1)));
+  layer.top!.subscribeLegacy<LayerPing>(
+      onData: (e) => layer.bottom!.fireLegacy(LayerPing(e.count + 1)));
+  layer.bottom!.subscribeLegacy<LayerPing>(
+      onData: (e) => layer.top!.fireLegacy(LayerPing(e.count + 1)));
 }
 
 Future<void> initBottomLayer(Layer layer, Object? _) async {
   await Future<void>.delayed(const Duration(milliseconds: 20));
-  layer.top!.subscribe<LayerPing>(
-      onData: (e) => layer.top!.fire(LayerPing(e.count + 1)));
+  layer.top!.subscribeLegacy<LayerPing>(
+      onData: (e) => layer.top!.fireLegacy(LayerPing(e.count + 1)));
 }
 
 void main() {
@@ -116,7 +116,7 @@ void main() {
     test('send before waitInit throws StateError', () async {
       final iso = EventBusIsolate(onInit: slowInitWorker);
 
-      await expectLater(iso.request<String>('x'), throwsStateError);
+      await expectLater(iso.requestLegacy<String>('x'), throwsStateError);
 
       await iso.waitInit;
       await iso.dispose();
@@ -127,7 +127,7 @@ void main() {
       final iso = EventBusIsolate(onInit: slowInitWorker);
       await iso.waitInit;
 
-      expect(await iso.request<String>('ping'), 'ready: ping');
+      expect(await iso.requestLegacy<String>('ping'), 'ready: ping');
       await iso.dispose();
     });
 
@@ -156,8 +156,8 @@ void main() {
       final iso = EventBusIsolate(onInit: slowByValueWorker);
       await iso.waitInit;
 
-      final first = iso.request<int>(1); // responds later
-      final second = iso.request<int>(2); // responds earlier
+      final first = iso.requestLegacy<int>(1); // responds later
+      final second = iso.requestLegacy<int>(2); // responds earlier
 
       expect(await second, 2);
       expect(await first, 1);
@@ -170,7 +170,7 @@ void main() {
       await iso.waitInit;
 
       await expectLater(
-        iso.request<String>('nobody').timeout(const Duration(seconds: 5)),
+        iso.requestLegacy<String>('nobody').timeout(const Duration(seconds: 5)),
         throwsA(isA<NoHandlerException>()),
       );
       await iso.dispose();
@@ -180,7 +180,7 @@ void main() {
       final iso = EventBusIsolate(onInit: throwingWorker);
       await iso.waitInit;
 
-      await expectLater(iso.request<int>(1), throwsStateError);
+      await expectLater(iso.requestLegacy<int>(1), throwsStateError);
       await iso.dispose();
     });
 
@@ -188,9 +188,9 @@ void main() {
       final iso = EventBusIsolate(onInit: echoWorker);
       await iso.waitInit;
       final received = <String>[];
-      final sub = iso.subscribe<String>(paths: ['out'], onData: received.add);
+      final sub = iso.subscribeLegacy<String>(paths: ['out'], onData: received.add);
 
-      iso.fire<String>('hi', paths: ['in']);
+      iso.fireLegacy<String>('hi', paths: ['in']);
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
       expect(received, ['echo: hi']);
@@ -201,7 +201,7 @@ void main() {
     test('dispose completes pending requests with an error', () async {
       final iso = EventBusIsolate(onInit: slowByValueWorker);
       await iso.waitInit;
-      final pending = iso.request<int>(1); // the handler responds after 200 ms
+      final pending = iso.requestLegacy<int>(1); // the handler responds after 200 ms
       // the error expectation is attached in advance: the error arrives at dispose time
       final expectation =
           expectLater(pending, throwsA(isA<EventBusException>()));
@@ -217,7 +217,7 @@ void main() {
       await iso.waitInit;
       await iso.dispose();
 
-      await expectLater(iso.request<int>(1), throwsStateError);
+      await expectLater(iso.requestLegacy<int>(1), throwsStateError);
     });
 
     test('a repeated dispose is safe', () async {
@@ -236,7 +236,7 @@ void main() {
       final iso = EventBusIsolate(onInit: argumentWorker);
       await iso.waitInit;
 
-      expect(await iso.request<String>('x', arguments: {'multiplier': '10'}),
+      expect(await iso.requestLegacy<String>('x', arguments: {'multiplier': '10'}),
           'multiplier=10');
       await iso.dispose();
     });
@@ -245,10 +245,10 @@ void main() {
       final iso = EventBusIsolate(onInit: pathWorker);
       await iso.waitInit;
 
-      expect(await iso.request<int>(21, paths: ['counter']), 42);
+      expect(await iso.requestLegacy<int>(21, paths: ['counter']), 42);
       // another path is another topic: the worker has no node for it
       await expectLater(
-        iso.request<int>(21,
+        iso.requestLegacy<int>(21,
             paths: ['other']).timeout(const Duration(seconds: 5)),
         throwsA(isA<NoHandlerException>()),
       );
@@ -261,7 +261,7 @@ void main() {
       final iso = EventBusIsolate(onInit: patternHandlerWorker);
       await iso.waitInit;
 
-      expect(await iso.request<int>(21, paths: ['sensor', 'temp']), 42);
+      expect(await iso.requestLegacy<int>(21, paths: ['sensor', 'temp']), 42);
       await iso.dispose();
     });
 
@@ -269,9 +269,9 @@ void main() {
       final iso = EventBusIsolate(onInit: patternEchoWorker);
       await iso.waitInit;
       final received = <String>[];
-      final sub = iso.subscribe<String>(onData: received.add);
+      final sub = iso.subscribeLegacy<String>(onData: received.add);
 
-      iso.fire<String>('hi', paths: ['x']);
+      iso.fireLegacy<String>('hi', paths: ['x']);
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
       expect(received, ['echo: hi']);
@@ -292,10 +292,10 @@ void main() {
       // used in both directions on purpose: fire on a bridge is outbound only,
       // so a listener cannot receive its own fire back.
       final answerFuture = layer.bottom!
-          .listen<LayerPing>()
+          .listenLegacy<LayerPing>()
           .firstWhere((p) => p.count == 3)
           .timeout(const Duration(seconds: 2));
-      layer.bottom!.fire(LayerPing(0));
+      layer.bottom!.fireLegacy(LayerPing(0));
       final answer = await answerFuture;
 
       expect(answer.count, 3);
@@ -324,7 +324,7 @@ void main() {
       expect(layer.top, isNull);
       expect(layer.bottom, isNull);
       expect(current.isDisposed, isTrue);
-      expect(() => current.fire<String>('x'), throwsStateError);
+      expect(() => current.fireLegacy<String>('x'), throwsStateError);
     });
   });
 }

@@ -8,8 +8,8 @@
 
 `FSM<T>` is a mixin that turns the bus's event stream into transitions between states. The state
 machine does not require anyone to subscribe to an event: it listens to `allEventStream` and reacts
-to events **by topic**, that is, by event type and `paths`. Both `fire` and `request` produce
-entries there, so either call can drive a transition.
+to events by their **selector** — an exact `EventKey<E>` or an `EventPatternKey<E>`. Both `fire` and
+`request` produce entries there, so either call can drive a transition.
 
 ## Setup
 
@@ -23,6 +23,7 @@ class Loader with FSM<State> {
     initFSM(bus, State.idle);                        // initial state
 
     addFSMTransition<Start>(State.idle, State.loading,
+      selector: EventKey<Start>('api.items'),
       filter: (current, last, event) => event.url.isNotEmpty,
       handler: (current, last, event, ignored) async {
         print('$last -> $current on $event');
@@ -30,8 +31,10 @@ class Loader with FSM<State> {
         return null;
       });
 
-    addFSMTransition<Done>(State.loading, State.ready);
-    addFSMTransition<Fail>(State.loading, State.failed);
+    addFSMTransition<Done>(State.loading, State.ready,
+      selector: EventKey<Done>('api.done'));
+    addFSMTransition<Fail>(State.loading, State.failed,
+      selector: EventPatternKey<Fail>('api.*'));
   }
 }
 ```
@@ -40,8 +43,8 @@ class Loader with FSM<State> {
 final bus = EventBus();
 final loader = Loader(bus);
 
-bus.fire(Start('/api/items'));   // idle -> loading, handler was called
-bus.fire(Done());                // loading -> ready
+bus.fire(EventKey<Start>('api.items'), Start('/api/items')); // idle -> loading
+bus.fire(EventKey<Done>('api.done'), Done());                // loading -> ready
 ```
 
 ## API
@@ -56,13 +59,13 @@ mixin class FSM<T> {
   void addFSMTransition<E>(
     T fromState,
     T toState, {
+    required EventSelector<E> selector,
     FSMHandler<T, E>? handler,
     FSMFilter<T, E>? filter,
-    List<String>? eventPaths,
   });
 
   void changeState(T newState);         // change the state manually
-  void changeStateByEvent(T newState);  // an alias for changeState
+  void changeStateByEvent(T newState);  // deprecated alias for changeState
 
   void dispose();                       // unsubscribe from the bus
 }
@@ -76,8 +79,9 @@ typedef FSMHandler<T, E> =
 ## How it works
 
 1. `initFSM(bus, state)` remembers the bus and subscribes to `bus.allEventStream`.
-2. For every event, the state machine takes `dto.topic` and looks for a registered transition for
-   the pair **(event topic, current state)**.
+2. For every event, the state machine matches the event key against the registered transition
+   selectors for the current state. An exact selector beats a pattern; among patterns the most
+   specific wins. The payload must also be an `E` (`data is E`).
 3. If a transition is found, `filter` is called (if it exists). `false` — the transition is rejected
    and the state does not change.
 4. If the filter lets it through: the state changes to `toState`, and `handler` is called with
@@ -85,12 +89,13 @@ typedef FSMHandler<T, E> =
    `lastState` is the previous one.
 5. While the handler is running, all incoming events are collected into the `ignoredEvents` list and
    passed to the handler. **They are not replayed after the handler finishes** — the events are lost
-   and the list is cleared.
+   and the list is cleared. A handler error resets the transition-in-progress flag in a `finally`
+   block, so the machine never gets stuck.
 
 ```text
    event E arrived
         │
-        ├─ no transition for (topic of E, current state) → ignore
+        ├─ no transition for (key of E, current state) → ignore
         │
         ├─ filter returned false → ignore
         │
@@ -104,25 +109,22 @@ typedef FSMHandler<T, E> =
 
 ## Important details
 
-* **A transition is registered by the static event type.** `addFSMTransition<int>(...)` fires on
-  `bus.fire<int>(...)`/`bus.request<int>(...)` but not on `bus.fire<num>(...)`: for the bus these
-  are different topics.
-* **`eventPaths` must match what was sent.** The transition topic is built as
-  `Topic.create<E>(paths: eventPaths)`, and `arguments` do not participate in the topic — you can
-  pass transition parameters through them without breaking routing. A transition registered
-  without `eventPaths` fires on the type alone (`fire<Start>(...)` with no `paths`).
-* **`eventPaths` are exact.** The FSM looks a transition up by the whole topic key; wildcard
-  transitions (`paths: ['sensor', '*']`) are **not** matched against concrete events. Use one
-  transition per exact path, or route events through a single stable path.
-* **One transition per (event, state) pair.** Calling `addFSMTransition` again with the same
-  `E`/`fromState` overwrites the previous one — the old handler/transition pair stops working.
+* **A transition is registered by a selector.** The payload must be an `E` at delivery time:
+  `addFSMTransition<int>` accepts an event delivered to `EventKey<int>('x')`; a
+  `EventKey<num>('x')` carrying an `int` also matches because `int is num`. A differently typed
+  node (`EventKey<String>('x')`) does not.
+* **`selector` is required and exact by default.** Use `EventKey<E>` for one address and
+  `EventPatternKey<E>` for a family. `arguments` do not participate in matching — pass transition
+  parameters through them without breaking routing.
+* **One transition per (selector, fromState) pair.** Calling `addFSMTransition` again with the same
+  `E`/`selector`/`fromState` replaces the previous one.
 * **The state machine sees every event on the bus**, including the ones delivered to nobody and
   requests that end with `NoHandlerException`. `allEventStream` carries a delivery flag, but FSM
   ignores it.
 * **The state lives only in the mixin's memory.** It is not published to the bus automatically: if
   other components need to know the state, send an event from the transition handler manually.
-* **`changeStateByEvent` is a full alias for `changeState`** (identical bodies), and is the only
-  deprecated member left in the package. There is no separate "state change event".
+* **`changeStateByEvent` is a deprecated alias for `changeState`.** There is no separate "state
+  change event".
 * **`FSM.dispose()` unsubscribes the machine from the bus.** Until it is called, the
   `allEventStream` subscription lives on and keeps the bus alive; a repeated `initFSM` does not add
   a second subscription.
@@ -133,15 +135,19 @@ typedef FSMHandler<T, E> =
 ## Desync example (events during a transition)
 
 ```dart
-addFSMTransition<int>(S.a, S.b, handler: (current, last, event, ignored) async {
-  await Future.delayed(const Duration(milliseconds: 50));   // "long" work
-  print(ignored.map((d) => d.data));                        // what arrived during this time
-  return null;
-});
+final pulse = EventKey<int>('pulse');
 
-bus.fire<int>(1);
-bus.fire<int>(2);   // arrives in the first transition's ignoredEvents
-bus.fire<int>(3);   // there too
+addFSMTransition<int>(S.a, S.b,
+  selector: pulse,
+  handler: (current, last, event, ignored) async {
+    await Future.delayed(const Duration(milliseconds: 50));   // "long" work
+    print(ignored.map((d) => d.data));                        // what arrived during this time
+    return null;
+  });
+
+bus.fire(pulse, 1);
+bus.fire(pulse, 2);   // arrives in the first transition's ignoredEvents
+bus.fire(pulse, 3);   // there too
 ```
 
 If you need to process such events instead of losing them, collect them into your own queue inside

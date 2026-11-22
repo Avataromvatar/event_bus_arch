@@ -48,11 +48,11 @@ void main() {
       final machine = _NameMachine(bus);
 
       // the transition is registered for NameEvent.go: another address is another node
-      bus.fire<NameEvent>(NameEvent(), paths: ['other']);
+      bus.fireLegacy<NameEvent>(NameEvent(), paths: ['other']);
       await pumpEventQueue();
       expect(machine.state, NameState.a);
 
-      bus.fire<NameEvent>(NameEvent(), paths: ['go']);
+      bus.fireLegacy<NameEvent>(NameEvent(), paths: ['go']);
       await pumpEventQueue();
 
       expect(machine.state, NameState.b);

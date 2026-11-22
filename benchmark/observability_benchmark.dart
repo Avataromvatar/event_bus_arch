@@ -55,15 +55,15 @@ Future<void> main() async {
 Future<double> _fireBenchmark({required bool enabled}) async {
   final bus = EventBus(
       observability: ObservabilityConfig(enabled: enabled, metrics: enabled));
-  final sub = bus.subscribeEvents<int>(
+  final sub = bus.subscribeEventsLegacy<int>(
       paths: ['x'], deliveryMode: DeliveryMode.sync, onEvent: (_) {});
 
   for (var i = 0; i < 10000; i++) {
-    bus.fire<int>(i, paths: ['x']);
+    bus.fireLegacy<int>(i, paths: ['x']);
   }
   final stopwatch = Stopwatch()..start();
   for (var i = 0; i < _fires; i++) {
-    bus.fire<int>(i, paths: ['x']);
+    bus.fireLegacy<int>(i, paths: ['x']);
   }
   stopwatch.stop();
 
@@ -76,14 +76,14 @@ Future<double> _requestBenchmark({required bool enabled}) async {
   final bus = EventBus(
       observability: ObservabilityConfig(enabled: enabled, metrics: enabled));
   final sub =
-      bus.subscribeEvents<int>(handler: (dto, lastData) async => dto.data);
+      bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async => dto.data);
 
   for (var i = 0; i < 500; i++) {
-    await bus.request<int>(i);
+    await bus.requestLegacy<int>(i);
   }
   final stopwatch = Stopwatch()..start();
   for (var i = 0; i < _requests; i++) {
-    await bus.request<int>(i);
+    await bus.requestLegacy<int>(i);
   }
   stopwatch.stop();
 

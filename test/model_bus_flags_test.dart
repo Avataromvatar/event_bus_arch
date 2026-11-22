@@ -5,27 +5,27 @@ import 'package:test/test.dart';
 
 ///Reports `bus.isModelBus` from inside the worker.
 void modelFlagWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<bool>(
+  bus.subscribeEventsLegacy<bool>(
       paths: ['model_flag'], handler: (dto, lastData) async => bus.isModelBus);
 }
 
 ///Cancels its only listener, then answers with the data retained for the topic.
 ///A model bus keeps the node and its `currentData`; a common bus removes it.
 void canceledListenerWorker(EventBus bus, Object? initialData) async {
-  final sub = bus.subscribe<int>(paths: ['state']);
+  final sub = bus.subscribeLegacy<int>(paths: ['state']);
   await sub.cancel();
-  bus.subscribeEvents<int>(
+  bus.subscribeEventsLegacy<int>(
       paths: ['read_state'],
       handler: (dto, lastData) async =>
-          bus.currentData<int>(paths: ['state']) ?? -1);
+          bus.currentDataLegacy<int>(paths: ['state']) ?? -1);
 }
 
 ///Fires an event back to main; the main-side bus decides whether to keep it.
 void emitToMainWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<int>(
+  bus.subscribeEventsLegacy<int>(
       paths: ['emit'],
       handler: (dto, lastData) async {
-        bus.fire<int>(dto.data, paths: ['state']);
+        bus.fireLegacy<int>(dto.data, paths: ['state']);
         return dto.data;
       });
 }
@@ -34,13 +34,13 @@ void emitToMainWorker(EventBus bus, Object? initialData) {
 
 ///Reports the flags of the three buses the layer can see.
 void inspectBusesLayer(Layer layer, Object? initialData) {
-  layer.top!.subscribeEvents<bool>(
+  layer.top!.subscribeEventsLegacy<bool>(
       paths: ['top_is_model'],
       handler: (dto, lastData) async => layer.top!.isModelBus);
-  layer.top!.subscribeEvents<bool>(
+  layer.top!.subscribeEventsLegacy<bool>(
       paths: ['bottom_is_model'],
       handler: (dto, lastData) async => layer.bottom?.isModelBus ?? false);
-  layer.top!.subscribeEvents<bool>(
+  layer.top!.subscribeEventsLegacy<bool>(
       paths: ['current_is_model'],
       handler: (dto, lastData) async => layer.current.isModelBus);
 }
@@ -54,7 +54,7 @@ void main() {
       expect(iso.isModelBus, isFalse);
 
       await iso.waitInit;
-      expect(await iso.request<bool>(true, paths: ['model_flag']), isFalse);
+      expect(await iso.requestLegacy<bool>(true, paths: ['model_flag']), isFalse);
 
       await iso.dispose();
     });
@@ -65,7 +65,7 @@ void main() {
       expect(iso.isModelBus, isTrue);
 
       await iso.waitInit;
-      expect(await iso.request<bool>(true, paths: ['model_flag']), isTrue);
+      expect(await iso.requestLegacy<bool>(true, paths: ['model_flag']), isTrue);
 
       await iso.dispose();
     });
@@ -76,9 +76,9 @@ void main() {
           EventBusIsolate(onInit: canceledListenerWorker, isModelBus: true);
       await iso.waitInit;
 
-      iso.fire<int>(42, paths: ['state']);
+      iso.fireLegacy<int>(42, paths: ['state']);
 
-      expect(await iso.request<int>(0, paths: ['read_state']), 42);
+      expect(await iso.requestLegacy<int>(0, paths: ['read_state']), 42);
       await iso.dispose();
     });
 
@@ -87,9 +87,9 @@ void main() {
       final iso = EventBusIsolate(onInit: canceledListenerWorker);
       await iso.waitInit;
 
-      iso.fire<int>(42, paths: ['state']);
+      iso.fireLegacy<int>(42, paths: ['state']);
 
-      expect(await iso.request<int>(0, paths: ['read_state']), -1);
+      expect(await iso.requestLegacy<int>(0, paths: ['read_state']), -1);
       await iso.dispose();
     });
 
@@ -98,13 +98,13 @@ void main() {
         () async {
       final iso = EventBusIsolate(onInit: emitToMainWorker, isModelBus: true);
       await iso.waitInit;
-      final sub = iso.subscribe<int>(paths: ['state'], onData: (_) {});
+      final sub = iso.subscribeLegacy<int>(paths: ['state'], onData: (_) {});
 
-      await iso.request<int>(1, paths: ['emit']);
+      await iso.requestLegacy<int>(1, paths: ['emit']);
       await sub.cancel();
-      await iso.request<int>(2, paths: ['emit']);
+      await iso.requestLegacy<int>(2, paths: ['emit']);
 
-      expect(iso.currentData<int>(paths: ['state']), 2);
+      expect(iso.currentDataLegacy<int>(paths: ['state']), 2);
       await iso.dispose();
     });
 
@@ -112,13 +112,13 @@ void main() {
         () async {
       final iso = EventBusIsolate(onInit: emitToMainWorker);
       await iso.waitInit;
-      final sub = iso.subscribe<int>(paths: ['state'], onData: (_) {});
+      final sub = iso.subscribeLegacy<int>(paths: ['state'], onData: (_) {});
 
-      await iso.request<int>(1, paths: ['emit']);
+      await iso.requestLegacy<int>(1, paths: ['emit']);
       await sub.cancel();
-      await iso.request<int>(2, paths: ['emit']);
+      await iso.requestLegacy<int>(2, paths: ['emit']);
 
-      expect(iso.currentData<int>(paths: ['state']), isNull);
+      expect(iso.currentDataLegacy<int>(paths: ['state']), isNull);
       await iso.dispose();
     });
   });
@@ -131,13 +131,13 @@ void main() {
       ]);
 
       expect((layer.bottom as EventBusIsolate).isModelBus, isFalse);
-      expect(await layer.bottom!.request<bool>(true, paths: ['top_is_model']),
+      expect(await layer.bottom!.requestLegacy<bool>(true, paths: ['top_is_model']),
           isFalse);
       expect(
-          await layer.bottom!.request<bool>(true, paths: ['bottom_is_model']),
+          await layer.bottom!.requestLegacy<bool>(true, paths: ['bottom_is_model']),
           isFalse);
       expect(
-          await layer.bottom!.request<bool>(true, paths: ['current_is_model']),
+          await layer.bottom!.requestLegacy<bool>(true, paths: ['current_is_model']),
           isFalse);
 
       await layer.close();
@@ -151,10 +151,10 @@ void main() {
 
       // the bridge to the first worker and the bridge from it to the second
       expect((layer.bottom as EventBusIsolate).isModelBus, isTrue);
-      expect(await layer.bottom!.request<bool>(true, paths: ['top_is_model']),
+      expect(await layer.bottom!.requestLegacy<bool>(true, paths: ['top_is_model']),
           isTrue);
       expect(
-          await layer.bottom!.request<bool>(true, paths: ['bottom_is_model']),
+          await layer.bottom!.requestLegacy<bool>(true, paths: ['bottom_is_model']),
           isTrue);
 
       await layer.close();
@@ -167,12 +167,12 @@ void main() {
       ]);
 
       expect(
-          await layer.bottom!.request<bool>(true, paths: ['current_is_model']),
+          await layer.bottom!.requestLegacy<bool>(true, paths: ['current_is_model']),
           isTrue);
-      expect(await layer.bottom!.request<bool>(true, paths: ['top_is_model']),
+      expect(await layer.bottom!.requestLegacy<bool>(true, paths: ['top_is_model']),
           isFalse);
       expect(
-          await layer.bottom!.request<bool>(true, paths: ['bottom_is_model']),
+          await layer.bottom!.requestLegacy<bool>(true, paths: ['bottom_is_model']),
           isFalse);
 
       await layer.close();

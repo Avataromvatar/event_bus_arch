@@ -19,6 +19,10 @@ class TestData {
   TestData(this.count);
 }
 
+///The same address on every layer: routing is explicit, the type is part of
+///the key and never appears in the address string.
+final chainKey = EventKey<TestData>('chain');
+
 ///MIDDLE layer. In WORKER ISOLATE
 class TestMiddleIsolateController {
   Layer layer;
@@ -26,19 +30,15 @@ class TestMiddleIsolateController {
   late StreamSubscription<TestData> subscriptionBottom;
   TestMiddleIsolateController(this.layer) {
     //Wait event from top layer
-    subscriptionTop = layer.top!.subscribe<TestData>(
-      onData: (e) {
-        //send new data to
-        layer.bottom!.fire(TestData(e.count + 1));
-        print('FROM MIDDLE TO BOTTOM ${e.count}->${e.count + 1}');
-      },
-    );
-    subscriptionBottom = layer.bottom!.subscribe(
-      onData: (e) {
-        layer.top!.fire(TestData(e.count + 1));
-        print('FROM MIDDLE TO TOP ${e.count}->${e.count + 1}');
-      },
-    );
+    subscriptionTop = layer.top!.subscribe(chainKey, onData: (e) {
+      //send new data to
+      layer.bottom!.fire(chainKey, TestData(e.count + 1));
+      print('FROM MIDDLE TO BOTTOM ${e.count}->${e.count + 1}');
+    });
+    subscriptionBottom = layer.bottom!.subscribe(chainKey, onData: (e) {
+      layer.top!.fire(chainKey, TestData(e.count + 1));
+      print('FROM MIDDLE TO TOP ${e.count}->${e.count + 1}');
+    });
   }
   void dispose() {
     subscriptionTop.cancel();
@@ -53,13 +53,11 @@ class TestBottomIsolateController {
 
   TestBottomIsolateController(this.layer) {
     //Wait event from top layer
-    subscriptionTop = layer.top!.subscribe<TestData>(
-      onData: (e) {
-        //send new data to
-        layer.top!.fire(TestData(e.count + 1));
-        print('FROM BOTTOM TO MIDDLE ${e.count}->${e.count + 1}');
-      },
-    );
+    subscriptionTop = layer.top!.subscribe(chainKey, onData: (e) {
+      //send new data to
+      layer.top!.fire(chainKey, TestData(e.count + 1));
+      print('FROM BOTTOM TO MIDDLE ${e.count}->${e.count + 1}');
+    });
   }
   void dispose() {
     subscriptionTop.cancel();
@@ -79,19 +77,17 @@ class TestIsolateProvider {
         .then(
       (value) {
         layer = value;
-        layer.bottom!.subscribe<TestData>(
-          onData: (e) {
-            print('Get from middle ${e.count}');
-          },
-        );
+        layer.bottom!.subscribe(chainKey, onData: (e) {
+          print('Get from middle ${e.count}');
+        });
         _completer.complete();
       },
     );
   }
   Future<int> send(int data) async {
     print('SEND $data');
-    layer.bottom!.fire(TestData(data));
-    var ret = (await layer.bottom!.listen<TestData>().first).count;
+    layer.bottom!.fire(chainKey, TestData(data));
+    var ret = (await layer.bottom!.listen(chainKey).first).count;
 
     return ret;
   }
@@ -119,6 +115,7 @@ void _initMiddleLayers(Layer layer, Object? initialData) async {
   );
 }
 
+//This function run in bottom Isolate
 void _initBottomLayers(Layer layer, Object? initialData) async {
   print('Hello From Bottom ${Isolate.current.hashCode}');
   var controller = TestBottomIsolateController(layer);

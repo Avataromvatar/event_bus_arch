@@ -20,7 +20,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final key = EventKey<int>('counter');
       final log = <int>[];
-      bus.subscribeEventsKey<int>(key, handler: (dto, lastData) async {
+      bus.subscribeEvents<int>(key, handler: (dto, lastData) async {
         log.add(dto.data);
       });
       final command = Command<int>(bus, key, maxLen: 10);
@@ -78,7 +78,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final key = EventKey<int>('counter');
       final seen = <int>[];
-      bus.subscribeEventsKey<int>(key, handler: (dto, lastData) async {
+      bus.subscribeEvents<int>(key, handler: (dto, lastData) async {
         seen.add(dto.data);
       });
       final command = Command<int>(bus, key, maxLen: 5);
@@ -154,16 +154,16 @@ void main() {
       final scope = Scope<int>();
       final keyA = EventKey<int>('a');
       final keyB = EventKey<int>('b');
-      final handler = bus.subscribeEventsKey<int>(keyA,
+      final handler = bus.subscribeEvents<int>(keyA,
           handler: (dto, lastData) async {});
       await scope.initScope(bus, keyA, maxLenForUndo: 10);
 
       await scope.initScope(bus, keyB, maxLenForUndo: 10);
 
       // The handler is not owned by Scope and stays; the old listener is gone.
-      expect(bus.haveHandlerKey(keyA), true);
-      expect(bus.haveListenerKey(keyA), false);
-      expect(bus.haveListenerKey(keyB), true);
+      expect(bus.haveHandler(keyA), true);
+      expect(bus.haveListener(keyA), false);
+      expect(bus.haveListener(keyB), true);
 
       scope.disposeScope();
       await handler.cancel();
@@ -174,13 +174,13 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
       final key = EventKey<int>('a');
-      final handler = bus.subscribeEventsKey<int>(key,
+      final handler = bus.subscribeEvents<int>(key,
           handler: (dto, lastData) async {});
       await scope.initScope(bus, key, maxLenForUndo: 10);
 
       scope.disposeScope();
 
-      expect(bus.haveHandlerKey(key), true);
+      expect(bus.haveHandler(key), true);
       await handler.cancel();
       await bus.dispose();
     });

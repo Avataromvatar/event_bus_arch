@@ -2,19 +2,18 @@
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 
+///The pool routes by the event key; the address is the routing identity.
+final jobsKey = EventKey<int>('jobs');
+final noteKey = EventKey<String>('note');
+
 ///Runs in every worker isolate. `initialData` is the worker index.
 void poolWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
-  bus.subscribeEvents<int>(
-    handler: (dto, lastData) async {
-      print('worker $index handled ${dto.data}');
-      return index * 100 + dto.data;
-    },
-  );
-  bus.subscribe<String>(
-    paths: ['note'],
-    onData: (note) => print('worker $index got note: $note'),
-  );
+  bus.subscribeEvents(jobsKey, handler: (dto, lastData) async {
+    print('worker $index handled ${dto.data}');
+    return index * 100 + dto.data;
+  });
+  bus.subscribe(noteKey, onData: (note) => print('worker $index got note: $note'));
 }
 
 Future<void> main() async {
@@ -30,11 +29,11 @@ Future<void> main() async {
   print('ready with ${pool.metrics.readyWorkers} workers');
 
   for (var i = 0; i < 6; i++) {
-    final answer = await pool.request<int>(i);
+    final answer = await pool.request(jobsKey, i);
     print('request $i -> $answer');
   }
 
-  print('fire accepted: ${pool.fire<String>('hello', paths: ['note'])}');
+  print('fire accepted: ${pool.fire(noteKey, 'hello')}');
   print(pool.metrics);
 
   await pool.close();

@@ -34,7 +34,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(
-      bus.fireKey(EventKey<Order>('orders.placed'), Order('A-1')),
+      bus.fire(EventKey<Order>('orders.placed'), Order('A-1')),
       isTrue,
     );
     await Future<void>.delayed(Duration.zero);
@@ -57,7 +57,7 @@ void main() {
     addTearDown(bus.dispose);
     await Future<void>.delayed(Duration.zero);
 
-    bus.fireKey(EventKey<Order>('orders'), Order('A-1'));
+    bus.fire(EventKey<Order>('orders'), Order('A-1'));
     await Future<void>.delayed(Duration.zero);
 
     expect(connection.publishes.single.subject, 'acme.orders');

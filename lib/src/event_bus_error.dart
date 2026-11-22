@@ -32,13 +32,15 @@ class EventBusError {
     required this.kind,
     required this.error,
     this.source = EventBusErrorSource.core,
-    this.topic,
+    String? topic,
+    String? address,
     this.event,
     this.correlationId,
     this.stackTrace,
     this.context = const <String, String>{},
     DateTime? timestamp,
-  }) : timestamp = timestamp ?? DateTime.now();
+  })  : topic = address ?? topic,
+        timestamp = timestamp ?? DateTime.now();
 
   final EventBusErrorKind kind;
   final EventBusErrorSource source;

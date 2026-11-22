@@ -17,7 +17,10 @@ class EventBusException implements Exception {
 class NoHandlerException extends EventBusException {
   NoHandlerException(this.topic) : super('no request handler for "$topic"');
 
-  ///The topic of the request.
+  ///The event address of the request.
+  String get address => topic;
+
+  ///The topic of the request; the same string as [address].
   final String topic;
 }
 
@@ -28,7 +31,10 @@ class BusyException extends EventBusException {
       : super('no handler capacity for "$topic"'
             '${reason == null ? '' : ': $reason'}');
 
-  ///The topic of the request.
+  ///The event address of the request.
+  String get address => topic;
+
+  ///The topic of the request; the same string as [address].
   final String topic;
 }
 
@@ -37,7 +43,10 @@ class RequestTimeoutException extends EventBusException {
   RequestTimeoutException(this.topic, this.timeout)
       : super('request "$topic" timed out after $timeout');
 
-  ///The topic of the request.
+  ///The event address of the request.
+  String get address => topic;
+
+  ///The topic of the request; the same string as [address].
   final String topic;
 
   ///The timeout that expired.
@@ -49,6 +58,9 @@ class RequestCanceledException extends EventBusException {
   RequestCanceledException(this.topic)
       : super('request "$topic" was cancelled');
 
-  ///The topic of the request.
+  ///The event address of the request.
+  String get address => topic;
+
+  ///The topic of the request; the same string as [address].
   final String topic;
 }

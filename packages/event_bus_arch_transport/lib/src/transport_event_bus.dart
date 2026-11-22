@@ -231,7 +231,7 @@ class TransportEventBus extends EventBusImpl {
   ///process. Without a local handler both a serializer and a deserializer are
   ///required; otherwise [NoHandlerException] is thrown.
   @override
-  Future<dynamic> request<T>(
+  Future<dynamic> requestLegacy<T>(
     T data, {
     List<String>? paths,
     String? separator,
@@ -249,8 +249,8 @@ class TransportEventBus extends EventBusImpl {
       throw EventBusException(
           'request does not support wildcard paths ("${topic.topic}")');
     }
-    if (haveHandler<T>(paths: paths, separator: separator)) {
-      return super.request<T>(
+    if (haveHandlerLegacy<T>(paths: paths, separator: separator)) {
+      return super.requestLegacy<T>(
         data,
         paths: paths,
         separator: separator,
@@ -268,7 +268,7 @@ class TransportEventBus extends EventBusImpl {
   ///A request on a keyed transport bus: a local handler wins, otherwise the
   ///codec publishes the request and decodes the first response.
   @override
-  Future<dynamic> requestKey<T>(
+  Future<dynamic> request<T>(
     EventKey<T> key,
     T data, {
     Map<String, String>? arguments,
@@ -277,7 +277,7 @@ class TransportEventBus extends EventBusImpl {
     String? correlationId,
   }) {
     if (!_keyMode) {
-      return super.requestKey<T>(key, data,
+      return super.request<T>(key, data,
           arguments: arguments,
           timeout: timeout,
           cancelToken: cancelToken,
@@ -289,8 +289,8 @@ class TransportEventBus extends EventBusImpl {
     if (cancelToken?.isCancelled ?? false) {
       throw RequestCanceledException(key.address.value);
     }
-    if (haveHandlerKey<T>(key)) {
-      return super.requestKey<T>(key, data,
+    if (haveHandler<T>(key)) {
+      return super.request<T>(key, data,
           arguments: arguments,
           timeout: timeout,
           cancelToken: cancelToken,

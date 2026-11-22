@@ -93,15 +93,15 @@ final changes = bus.metrics.changes.listen(exporter.export);
 
 | Scope | Data |
 |---|---|
-| Per topic | `fired`, `delivered`, `dropped`, `bufferOverflow`; requests `started`, `completed`, `errored`, `timeout`, `canceled`, `busy`; dispatch and request latency histograms |
+| Per address | `fired`, `delivered`, `dropped`, `bufferOverflow`; requests `started`, `completed`, `errored`, `timeout`, `canceled`, `busy`; dispatch and request latency histograms |
 | Per subscription | buffer and queue depth, `maxBufferedRequests`, `inFlight`, `handlerConcurrency`, delivered/dropped, queue-wait latency |
 | Global | totals and `droppedMetricSeries` |
 
 ### Metric keys and cardinality
 
-The default key is the **event type token** (`Topic.type`), not the concrete path, so a dynamic
-topic such as `session.<id>` cannot grow the registry without bound. A custom
-`metricKeyBuilder: (topic) => ...` can add detail.
+The default key is the **event address** string, so a dynamic address such as `session.<id>` can
+grow the registry; `cardinalityLimit` bounds it. A custom
+`metricKeyBuilder: (address) => ...` can coarsen the key.
 
 The registry is capped by `cardinalityLimit`. A new key above the limit is counted into the
 `__other__` bucket and increments `droppedMetricSeries`; existing keys keep their counters.
@@ -173,10 +173,10 @@ classDiagram
 `fire` and `request` accept an optional `correlationId`:
 
 ```dart
-await bus.request<Order>(order, paths: ['orders'],
-    correlationId: 'checkout-42');
+final orderKey = EventKey<Order>('orders');
+await bus.request(orderKey, order, correlationId: 'checkout-42');
 
-bus.subscribeEvents<Order>(handler: (dto, last) async {
+bus.subscribeEvents(orderKey, handler: (dto, last) async {
   print(dto.correlationId); // checkout-42
   return await process(dto);
 });

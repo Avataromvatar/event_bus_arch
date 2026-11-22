@@ -390,5 +390,46 @@ data: A-1
      и старые тесты; переписать docs/00–15, README, CHANGELOG, примеры.
   4. Финальный прогон + obfuscation-check.
 
+### Этап 7a: финальные имена API, документация и obfuscation-check
+
+Выполнено:
+
+- Новые E-методы переименованы в финальные имена: `fire`, `request`, `listen`, `subscribe`,
+  `subscribeEvents`, `currentData`, `haveListener`, `haveHandler`, `haveAvailableHandler`,
+  `remove`, `removePattern` (плюс `removeAddress`). Старые методы переименованы в `*Legacy`
+  (`fireLegacy`, `requestLegacy`, `listenLegacy`, `subscribeLegacy`, `subscribeEventsLegacy`,
+  `currentDataLegacy`, `have*Legacy`, `removeTopicLegacy`).
+- Все call sites в тестах, примерах, пакетах и `tool/` мигрированы на новые имена; старые
+  вызовы используют `*Legacy` и продолжают компилироваться.
+- `EventBusError` принимает `address:` (приоритетнее `topic:`), `address` — E-имя;
+  `NoHandlerException`, `BusyException`, `RequestTimeoutException`, `RequestCanceledException`
+  получили геттер `address`.
+- Примеры ядра, patterns, NATS и MQTT переписаны на ключи (`EventKey`/`EventPatternKey`) и
+  keyed-транспорты; `dart analyze` по примерам чист.
+- Документация переписана на E-модель: README, `doc/00`–`doc/15`, README пакетов
+  `event_bus_arch_transport`, `_nats`, `_mqtt`; CHANGELOG 4.0 дополнен.
+- Obfuscation-check: `dart compile js -O2` + Node на `packages/event_bus_arch_transport/build/
+  obfuscation_check.dart`; пользовательский класс в `Type.toString()` даёт `minified:bp`, но
+  `EventKey<UserOrder>('orders.placed')` разрешает кодек и публикует ровно один раз:
+  `accepted=true publishes=1 subject=orders.placed`.
+
+Прогоны:
+
+- core 278, patterns 20, transport 37, NATS 44 (+10 skipped), MQTT 33 (+7 skipped) — все зелёные;
+- `dart analyze` — 19 info, ошибок и предупреждений нет;
+- код не коммитился.
+
+Осталось (этап 7b, отдельный крупный проход):
+
+1. Удалить legacy-слой: `Topic`/`TopicPattern`/`paths`/`separator`, `*Legacy`-методы,
+   `EventDTO.topic`/legacy-фабрики, `EventSubscription.topic`.
+2. Удалить legacy-транспорт (`serializers`/`deserializers`/`typeTags`, `TopicSubjectMapper`,
+   `TransportEventNode`, `TopicRegistryIndex`) и мигрировать ~2.8 тыс. строк тестов
+   transport/NATS/MQTT на keyed-режим.
+3. Переписать ~560 старых call sites в 20 core-тестах на E-ключи (тесты поведения isolate,
+   pool, backpressure и observability при этом сохранить).
+4. Обновить `tool/migrate_3_to_4.dart` под адресную модель (сейчас он умеет только
+   `handlers.setHandler` → `subscribeEvents`).
+
 ## Ссылки
 Вверх: нет (локальная задача). ADR: doc/decisions/0009-event-key-and-address.md

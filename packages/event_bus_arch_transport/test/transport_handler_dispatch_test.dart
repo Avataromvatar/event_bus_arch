@@ -46,11 +46,11 @@ void main() {
     );
     await bus.waitConnected();
 
-    final exact = bus.subscribeEvents<int>(
+    final exact = bus.subscribeEventsLegacy<int>(
       paths: ['a'],
       handler: (dto, lastData) async => 1,
     );
-    final pattern = bus.subscribeEvents<int>(
+    final pattern = bus.subscribeEventsLegacy<int>(
       paths: ['*'],
       handler: (dto, lastData) async => 2,
     );

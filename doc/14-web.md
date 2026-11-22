@@ -11,7 +11,7 @@ The isolate APIs are VM-only and fail cleanly.
 | Feature | VM / Flutter mobile and desktop | Browser (JS/Wasm) |
 |---|---|---|
 | `EventBus`, `EventSubscription`, `listen`/`subscribe` | yes | yes |
-| Model bus, `currentData`, `removeTopic` | yes | yes |
+| Model bus, `currentData`, `remove` | yes | yes |
 | Handler subscriptions, request lifecycle, cancellation | yes | yes |
 | `errors`, `EventBusErrorMonitor` | yes | yes |
 | Observability (`ObservabilityConfig`, metrics, correlation) | yes | yes |
@@ -80,11 +80,10 @@ and reply subjects. A web application implements it over a browser WebSocket and
 ```dart
 // The browser client exists in mqtt5_client; wrap it in TransportConnection.
 final connection = BrowserWebSocketTransportConnection(url);
-final bus = TransportEventBus(
+final bus = TransportEventBus.keys(
   connection: connection,
-  subjects: mySubjects,
-  serializers: {'Order': encodeOrder},
-  deserializers: {'Order': decodeOrder},
+  addresses: myAddressMapper,
+  codecs: myCodecRegistry,
   originId: newTransportOriginId(),
 );
 ```

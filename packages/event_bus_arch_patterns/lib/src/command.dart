@@ -76,10 +76,10 @@ class CommandImpl<T> implements Command<T> {
   ///value still goes through the bus (a model bus stores it), and the result
   ///is null.
   Future<dynamic> _call(T data, Map<String, String>? arguments) {
-    if (_bus.haveHandlerKey<T>(_key)) {
-      return _bus.requestKey<T>(_key, data, arguments: arguments);
+    if (_bus.haveHandler<T>(_key)) {
+      return _bus.request<T>(_key, data, arguments: arguments);
     }
-    _bus.fireKey<T>(_key, data, arguments: arguments);
+    _bus.fire<T>(_key, data, arguments: arguments);
     return Future.value(null);
   }
 

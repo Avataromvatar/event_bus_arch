@@ -1,54 +1,55 @@
-# 07. Pitfalls and upgrade notes
+# 07. Pitfalls and limits
 
 [← 06. API reference](06-api-reference.md) · [Contents](README.md) · [Next: Transports →](08-transports.md)
 
 The traps below are the ones that cost the most time in real applications. Each entry names the
-symptom, the cause and the fix. The 3.x history is at the end; the full upgrade path is in
-[15](15-migration-3-to-4.md).
+symptom, the cause and the fix. The full upgrade path from 3.x is in [15](15-migration-3-to-4.md).
 
-## 1. The type is part of the address
+## 1. The address is a string; the type is a separate filter
 
-`request<int>` and `subscribeEvents<num>(handler: ...)` are different topics. `fire<int>` does not
-reach a `num` handler, and a pattern does not change the type token.
+`EventKey<Order>('orders')` and `EventKey<Invoice>('orders')` are different nodes with separate
+`currentData`, but they share the address string. A listener on a supertype key accepts subtype
+data; a listener on an unrelated type does not.
 
 ```dart
-bus.subscribeEvents<num>(handler: ...);
-await bus.request<int>(1);              // NoHandlerException: different topic
-await bus.request<num>(1);              // answered
+final asNum = EventKey<num>('counter');
+bus.subscribeEvents(asNum, handler: (dto, last) async => dto.data);
+await bus.request(EventKey<int>('counter'), 1);   // answered — int is num
+await bus.request(EventKey<String>('counter'), 'x'); // NoHandlerException
 ```
 
-Use the exact static type on both sides, or normalise at the boundary.
+Pick the type deliberately on both sides, or normalise at the boundary.
 
 ## 2. `lastData` is the previous value
 
 In a handler, `dto.data` is the current event and `lastData` is the previous `currentData` of the
 handler's node. On the first call it is `null`. If you need the current stored value, read
-`currentData<T>(paths: ...)`.
+`currentData(key)`.
 
 ## 3. `fire` is not a delivery guarantee
 
 `fire` returns `true` only when a listener accepted the event, a model bus stored it, a transport
-published it, or a remote listener/model interest is known. It never invokes a handler. A topic with
+published it, or a remote listener/model interest is known. It never invokes a handler. A key with
 only a handler subscription returns `false`.
 
 ```dart
-bus.subscribeEvents<int>(handler: (dto, last) async => 1);
-bus.fire<int>(1);                       // false — no listener
+bus.subscribeEvents(counterKey, handler: (dto, last) async => 1);
+bus.fire(counterKey, 1);                // false — no listener
 ```
 
-## 4. Legacy `listen`/`subscribe` have no backpressure controls
+## 4. `listen`/`subscribe` have no backpressure controls
 
-They are a facade over the node's raw broadcast stream. A paused legacy subscription buffers
-**unboundedly** in the Dart stream, has no overflow policy or counters, and a throwing `onData` goes
-to the zone instead of `bus.errors`. Use `subscribeEvents` for buffers, pause policies, error
-routing, counters and handlers. The facade is removed in 5.0.0.
+They are the raw node-stream view. A paused raw subscription buffers **unboundedly** in the Dart
+stream, has no overflow policy or counters, and a throwing `onData` goes to the zone instead of
+`bus.errors`. Use `subscribeEvents` for buffers, pause policies, error routing, counters and
+handlers.
 
 ```dart
 // dangerous under load: the stream queue is invisible and unbounded
-bus.subscribe<Price>(onData: slowRender);
+bus.subscribe(priceKey, onData: slowRender);
 
 // bounded, observable
-bus.subscribeEvents<Price>(
+bus.subscribeEvents(priceKey,
   bufferCapacity: 1,
   bufferOverflow: BufferOverflow.latest,
   onEvent: slowRender,
@@ -63,9 +64,7 @@ running and its result is discarded. A request whose worker dies fails and is **
 idempotency explicit if you need it.
 
 ```dart
-final result = await bus.request<Receipt>(
-  order,
-  paths: ['orders', 'place'],
+final result = await bus.request(receiptKey, order,
   timeout: const Duration(seconds: 2),
   correlationId: trackId,
 );
@@ -80,17 +79,17 @@ local pub/sub.
 
 ```dart
 // does not echo back to the main-side listener
-iso.subscribe<String>(onData: render);
-iso.fire<String>('refresh');
+iso.subscribe(refreshKey, onData: render);
+iso.fire(refreshKey, 'refresh');
 
 // local pub/sub
-layer.current.subscribe<String>(onData: render);
+layer.current.subscribe(refreshKey, onData: render);
 ```
 
 ## 7. Isolate data must be sendable
 
 Only sendable objects cross the boundary: no closures, `Socket`s, `ReceivePort`s or objects that
-capture them. `onInit` and layer init functions must be top-level/static. `arguments` and
+capture them. `onInit` and layer init functions must be top-level/static. The key, `arguments` and
 `correlationId` travel with the DTO.
 
 ## 8. `waitInit` is about readiness and interests
@@ -100,36 +99,40 @@ handler and model interests. A `fire`/`request` sent right after it sees subscri
 `onInit`. Before it, `fire`/`request` throw `StateError`; an `onInit` error comes as
 `EventBusException` from `waitInit`.
 
-## 9. `removeTopic` is stronger than a cancelled listener
+## 9. `remove` is stronger than a cancelled listener
 
-`removeTopic` evicts the node even on a model bus and cancels **all** subscriptions of the topic
+`remove(key)` evicts the node even on a model bus and cancels **all** subscriptions of that keys
 (D13). On a common bus, cancelling the last subscription already removes the node; on a model bus
 it does not. A model bus recreates the node on the next `fire`, `request` or `listen`.
 
 ```dart
-await sub.cancel();                     // node stays on a model bus
-bus.removeTopic<int>(paths: ['x']);    // value and node are forgotten
+await sub.cancel();                 // node stays on a model bus
+bus.remove(counterKey);             // value and node are forgotten
 ```
+
+`removePattern(patternKey)` removes one pattern type node; `removeAddress(address)` removes every
+type node at an exact address.
 
 ## 10. Wildcards are local; brokers differ
 
-`*` is one path token, `>` is one or more trailing tokens and must be last. A wildcard must be a
-whole token. `fire`/`request` reject wildcard paths; only listeners/handlers/nodes may use patterns.
-On the wire, MQTT uses `+`/`#` and `#` also matches zero levels; the transport filters
-over-delivery so local semantics stay the same.
+`*` is one token, `>` is one or more trailing tokens and must be last. A wildcard must be a whole
+token. `fire`/`request` require an `EventKey`; only listeners/handlers/nodes may use
+`EventPatternKey`. On the wire, MQTT uses `+`/`#` and `#` also matches zero levels; the transport
+filters over-delivery so local semantics stay the same.
 
-## 11. The type token is normalised on the wire
+## 11. Type identity must not be stringified
 
-`<` becomes `(`, `>` becomes `)`, commas and whitespace become `_`, repeated `_` collapse. The case
-is preserved: `List<int>` is `List(int)`. This matters when a broker subject or an external
-producer builds the topic by hand. The type is part of the address, not an annotation.
+The type is captured from `T` (`Type _typeOf<T>() => T;`) and compared as a `Type` object. Do not
+build an address, a codec key or a metric key from `T.toString()`/`runtimeType`: minifiers rename
+user classes, and the local `dart compile js -O2` check showed a user class becoming `minified:bd`.
+Put the stable name in the address (`orders.placed.v1`) and use typed codecs.
 
 ## 12. Observability is off by default
 
 No metrics are collected unless `ObservabilityConfig(enabled: true)` is passed. Metric keys default
-to the event type token; dynamic paths do not create unbounded series. Above `cardinalityLimit`,
-new keys go to `__other__` and increment `droppedMetricSeries`. Payload capture is off: errors have
-`event == null` unless `capturePayloads: true`.
+to the event address; `metricKeyBuilder` can coarsen them. Above `cardinalityLimit`, new keys go to
+`__other__` and increment `droppedMetricSeries`. Payload capture is off: errors have `event == null`
+unless `capturePayloads: true`.
 
 ```dart
 final bus = EventBus(observability: const ObservabilityConfig(enabled: true));
@@ -151,15 +154,9 @@ The one method the bus used (`doOnCancel`) is replaced by native subscription ma
 ## 15. Scope is a latest-value consumer
 
 `Scope` lives in `event_bus_arch_patterns`. `Scope.initScope` subscribes with
-`bufferCapacity: 1`, `BufferOverflow.latest`. If `onUpdate` is
-slow, intermediate values are dropped by design. `undo()` needs at least two calls in the history
-(`maxLenForUndo >= 2`). `disposeScope()` cancels only the scope's own subscription; there is no
-`removeHandler:` parameter in 4.0.
-
-## 3.x history
-
-The detailed 3.x fix list and the 3.0 address-model change no longer describe the current package.
-Use [15. Migration](15-migration-3-to-4.md) for the upgrade path and [CHANGELOG.md](../CHANGELOG.md)
-for the release history.
+`bufferCapacity: 1`, `BufferOverflow.latest`. If `onUpdate` is slow, intermediate values are dropped
+by design. `undo()` needs at least two calls in the history (`maxLenForUndo >= 2`).
+`disposeScope()` cancels only the scope's own subscription; there is no `removeHandler:` parameter
+in 4.0.
 
 [Next: Transports →](08-transports.md)

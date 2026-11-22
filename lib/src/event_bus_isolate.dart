@@ -544,7 +544,7 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  bool fire<T>(T data,
+  bool fireLegacy<T>(T data,
       {List<String>? paths,
       String? separator,
       Map<String, String>? arguments,
@@ -577,7 +577,7 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  bool fireKey<T>(EventKey<T> key, T data,
+  bool fire<T>(EventKey<T> key, T data,
       {Map<String, String>? arguments, String? correlationId}) {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
@@ -600,7 +600,7 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  Future<dynamic> requestKey<T>(EventKey<T> key, T data,
+  Future<dynamic> request<T>(EventKey<T> key, T data,
       {Map<String, String>? arguments,
       Duration? timeout,
       CancelToken? cancelToken,
@@ -620,8 +620,8 @@ class EventBusIsolate extends EventBusImpl {
       }
       throw RequestCanceledException(key.address.value);
     }
-    if (haveHandlerKey<T>(key)) {
-      return super.requestKey<T>(key, data,
+    if (haveHandler<T>(key)) {
+      return super.request<T>(key, data,
           arguments: arguments,
           timeout: timeout,
           cancelToken: cancelToken,
@@ -660,7 +660,7 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  Future<dynamic> request<T>(T data,
+  Future<dynamic> requestLegacy<T>(T data,
       {List<String>? paths,
       String? separator,
       Map<String, String>? arguments,
@@ -684,8 +684,8 @@ class EventBusIsolate extends EventBusImpl {
       }
       throw RequestCanceledException(topic.topic);
     }
-    if (haveHandler<T>(paths: paths, separator: separator)) {
-      return super.request<T>(data,
+    if (haveHandlerLegacy<T>(paths: paths, separator: separator)) {
+      return super.requestLegacy<T>(data,
           paths: paths,
           separator: separator,
           arguments: arguments,
@@ -767,7 +767,7 @@ class EventBusIsolate extends EventBusImpl {
   ///registered in the worker for this topic stays; cancel its handler
   ///subscription on the worker bus for a full forget.
   @override
-  bool removeTopic<T>({List<String>? paths, String? separator}) {
+  bool removeTopicLegacy<T>({List<String>? paths, String? separator}) {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
     }
@@ -786,7 +786,7 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  bool removeKey<T>(EventKey<T> key) {
+  bool remove<T>(EventKey<T> key) {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
     }
@@ -800,7 +800,7 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  bool removePatternKey<T>(EventPatternKey<T> key) {
+  bool removePattern<T>(EventPatternKey<T> key) {
     if (isDisposed) {
       throw StateError('EventBusIsolate is disposed');
     }
@@ -1053,7 +1053,7 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  bool fire<T>(T data,
+  bool fireLegacy<T>(T data,
       {List<String>? paths,
       String? separator,
       Map<String, String>? arguments,
@@ -1074,7 +1074,7 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  bool fireKey<T>(EventKey<T> key, T data,
+  bool fire<T>(EventKey<T> key, T data,
       {Map<String, String>? arguments, String? correlationId}) {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
@@ -1085,7 +1085,7 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  Future<dynamic> requestKey<T>(EventKey<T> key, T data,
+  Future<dynamic> request<T>(EventKey<T> key, T data,
       {Map<String, String>? arguments,
       Duration? timeout,
       CancelToken? cancelToken,
@@ -1096,8 +1096,8 @@ class _EventBusForIsolate extends EventBusImpl {
     if (cancelToken?.isCancelled ?? false) {
       throw RequestCanceledException(key.address.value);
     }
-    if (haveHandlerKey<T>(key)) {
-      return super.requestKey<T>(key, data,
+    if (haveHandler<T>(key)) {
+      return super.request<T>(key, data,
           arguments: arguments,
           timeout: timeout,
           cancelToken: cancelToken,
@@ -1114,7 +1114,7 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  Future<dynamic> request<T>(T data,
+  Future<dynamic> requestLegacy<T>(T data,
       {List<String>? paths,
       String? separator,
       Map<String, String>? arguments,
@@ -1130,8 +1130,8 @@ class _EventBusForIsolate extends EventBusImpl {
     if (cancelToken?.isCancelled ?? false) {
       throw RequestCanceledException(topic.topic);
     }
-    if (haveHandler<T>(paths: paths, separator: separator)) {
-      return super.request<T>(data,
+    if (haveHandlerLegacy<T>(paths: paths, separator: separator)) {
+      return super.requestLegacy<T>(data,
           paths: paths,
           separator: separator,
           arguments: arguments,
@@ -1186,7 +1186,7 @@ class _EventBusForIsolate extends EventBusImpl {
 
   ///Removes the topic on this side and asks the main isolate to remove it too.
   @override
-  bool removeTopic<T>({List<String>? paths, String? separator}) {
+  bool removeTopicLegacy<T>({List<String>? paths, String? separator}) {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
@@ -1201,21 +1201,21 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  bool removeKey<T>(EventKey<T> key) {
+  bool remove<T>(EventKey<T> key) {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
-    final removed = super.removeKey(key);
+    final removed = super.remove(key);
     _link.removeSelector(key);
     return removed;
   }
 
   @override
-  bool removePatternKey<T>(EventPatternKey<T> key) {
+  bool removePattern<T>(EventPatternKey<T> key) {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
-    final removed = super.removePatternKey(key);
+    final removed = super.removePattern(key);
     _link.removeSelector(key);
     return removed;
   }

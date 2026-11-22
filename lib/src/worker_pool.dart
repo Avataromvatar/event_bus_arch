@@ -293,7 +293,7 @@ class WorkerPool {
 
   ///Sends an event according to [dispatch]. Returns true when at least one
   ///worker accepted it; false when it reached no worker.
-  bool fire<T>(T data,
+  bool fireLegacy<T>(T data,
       {List<String>? paths,
       String? separator,
       Map<String, String>? arguments,
@@ -327,7 +327,7 @@ class WorkerPool {
 
   ///Sends a request to the worker selected by [dispatch] and waits for its
   ///answer. [DispatchStrategy.broadcast] is rejected with [UnsupportedError].
-  Future<dynamic> request<T>(T data,
+  Future<dynamic> requestLegacy<T>(T data,
       {List<String>? paths,
       String? separator,
       Map<String, String>? arguments,
@@ -356,7 +356,7 @@ class WorkerPool {
     slot.requests++;
     slot.inFlight++;
     try {
-      return await bus.request<T>(data,
+      return await bus.requestLegacy<T>(data,
           paths: paths,
           separator: separator,
           arguments: arguments,
@@ -377,7 +377,7 @@ class WorkerPool {
   }
 
   ///Sends an event on an exact E key according to [dispatch].
-  bool fireKey<T>(EventKey<T> key, T data,
+  bool fire<T>(EventKey<T> key, T data,
       {Map<String, String>? arguments, String? correlationId}) {
     _checkOpen();
     final dto = EventDTO<T>.withKey(key, data,
@@ -404,7 +404,7 @@ class WorkerPool {
   }
 
   ///Sends a request on an exact E key to the selected worker.
-  Future<dynamic> requestKey<T>(EventKey<T> key, T data,
+  Future<dynamic> request<T>(EventKey<T> key, T data,
       {Map<String, String>? arguments,
       Duration? timeout,
       CancelToken? cancelToken,
@@ -429,7 +429,7 @@ class WorkerPool {
     slot.requests++;
     slot.inFlight++;
     try {
-      return await bus.requestKey<T>(key, data,
+      return await bus.request<T>(key, data,
           arguments: arguments,
           timeout: timeout,
           cancelToken: cancelToken,
@@ -546,7 +546,7 @@ class WorkerPool {
       String? correlationId) {
     slot.fired++;
     try {
-      final accepted = bus.fire<T>(data,
+      final accepted = bus.fireLegacy<T>(data,
           paths: paths,
           separator: separator,
           arguments: arguments,
@@ -583,7 +583,7 @@ class WorkerPool {
       String? correlationId) {
     slot.fired++;
     try {
-      final accepted = bus.fireKey<T>(key, data,
+      final accepted = bus.fire<T>(key, data,
           arguments: arguments, correlationId: correlationId);
       if (accepted) _counters.accepted++;
       return accepted;

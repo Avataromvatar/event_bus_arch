@@ -21,14 +21,14 @@ void main() {
       final isolate = EventBusIsolate(
         onInit: (bus, data) {
           final out = data as SendPort;
-          bus.subscribeEventsKey<Order>(EventKey<Order>('orders'),
+          bus.subscribeEvents<Order>(EventKey<Order>('orders'),
               onEvent: (order) => out.send(order.id));
         },
         initialData: port.sendPort,
       );
       await isolate.waitInit;
 
-      expect(isolate.fireKey(EventKey<Order>('orders'), Order('A-1')), isTrue);
+      expect(isolate.fire(EventKey<Order>('orders'), Order('A-1')), isTrue);
       expect(await port.first.timeout(const Duration(seconds: 2)), 'A-1');
 
       port.close();
@@ -39,26 +39,26 @@ void main() {
       final start = Completer<void>();
       final isolate = EventBusIsolate(
         onInit: (bus, data) {
-          bus.subscribeEventsKey<String>(EventKey<String>('start'),
+          bus.subscribeEvents<String>(EventKey<String>('start'),
               onEvent: (_) {
-            bus.fireKey(EventKey<Order>('orders'), Order('W-1'));
+            bus.fire(EventKey<Order>('orders'), Order('W-1'));
           });
         },
       );
       await isolate.waitInit;
 
       final received = <Order>[];
-      final sub = isolate.subscribeEventsKey<Order>(
+      final sub = isolate.subscribeEvents<Order>(
           EventKey<Order>('orders'), onEvent: (order) {
         received.add(order);
         if (!start.isCompleted) start.complete();
       });
 
-      isolate.fireKey(EventKey<String>('start'), 'go');
+      isolate.fire(EventKey<String>('start'), 'go');
       await start.future.timeout(const Duration(seconds: 2));
 
       expect(received.single.id, 'W-1');
-      expect(isolate.currentDataKey(EventKey<Order>('orders'))?.id, 'W-1');
+      expect(isolate.currentData(EventKey<Order>('orders'))?.id, 'W-1');
 
       await sub.cancel();
       await isolate.dispose();
@@ -68,13 +68,13 @@ void main() {
         () async {
       final isolate = EventBusIsolate(
         onInit: (bus, data) {
-          bus.subscribeEventsKey<Order>(EventKey<Order>('orders'),
+          bus.subscribeEvents<Order>(EventKey<Order>('orders'),
               handler: (dto, lastData) async => dto.data.id);
         },
       );
       await isolate.waitInit;
 
-      expect(await isolate.requestKey(EventKey<Order>('orders'), Order('A-1')),
+      expect(await isolate.request(EventKey<Order>('orders'), Order('A-1')),
           'A-1');
 
       await isolate.dispose();
@@ -86,7 +86,7 @@ void main() {
       final isolate = EventBusIsolate(
         onInit: (bus, data) {
           final out = data as SendPort;
-          bus.subscribeEventsKey<Order>(
+          bus.subscribeEvents<Order>(
               EventPatternKey<Order>('orders.*'),
               onEvent: (order) => out.send(order.id));
         },
@@ -95,7 +95,7 @@ void main() {
       await isolate.waitInit;
 
       expect(
-        isolate.fireKey(EventKey<Order>('orders.placed'), Order('A-1')),
+        isolate.fire(EventKey<Order>('orders.placed'), Order('A-1')),
         isTrue,
       );
       expect(await port.first.timeout(const Duration(seconds: 2)), 'A-1');
@@ -109,15 +109,15 @@ void main() {
       final isolate = EventBusIsolate(onInit: (bus, data) {});
       await isolate.waitInit;
 
-      final sub = isolate.subscribeEventsKey<Order>(
+      final sub = isolate.subscribeEvents<Order>(
           EventKey<Order>('orders'), onEvent: (_) {});
-      expect(isolate.removeKey(EventKey<Order>('orders')), isTrue);
-      expect(isolate.haveListenerKey(EventKey<Order>('orders')), isFalse);
+      expect(isolate.remove(EventKey<Order>('orders')), isTrue);
+      expect(isolate.haveListener(EventKey<Order>('orders')), isFalse);
 
-      final sub2 = isolate.subscribeEventsKey<Invoice>(
+      final sub2 = isolate.subscribeEvents<Invoice>(
           EventKey<Invoice>('orders'), onEvent: (_) {});
       expect(isolate.removeAddress(EventAddress('orders')), isTrue);
-      expect(isolate.haveListenerKey(EventKey<Invoice>('orders')), isFalse);
+      expect(isolate.haveListener(EventKey<Invoice>('orders')), isFalse);
 
       await sub.cancel();
       await sub2.cancel();

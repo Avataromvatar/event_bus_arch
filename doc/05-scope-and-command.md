@@ -13,9 +13,10 @@ bus: a call is a `request` when a handler exists, otherwise a `fire` (a model bu
 
 ```dart
 final scope = Scope<int>();
+final counterKey = EventKey<int>('counter');
 await scope.initScope(
   bus,
-  paths: ['counter'],
+  counterKey,
   initialData: 0,
   maxLenForUndo: 10,               // history depth; undo needs at least 2 entries
   onUpdate: (value) => print('value: $value'),
@@ -31,10 +32,9 @@ API:
 
 ```dart
 mixin class Scope<T> {
-  Future<void> initScope(EventBus bus, {
+  Future<void> initScope(EventBus bus, EventKey<T> key, {
     T? initialData,
     bool initialDataNeedExecute = true,
-    List<String>? paths,
     int maxLenForUndo = 10,
     void Function(T newData)? onUpdate,
   });
@@ -57,7 +57,7 @@ How it works in 4.0:
   callback is busy, the newest value wins and older ones are dropped and counted.
 * `initialData` is sent through the bus by default (`initialDataNeedExecute: true`), so handlers and
   other listeners see it. Set it to `false` to seed only `lastData`.
-* `call` executes the command: a `request` if the bus has a handler for the topic, else a `fire`
+* `call` executes the command: a `request` if the bus has a handler for the key, else a `fire`
   (the result is `null`).
 * `undo()` removes the last entry and re-sends the previous value. It returns `null` when fewer than
   two calls exist.
@@ -69,7 +69,7 @@ How it works in 4.0:
 ## Command
 
 ```dart
-final command = Command<int>(bus, paths: ['counter'], maxLen: 10);
+final command = Command<int>(bus, EventKey<int>('counter'), maxLen: 10);
 final result = await command.execute(1);
 print(command.queueLength);     // 1
 print(command.lastCall?.$1);    // 1
@@ -84,20 +84,20 @@ abstract class Command<T> {
   Future<dynamic> undo();
   EventBus get bindedBus;
   int get queueLength;
-  List<String>? get paths;
+  EventKey<T> get key;
   (T data, Map<String, String>? arguments)? get lastCall;
 
-  factory Command(EventBus bus, {List<String>? paths, int maxLen = 10});
+  factory Command(EventBus bus, EventKey<T> key, {int maxLen = 10});
 }
 ```
 
 `execute` appends the call to a bounded history (`maxLen`, at least 1; the oldest entry is removed)
-and then calls the bus. `_call` is a `request` when `haveHandler<T>(paths:)` is true; otherwise it
-sends a `fire` and returns `null`. `undo` returns `null` when the history has fewer than two entries.
+and then calls the bus. `_call` is a `request` when `haveHandler<T>(key)` is true; otherwise it sends a
+`fire` and returns `null`. `undo` returns `null` when the history has fewer than two entries.
 
 | Situation | Result |
 |---|---|
-| A handler exists for the topic | `request`; the handler's value or error is returned |
+| A handler exists for the key | `request`; the handler's value or error is returned |
 | No handler, common bus | `fire`; listeners get the value, the result is `null` |
 | No handler, model bus | `fire` stores the value and returns `true`; the result is still `null` |
 | `undo` with fewer than 2 calls | `null`, nothing is sent |

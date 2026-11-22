@@ -22,13 +22,13 @@ void main() {
       final received = <int>[];
       final key = EventKey<int>('counter');
 
-      final sub = bus.subscribeEventsKey<int>(key, onEvent: received.add);
-      expect(bus.fireKey(key, 1), isTrue);
-      expect(bus.fireKey(key, 2), isTrue);
+      final sub = bus.subscribeEvents<int>(key, onEvent: received.add);
+      expect(bus.fire(key, 1), isTrue);
+      expect(bus.fire(key, 2), isTrue);
       await _pump();
 
       expect(received, [1, 2]);
-      expect(bus.currentDataKey(key), 2);
+      expect(bus.currentData(key), 2);
       await sub.cancel();
       await bus.dispose();
     });
@@ -42,22 +42,22 @@ void main() {
       final invoiceKey = EventKey<Invoice>('orders');
 
       final orderSub =
-          bus.subscribeEventsKey<Order>(orderKey, onEvent: orders.add);
+          bus.subscribeEvents<Order>(orderKey, onEvent: orders.add);
       final invoiceSub =
-          bus.subscribeEventsKey<Invoice>(invoiceKey, onEvent: invoices.add);
+          bus.subscribeEvents<Invoice>(invoiceKey, onEvent: invoices.add);
 
-      bus.fireKey(orderKey, Order('A-1'));
+      bus.fire(orderKey, Order('A-1'));
       await _pump();
       expect(orders, hasLength(1));
       expect(invoices, isEmpty);
-      expect(bus.currentDataKey(orderKey)?.id, 'A-1');
-      expect(bus.currentDataKey(invoiceKey), isNull);
+      expect(bus.currentData(orderKey)?.id, 'A-1');
+      expect(bus.currentData(invoiceKey), isNull);
 
-      bus.fireKey(invoiceKey, Invoice('I-1'));
+      bus.fire(invoiceKey, Invoice('I-1'));
       await _pump();
       expect(orders, hasLength(1));
       expect(invoices, hasLength(1));
-      expect(bus.currentDataKey(invoiceKey)?.id, 'I-1');
+      expect(bus.currentData(invoiceKey)?.id, 'I-1');
 
       await orderSub.cancel();
       await invoiceSub.cancel();
@@ -69,14 +69,14 @@ void main() {
       final seen = <DomainEvent>[];
       final domainKey = EventKey<DomainEvent>('events');
 
-      final sub = bus.subscribeEventsKey<DomainEvent>(domainKey,
+      final sub = bus.subscribeEvents<DomainEvent>(domainKey,
           onEvent: seen.add);
-      bus.fireKey(EventKey<Order>('events'), Order('A-1'));
+      bus.fire(EventKey<Order>('events'), Order('A-1'));
       await _pump();
 
       expect(seen, hasLength(1));
       expect(seen.single, isA<Order>());
-      expect(bus.currentDataKey(domainKey), isA<Order>());
+      expect(bus.currentData(domainKey), isA<Order>());
 
       await sub.cancel();
       await bus.dispose();
@@ -88,17 +88,17 @@ void main() {
       final pattern = EventPatternKey<Order>('orders.*');
 
       final sub =
-          bus.subscribeEventsKey<Order>(pattern, onEvent: received.add);
-      bus.fireKey(EventKey<Order>('orders.placed'), Order('A-1'));
-      bus.fireKey(EventKey<Invoice>('orders.placed'), Invoice('I-1'));
+          bus.subscribeEvents<Order>(pattern, onEvent: received.add);
+      bus.fire(EventKey<Order>('orders.placed'), Order('A-1'));
+      bus.fire(EventKey<Invoice>('orders.placed'), Invoice('I-1'));
       await _pump();
 
       expect(received, hasLength(1));
       expect(received.single.id, 'A-1');
       expect(
-          bus.haveListenerKey<Order>(EventKey<Order>('orders.placed')), isTrue);
+          bus.haveListener<Order>(EventKey<Order>('orders.placed')), isTrue);
       expect(
-          bus.haveListenerKey<Invoice>(EventKey<Invoice>('orders.placed')),
+          bus.haveListener<Invoice>(EventKey<Invoice>('orders.placed')),
           isFalse,
           reason: 'the Invoice key has no listener of its own');
 
@@ -112,13 +112,13 @@ void main() {
       final patternKey = EventPatternKey<int>('sensor.*');
       final exactKey = EventKey<int>('sensor.temp');
 
-      final patternSub = bus.subscribeEventsKey<int>(patternKey,
+      final patternSub = bus.subscribeEvents<int>(patternKey,
           handler: (dto, lastData) async => 'pattern');
-      final exactSub = bus.subscribeEventsKey<int>(exactKey,
+      final exactSub = bus.subscribeEvents<int>(exactKey,
           handler: (dto, lastData) async => 'exact');
 
-      expect(await bus.requestKey(exactKey, 1), 'exact');
-      expect(await bus.requestKey(EventKey<int>('sensor.humidity'), 1),
+      expect(await bus.request(exactKey, 1), 'exact');
+      expect(await bus.request(EventKey<int>('sensor.humidity'), 1),
           'pattern');
 
       await patternSub.cancel();
@@ -130,10 +130,10 @@ void main() {
         () async {
       final bus = EventBus();
       final domainPattern = EventPatternKey<DomainEvent>('orders.*');
-      final sub = bus.subscribeEventsKey<DomainEvent>(domainPattern,
+      final sub = bus.subscribeEvents<DomainEvent>(domainPattern,
           handler: (dto, lastData) async => dto.data.runtimeType);
 
-      final result = await bus.requestKey(
+      final result = await bus.request(
           EventKey<Order>('orders.placed'), Order('A-1'));
       expect(result, Order);
 
@@ -143,11 +143,11 @@ void main() {
 
     test('a type mismatch has no handler', () async {
       final bus = EventBus();
-      final sub = bus.subscribeEventsKey<Order>(EventKey<Order>('orders'),
+      final sub = bus.subscribeEvents<Order>(EventKey<Order>('orders'),
           handler: (dto, lastData) async => dto.data);
 
       await expectLater(
-        bus.requestKey(EventKey<Invoice>('orders'), Invoice('I-1')),
+        bus.request(EventKey<Invoice>('orders'), Invoice('I-1')),
         throwsA(isA<NoHandlerException>()),
       );
 
@@ -160,16 +160,16 @@ void main() {
       final orderKey = EventKey<Order>('orders');
       final invoiceKey = EventKey<Invoice>('orders');
       final orderSub =
-          bus.subscribeEventsKey<Order>(orderKey, onEvent: (_) {});
+          bus.subscribeEvents<Order>(orderKey, onEvent: (_) {});
       final invoiceSub =
-          bus.subscribeEventsKey<Invoice>(invoiceKey, onEvent: (_) {});
+          bus.subscribeEvents<Invoice>(invoiceKey, onEvent: (_) {});
 
-      expect(bus.removeKey(orderKey), isTrue);
-      expect(bus.currentDataKey(orderKey), isNull);
-      expect(bus.haveListenerKey(invoiceKey), isTrue);
+      expect(bus.remove(orderKey), isTrue);
+      expect(bus.currentData(orderKey), isNull);
+      expect(bus.haveListener(invoiceKey), isTrue);
 
       expect(bus.removeAddress(EventAddress('orders')), isTrue);
-      expect(bus.haveListenerKey(invoiceKey), isFalse);
+      expect(bus.haveListener(invoiceKey), isFalse);
 
       await orderSub.cancel();
       await invoiceSub.cancel();
@@ -181,15 +181,15 @@ void main() {
       final bus = EventBus();
       final key = EventKey<int>('counter');
       final pattern = EventPatternKey<int>('counter.*');
-      final sub = bus.subscribeEventsKey<int>(key,
+      final sub = bus.subscribeEvents<int>(key,
           handler: (dto, lastData) async => dto.data);
 
-      expect(bus.haveHandlerKey(key), isTrue);
-      expect(bus.haveAvailableHandlerKey(key), isTrue);
-      expect(bus.haveHandlerKey(pattern), isFalse);
+      expect(bus.haveHandler(key), isTrue);
+      expect(bus.haveAvailableHandler(key), isTrue);
+      expect(bus.haveHandler(pattern), isFalse);
 
       await sub.cancel();
-      expect(bus.haveHandlerKey(key), isFalse);
+      expect(bus.haveHandler(key), isFalse);
       await bus.dispose();
     });
 
@@ -198,11 +198,11 @@ void main() {
       final orderKey = EventKey<Order>('orders');
       final invoiceKey = EventKey<Invoice>('orders');
 
-      bus.fireKey(orderKey, Order('A-1'));
-      bus.fireKey(invoiceKey, Invoice('I-1'));
+      bus.fire(orderKey, Order('A-1'));
+      bus.fire(invoiceKey, Invoice('I-1'));
 
-      expect(bus.currentDataKey(orderKey)?.id, 'A-1');
-      expect(bus.currentDataKey(invoiceKey)?.id, 'I-1');
+      expect(bus.currentData(orderKey)?.id, 'A-1');
+      expect(bus.currentData(invoiceKey)?.id, 'I-1');
       await bus.dispose();
     });
 
@@ -211,7 +211,7 @@ void main() {
           observability: const ObservabilityConfig(enabled: true));
       final key = EventKey<Order>('orders.placed');
 
-      bus.fireKey(key, Order('A-1'));
+      bus.fire(key, Order('A-1'));
       final snapshot = bus.metrics.snapshot();
 
       expect(snapshot.fired, 1);

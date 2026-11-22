@@ -63,19 +63,19 @@ void main() {
     test('a message published by one bus reaches the other', () async {
       final received = Completer<int>();
       busB
-          .listen<int>(paths: ['sensor', 'temp'])
+          .listenLegacy<int>(paths: ['sensor', 'temp'])
           .listen((value) => received.complete(value));
 
-      busA.fire<int>(42, paths: ['sensor', 'temp']);
+      busA.fireLegacy<int>(42, paths: ['sensor', 'temp']);
 
       expect(await received.future.timeout(const Duration(seconds: 5)), 42);
     });
 
     test('the publisher does not receive its own echo', () async {
       final received = <int>[];
-      busA.listen<int>(paths: ['sensor', 'temp']).listen(received.add);
+      busA.listenLegacy<int>(paths: ['sensor', 'temp']).listen(received.add);
 
-      busA.fire<int>(1, paths: ['sensor', 'temp']);
+      busA.fireLegacy<int>(1, paths: ['sensor', 'temp']);
       await Future<void>.delayed(const Duration(milliseconds: 500));
 
       expect(received, [1]);
@@ -83,11 +83,11 @@ void main() {
 
     test('a wildcard listener receives a concrete subject', () async {
       final received = Completer<int>();
-      busB.listen<int>(paths: ['sensor', '*']).listen((value) {
+      busB.listenLegacy<int>(paths: ['sensor', '*']).listen((value) {
         received.complete(value);
       });
 
-      busA.fire<int>(7, paths: ['sensor', 'humidity']);
+      busA.fireLegacy<int>(7, paths: ['sensor', 'humidity']);
 
       expect(await received.future.timeout(const Duration(seconds: 5)), 7);
     });
@@ -95,16 +95,16 @@ void main() {
     test('a request is answered and reaches listeners once', () async {
       final values = <int>[];
       final subscription = busB
-          .listen<int>(paths: ['sensor', '*'])
+          .listenLegacy<int>(paths: ['sensor', '*'])
           .listen(values.add);
       addTearDown(subscription.cancel);
-      busB.subscribeEvents<int>(
+      busB.subscribeEventsLegacy<int>(
         paths: ['sensor', 'double'],
         handler: (dto, lastData) async => dto.data * 2,
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
-      final result = await busA.request<int>(
+      final result = await busA.requestLegacy<int>(
         21,
         paths: ['sensor', 'double'],
         timeout: const Duration(seconds: 5),
@@ -118,16 +118,16 @@ void main() {
     test('overlapping subscriptions deliver a fire once per node', () async {
       final values = <int>[];
       final subscription = busB
-          .listen<int>(paths: ['sensor', '*'])
+          .listenLegacy<int>(paths: ['sensor', '*'])
           .listen(values.add);
       addTearDown(subscription.cancel);
-      busB.subscribeEvents<int>(
+      busB.subscribeEventsLegacy<int>(
         paths: ['sensor', 'temp'],
         handler: (dto, lastData) async => dto.data,
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
-      busA.fire<int>(5, paths: ['sensor', 'temp']);
+      busA.fireLegacy<int>(5, paths: ['sensor', 'temp']);
       await Future<void>.delayed(const Duration(milliseconds: 500));
 
       expect(values, [5]);
@@ -135,7 +135,7 @@ void main() {
 
     test('a remote request times out when nobody answers', () async {
       await expectLater(
-        busA.request<int>(
+        busA.requestLegacy<int>(
           1,
           paths: ['sensor', 'nobody'],
           timeout: const Duration(milliseconds: 200),
@@ -157,9 +157,9 @@ void main() {
       );
       addTearDown(busC.dispose);
       await busC.waitConnected(timeout: const Duration(seconds: 5));
-      busC.listen<int>(paths: ['args']).listen((_) {});
+      busC.listenLegacy<int>(paths: ['args']).listen((_) {});
 
-      busA.fire<int>(1, paths: ['args'], arguments: {'tenant': 'acme'});
+      busA.fireLegacy<int>(1, paths: ['args'], arguments: {'tenant': 'acme'});
 
       expect(await received.future.timeout(const Duration(seconds: 5)), {
         'tenant': 'acme',

@@ -5,6 +5,16 @@ import 'dart:typed_data';
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_mqtt/event_bus_arch_mqtt.dart';
 
+EventCodec intCodec() => EventCodec(
+      encode: (dto) =>
+          (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+      decode: (data, address, {arguments}) => EventDTO.withKey(
+        EventKey<int>(address.value),
+        int.parse(utf8.decode(data)),
+        arguments: arguments,
+      ),
+    );
+
 ///A two-bus MQTT 5 demo. Start a broker first, for example:
 ///
 ///```text
@@ -18,38 +28,25 @@ import 'package:event_bus_arch_mqtt/event_bus_arch_mqtt.dart';
 ///```
 Future<void> main() async {
   final broker = Uri.parse('mqtt://localhost:1883');
+  final sensorTemp = EventAddress('sensor.temp');
+  final sensorDouble = EventAddress('sensor.double');
+  final sensorAny = EventPattern('sensor.*');
 
-  final publisher = EventBusMqtt(
+  final publisher = EventBusMqtt.keys(
     broker,
-    serializers: {
-      'int.sensor.temp': (dto) =>
-          (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
-      'int.sensor.double': (dto) =>
-          (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
-    },
-    deserializers: {
-      // A remote request needs a deserializer for the response.
-      'int.sensor.double': (data, topic, {arguments}) => EventDTO<int>(
-        int.parse(utf8.decode(data)),
-        topic: Topic.parse(topic),
-        arguments: arguments,
-      ),
-    },
+    codecs: EventCodecRegistry(exact: {
+      sensorTemp: intCodec(),
+      // A remote request needs a decoder for the response.
+      sensorDouble: intCodec(),
+    }),
   );
 
-  final subscriber = EventBusMqtt(
+  final subscriber = EventBusMqtt.keys(
     broker,
-    serializers: {
-      'int.sensor.double': (dto) =>
-          (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
-    },
-    deserializers: {
-      'int.sensor.*': (data, topic, {arguments}) => EventDTO<int>(
-        int.parse(utf8.decode(data)),
-        topic: Topic.parse(topic),
-        arguments: arguments,
-      ),
-    },
+    codecs: EventCodecRegistry(
+      exact: {sensorDouble: intCodec()},
+      patterns: {sensorAny: intCodec()},
+    ),
   );
 
   await Future.wait([
@@ -57,22 +54,22 @@ Future<void> main() async {
     subscriber.waitConnected(timeout: const Duration(seconds: 5)),
   ]);
 
-  subscriber.subscribeEvents<int>(
-    paths: ['sensor', 'double'],
+  subscriber.subscribeEvents(
+    EventKey<int>('sensor.double'),
     handler: (dto, lastData) async => dto.data * 2,
   );
 
   final received = <int>[];
   final subscription = subscriber
-      .listen<int>(paths: ['sensor', '*'])
+      .listen(EventPatternKey<int>('sensor.*'))
       .listen(received.add);
 
-  publisher.fire<int>(21, paths: ['sensor', 'temp']);
+  publisher.fire(EventKey<int>('sensor.temp'), 21);
   await Future<void>.delayed(const Duration(milliseconds: 500));
 
-  final doubled = await publisher.request<int>(
+  final doubled = await publisher.request(
+    EventKey<int>('sensor.double'),
     21,
-    paths: ['sensor', 'double'],
     timeout: const Duration(seconds: 5),
   );
 

@@ -34,7 +34,7 @@ class FSMTest with FSM<FSMTeststate> {
     addFSMTransition<String>(
       FSMTeststate.state2,
       FSMTeststate.state3,
-      selector: EventKey<String>('String'),
+      selector: EventKey<String>('text'),
       handler: (currentState, lastState, event, ignoredEvents) async {
         print('$lastState -> $currentState with $event');
         return null;
@@ -45,7 +45,7 @@ class FSMTest with FSM<FSMTeststate> {
 
 Future<void> main() async {
   var fsm = FSMTest(EventBus());
-  fsm.bus.fire(1);
-  fsm.bus.fire(2);
-  fsm.bus.fire('Test');
+  fsm.bus.fire(EventKey<int>('int'), 1);
+  fsm.bus.fire(EventKey<int>('int'), 2);
+  fsm.bus.fire(EventKey<String>('text'), 'Test');
 }

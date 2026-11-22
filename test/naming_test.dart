@@ -6,7 +6,7 @@ import 'package:test/test.dart';
 ///instead of surprising a caller later.
 
 void _worker(EventBus bus, Object? initialData) {
-  bus.subscribeEvents<String>(handler: (dto, lastData) async {
+  bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {
     return '$initialData: ${dto.data}';
   });
 }
@@ -17,7 +17,7 @@ void main() {
       final iso = EventBusIsolate(onInit: _worker, initialData: 'prefix');
       await iso.waitInit;
 
-      expect(await iso.request<String>('x'), 'prefix: x');
+      expect(await iso.requestLegacy<String>('x'), 'prefix: x');
       await iso.dispose();
     });
   });
@@ -26,7 +26,7 @@ void main() {
     test('send takes paths, separator and arguments', () async {
       final bus = EventBus(isModelBus: true);
       Map<String, String>? seen;
-      bus.subscribeEvents<int>(
+      bus.subscribeEventsLegacy<int>(
         paths: ['a', 'b'],
         separator: '/',
         handler: (dto, lastData) async {
@@ -35,7 +35,7 @@ void main() {
         },
       );
 
-      final result = await bus.request<int>(1,
+      final result = await bus.requestLegacy<int>(1,
           paths: ['a', 'b'], separator: '/', arguments: {'k': 'v'});
 
       expect(result, 1);
@@ -45,37 +45,37 @@ void main() {
 
     test('the reading methods take paths and separator', () async {
       final bus = EventBus(isModelBus: true);
-      final handler = bus.subscribeEvents<int>(
+      final handler = bus.subscribeEventsLegacy<int>(
           paths: ['c'], handler: (dto, lastData) async {});
 
-      expect(bus.haveHandler<int>(paths: ['c'], separator: '.'), true);
-      expect(bus.haveListener<int>(paths: ['c'], separator: '.'), false);
-      expect(bus.currentData<int>(paths: ['c'], separator: '.'), null);
+      expect(bus.haveHandlerLegacy<int>(paths: ['c'], separator: '.'), true);
+      expect(bus.haveListenerLegacy<int>(paths: ['c'], separator: '.'), false);
+      expect(bus.currentDataLegacy<int>(paths: ['c'], separator: '.'), null);
 
-      final sub = bus.subscribe<int>(
+      final sub = bus.subscribeLegacy<int>(
           paths: ['c'],
           separator: '.',
           onData: (_) {},
           onError: (_) {},
           onDone: () {},
           cancelOnError: true);
-      expect(bus.haveListener<int>(paths: ['c'], separator: '.'), true);
+      expect(bus.haveListenerLegacy<int>(paths: ['c'], separator: '.'), true);
       await sub.cancel();
 
-      final stream = bus.listen<int>(paths: ['c'], separator: '.');
+      final stream = bus.listenLegacy<int>(paths: ['c'], separator: '.');
       expect(stream, isA<Stream<int>>());
 
       await handler.cancel();
-      expect(bus.haveHandler<int>(paths: ['c']), false);
+      expect(bus.haveHandlerLegacy<int>(paths: ['c']), false);
       await bus.dispose();
     });
 
     test('subscribeEvents takes initialData', () async {
       final bus = EventBus(isModelBus: true);
-      bus.subscribeEvents<int>(
+      bus.subscribeEventsLegacy<int>(
           initialData: 3, handler: (dto, lastData) async {});
 
-      expect(bus.currentData<int>(), 3);
+      expect(bus.currentDataLegacy<int>(), 3);
       await bus.dispose();
     });
   });

@@ -35,7 +35,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(
-      bus.fireKey(EventKey<Order>('orders.placed'), Order('A-1')),
+      bus.fire(EventKey<Order>('orders.placed'), Order('A-1')),
       isTrue,
     );
     await Future<void>.delayed(Duration.zero);

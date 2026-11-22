@@ -2,27 +2,26 @@
 
 NATS transport for [`event_bus_arch`](https://pub.dev/packages/event_bus_arch).
 
-`EventBusNats` is an `EventBus` whose nodes publish to and subscribe from a
-NATS server. Application code keeps using `fire`, `request`, `listen`, `subscribe` and
-`setHandler`; the transport is configured with serializers and deserializers.
+`EventBusNats.keys` is an `EventBus` whose nodes publish to and subscribe from a NATS server.
+Application code keeps using `fire`, `request`, `listen`, `subscribe` and `subscribeEvents`; the
+transport is configured with an `EventCodecRegistry` keyed by event address.
 
 The package is a thin NATS adapter over
-[`event_bus_arch_transport`](../event_bus_arch_transport): the connection lifecycle,
-subscription registry, topic ↔ subject mapping, node and bus are shared with
-other transports. This package supplies the `dart_nats` client adapter, the
-NATS grammar and the public `Nats*` names.
+[`event_bus_arch_transport`](../event_bus_arch_transport): the connection lifecycle, subscription
+registry, address ↔ subject mapping, node and bus are shared with other transports. This package
+supplies the `dart_nats` client adapter, the NATS grammar and the public `Nats*` names.
 
 ## Requirements
 
 - Dart SDK 3.12 or newer.
-- A NATS server. Headers (`arguments` and self-echo filtering) need NATS 2.2+.
-  With an older server set `NatsConnectionOptions(useHeaders: false)`, but then
-  `arguments` are not transmitted and the bus does not filter its own echo.
+- A NATS server. Headers (`arguments` and self-echo filtering) need NATS 2.2+. With an older server
+  set `NatsConnectionOptions(useHeaders: false)`, but then `arguments` are not transmitted and the
+  bus does not filter its own echo.
 
 ## Quick start
 
-Two buses in one process: one publishes to the server, the other receives from
-it. In a real application they would usually run in different processes.
+Two buses in one process: one publishes to the server, the other receives from it. In a real
+application they would usually run in different processes.
 
 ```dart
 import 'dart:async';
@@ -32,23 +31,28 @@ import 'dart:typed_data';
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_nats/event_bus_arch_nats.dart';
 
-Future<void> main() async {
-  final publisher = EventBusNats(
-    Uri.parse('nats://localhost:4222'),
-    serializers: {
-      'int.sensor.temp': (dto) =>
+EventCodec intCodec() => EventCodec(
+      encode: (dto) =>
           (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
-    },
+      decode: (data, address, {arguments}) => EventDTO.withKey(
+        EventKey<int>(address.value),
+        int.parse(utf8.decode(data)),
+        arguments: arguments,
+      ),
+    );
+
+Future<void> main() async {
+  final sensorTemp = EventAddress('sensor.temp');
+  final sensorAny = EventPattern('sensor.*');
+
+  final publisher = EventBusNats.keys(
+    Uri.parse('nats://localhost:4222'),
+    codecs: EventCodecRegistry(exact: {sensorTemp: intCodec()}),
   );
 
-  final subscriber = EventBusNats(
+  final subscriber = EventBusNats.keys(
     Uri.parse('nats://localhost:4222'),
-    deserializers: {
-      'int.sensor.*': (data, topic, {arguments}) => EventDTO<int>(
-        int.parse(utf8.decode(data)),
-        topic: Topic.parse(topic),
-      ),
-    },
+    codecs: EventCodecRegistry(patterns: {sensorAny: intCodec()}),
   );
 
   await Future.wait([
@@ -57,15 +61,15 @@ Future<void> main() async {
   ]);
 
   final received = Completer<int>();
-  final subscription = subscriber.subscribe<int>(
-    paths: ['sensor', '*'],
+  final subscription = subscriber.subscribe(
+    EventPatternKey<int>('sensor.*'),
     onData: (value) {
       print('received: $value');
       received.complete(value);
     },
   );
 
-  publisher.fire<int>(21, paths: ['sensor', 'temp']);
+  publisher.fire(EventKey<int>('sensor.temp'), 21);
 
   await received.future.timeout(const Duration(seconds: 5));
 
@@ -75,173 +79,76 @@ Future<void> main() async {
 }
 ```
 
-The runnable version is in `example/event_bus_arch_nats_example.dart`.
+A runnable keyed version is in `example/event_bus_arch_nats_example.dart`.
 
-## Topics and subjects
+## Addresses and subjects
 
-A local topic is `<type>.<path...>`, for example `int.sensor.temp`. By default
-it is also the wire subject. The type token comes from the static type `T` of
-the call and is normalised by the core to a broker-safe token: `List<int>`
-becomes `List(int)`.
+The event address is the wire subject: `orders.placed.v1` is published to
+`orders.placed.v1`. The address is user-supplied; no Dart type name and no `typeTags` are involved.
 
 `subjectPrefix` namespaces every subject:
 
 ```dart
-EventBusNats(..., subjectPrefix: 'acme.shop');
-// int.sensor.temp -> acme.shop.int.sensor.temp
+EventBusNats.keys(..., subjectPrefix: 'acme.shop');
+// orders.placed.v1 -> acme.shop.orders.placed.v1
 ```
 
-The prefix is stripped before the deserializer is called, so the deserializer
-always receives a local topic.
+The prefix is stripped before the codec is called, so the codec always receives the local address.
 
-`typeTags` replaces the type token with a stable wire name. This is the escape
-hatch for `runtimeType` names that are minified on the web or obfuscated in an
-AOT build:
+## Codecs
 
-```dart
-EventBusNats(..., typeTags: {'int': 'number'});
-// int.sensor.temp -> number.sensor.temp
-```
-
-Keys are the local type tokens as they appear in `Topic.type`; values must be
-unique single tokens without `.`, `*`, `>` or whitespace.
-
-## Serializers and deserializers
-
-Registry keys are local topics. Resolution order:
+`EventCodecRegistry` keys are addresses or address patterns. Resolution order:
 
 | Direction | Order |
 |---|---|
-| Publish (`serializers`) | exact topic → type token |
-| Subscribe (`deserializers`) | exact topic → type token → most specific wildcard pattern |
+| Publish (`encode`) | exact address → most specific matching pattern |
+| Subscribe (`decode`) | exact address → most specific matching pattern |
 
-- A topic is published to the server only when a serializer resolves for it.
-- A node subscribes only when a deserializer resolves for it.
-- The most specific pattern is the one with the most literal tokens; ties keep
-  the insertion order of the registry.
-- A topic that itself contains wildcards is resolved by exact/type only:
-  matching a pattern against a pattern is ambiguous.
+- An address is published to the server only when an encoder resolves for it.
+- A node subscribes only when a decoder resolves for it.
+- The most specific pattern is the one with the most literal tokens; ties keep the insertion order
+  of the registry.
+- A codec may implement only one direction: a publisher needs `encode`, a subscriber needs `decode`.
 
-A node is created lazily by `listen<T>`, `setHandler<T>` or `fire<T>`/`request<T>`. `fire`
-creates a node only for a topic present in one of the registries; for any other
-topic it keeps local bus semantics and returns `false` when no node exists.
+A node is created lazily by `listen`, `subscribeEvents` or `fire`/`request`. `fire` creates a node
+only for an address present in the codec registry; for any other address it keeps local bus
+semantics and returns `false` when no node exists.
 
 ### Wildcards
 
-Wildcard semantics are defined by the core `TopicPattern`: `*` matches exactly
-one path token, `>` matches one or more trailing tokens and must be last. NATS
-uses the same symbols. `fire` and `request` calls themselves must address a
-concrete topic; a request may be answered by a handler registered on a pattern.
+Wildcard semantics are defined by the core `EventPattern`: `*` matches exactly one token, `>`
+matches one or more trailing tokens and must be last. NATS uses the same symbols. `fire` and
+`request` calls themselves must carry an `EventKey`; a request may be answered by a handler
+registered on an `EventPatternKey`.
 
-Wildcards are rejected in publish subjects and serializer keys. The server
-delivers a concrete subject (`int.sensor.humidity`), and the node passes that
-concrete local topic to the deserializer.
+### Encoder subject override
 
-### Serializer subject override
-
-The serializer may return a subject as the first element of its record. A
-non-null subject is used as is: it is a full wire subject, including the prefix
-if one is configured. It must be a concrete publish subject.
-
-## Arguments
-
-`fire(arguments: {...})` puts the map into the `X-EventBus-Arguments` header as
-JSON. The deserializer receives it as the named `arguments` parameter and
-decides whether to put it into the `EventDTO`. This requires NATS headers.
+An encoder may return a non-null first element to publish to a full wire subject instead of the
+mapped address. The override is validated as a NATS publish subject; the node still delivers the
+event locally and the incoming subscription still uses the mapped address/pattern. Responses to
+requests always go to the inbox, so the override does not apply to them.
 
 ## Requests
 
-`request` keeps local semantics when a handler is registered on the bus. When
-there is no local handler, the request goes over NATS and the first response is
-returned:
-
-```dart
-final doubled = await requester.request<int>(
-  21,
-  paths: ['sensor', 'double'],
-  timeout: const Duration(seconds: 2),
-);
-```
-
-The responder needs a handler plus a serializer and a deserializer for the
-topic: the deserializer decodes the request, the serializer encodes the
-handler's return value. The request is published with a NATS inbox in the reply
-subject. A node that receives a message with `replyTo` invokes the local handler
-through the core and publishes the result back to that inbox.
-
-The response is decoded with the requester's deserializer registered for the
-request topic, so the responder serializes its result under the same topic. A
-request with neither a local handler nor a transport route throws
-`NoHandlerException`. Only the node that owns the handler's registration topic
-answers, so overlapping exact/pattern subscriptions do not duplicate the
-response or the listener notification. A bus without a matching handler stays
-silent; the requester sees `TimeoutException`.
-
-## Connection lifecycle
-
-```dart
-bus.isConnected;          // true while the client is fully connected
-bus.status;               // connecting / connected / reconnecting / ...
-bus.connectionStatus;     // stream of status changes
-await bus.waitConnected(timeout: Duration(seconds: 5));
-bus.errors;               // stream of asynchronous transport/node errors
-```
-
-- The constructor starts connecting in the background. `fire` on a transport
-  topic while the connection is down throws
-  `NatsServerUnavailableException` before local delivery; the event is not
-  silently buffered.
-- Reconnection is owned by the shared `ReconnectingTransportConnection`: a new
-  `dart_nats` client is created per attempt, with exponential backoff
-  (`NatsReconnectPolicy`, default 1s → 30s, unlimited attempts). Subscriptions
-  are restored from a local registry, exactly once.
-- The bus writes `X-EventBus-Origin` on every publish and drops messages with
-  its own origin, so a node that both publishes and subscribes does not receive
-  its own event twice. Local listeners still receive it from the local fire.
-- A node is a `KeepAliveNode`: cancelling the last local listener does not
-  unsubscribe while the bus is alive. `dispose` of the bus cancels every
-  subscription. `haveHandler` reflects request handlers registered on the bus;
-  a transport subscription alone does not make the node a request responder.
+A request keeps local semantics when a local handler exists. Otherwise it is published to the
+mapped subject with a NATS inbox (`_INBOX.…`) as the reply subject, and the first response is
+decoded with the codec registered for the request address. `timeout` is supported; broker-side
+cancellation is not part of the 4.0 contract.
 
 ## Errors
 
-- `NatsServerUnavailableException` — `fire` while disconnected.
-- `NatsSerializationException` — the serializer threw; the caller receives it.
-- `NatsDeserializationException` — an incoming payload or request response
-  could not be decoded, or an event's data type does not match `T`; it is
-  reported on `bus.errors` and the node keeps running.
-- Transport failures that happen after `fire` returned (a race on the socket)
-  are reported on `bus.errors`.
-
-## Guarantees and limitations
-
-- Core NATS is **at-most-once**: no persistence, no acknowledgement of a
-  publish. JetStream is not used.
-- Ordering across publishers is not guaranteed. Per-publisher order is what
-  the server provides; do not rely on the local bus's strict per-node order.
-- The local-only members keep their local meaning: `haveListener` and
-  `haveHandler` only see this process, and `allEventStream` sees outgoing
-  events, not incoming ones.
-- `request` is local when a handler is registered; otherwise it uses NATS
-  request/reply with the inbox from `replyTo`. There is no queue-group
-  competing-consumer routing: every subscribed bus receives the request.
-- `EventNodeNatsImpl.copy()` throws: a node cannot be rebound to another bus.
-- `runtimeType` as a wire address is not stable under web minification or AOT
-  obfuscation. Use `typeTags` (or a type whose name is stable) before deploying.
-- The server's `maxPayload` is checked before publishing; a larger event throws
-  `NatsPublishException`.
+| Error | Where |
+|---|---|
+| `NatsServerUnavailableException` | `publish` while the connection is down |
+| `NatsSerializationException` | encoder threw; reaches the sender |
+| `NatsDeserializationException` | broken or mismatched payload; `bus.errors` |
+| `NatsPublishException` | payload too large, or a publish that failed after the check |
+| `NatsSubjectException` | invalid address, subject or codec key |
+| `NatsConnectionException` | connection use after close, exhausted retries |
 
 ## Tests
 
-```powershell
-# unit tests, fake connection, no server
+```text
 dart test
-
-# with a live server, including integration tests
-$env:NATS_URL = "nats://127.0.0.1:4222"
-dart test
+NATS_URL=nats://127.0.0.1:4222 dart test   # broker-backed tests
 ```
-
-The integration files skip themselves when `NATS_URL` is not set. The shared
-layer has its own suite in [`packages/event_bus_arch_transport`](../event_bus_arch_transport).
-A load benchmark is in [`benchmark/`](benchmark/README.md).

@@ -21,12 +21,12 @@ final pool = WorkerPool(
     initialBackoff: Duration(milliseconds: 100),
     maxBackoff: Duration(seconds: 10),
   ),
-  keySelector: (dto) => dto.topic.topic, // used by keyed
+  keySelector: (dto) => dto.address, // used by keyed
 );
 
 await pool.waitInit;                    // all workers ready
-final answer = await pool.request<int>(21);
-pool.fire('refresh');
+final answer = await pool.request(EventKey<int>('jobs'), 21);
+pool.fire(EventKey<String>('note'), 'refresh');
 print(pool.state);                      // ready, restarting, failed, closed
 print(pool.metrics);                    // WorkerPoolMetrics snapshot
 await pool.close();                     // intentional: never restarts

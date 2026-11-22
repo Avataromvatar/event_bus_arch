@@ -22,7 +22,7 @@ void main() {
       final isolateBus = EventBusIsolate(
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
-          bus.subscribeEvents<String>(handler: (dto, lastData) async {
+          bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {
             return 'Processed: ${dto.data}';
           });
         },
@@ -31,7 +31,7 @@ void main() {
       await isolateBus.waitInit;
 
       // Send an event and expect a response
-      final result = await isolateBus.request<String>('test message');
+      final result = await isolateBus.requestLegacy<String>('test message');
       expect(result, 'Processed: test message');
     });
 
@@ -39,7 +39,7 @@ void main() {
       final isolateBus = EventBusIsolate(
         separator: '/',
         onInit: (bus, initialData) {
-          bus.subscribeEvents<int>(
+          bus.subscribeEventsLegacy<int>(
               paths: ['a', 'b'], handler: (dto, lastData) async => dto.data);
         },
       );
@@ -48,7 +48,7 @@ void main() {
 
       // The worker registered `int/a/b`; the main side must address the same
       // topic, otherwise the interest lookup misses and the request fails.
-      expect(await isolateBus.request<int>(7, paths: ['a', 'b']), 7);
+      expect(await isolateBus.requestLegacy<int>(7, paths: ['a', 'b']), 7);
       await isolateBus.dispose();
     });
 
@@ -73,7 +73,7 @@ void main() {
       final isolateBus = EventBusIsolate(
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
-          bus.subscribeEvents<int>(handler: (dto, lastData) async {
+          bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
             return dto.data * 2;
           });
         },
@@ -83,9 +83,9 @@ void main() {
 
       // Send multiple events
       final results = await Future.wait<dynamic>([
-        isolateBus.request<int>(1),
-        isolateBus.request<int>(2),
-        isolateBus.request<int>(3),
+        isolateBus.requestLegacy<int>(1),
+        isolateBus.requestLegacy<int>(2),
+        isolateBus.requestLegacy<int>(3),
       ]);
 
       expect(results, [2, 4, 6]);

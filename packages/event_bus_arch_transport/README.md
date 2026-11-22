@@ -1,12 +1,12 @@
 # event_bus_arch_transport
 
 Broker-agnostic transport layer for
-[`event_bus_arch`](https://pub.dev/packages/event_bus_arch). It contains no
-broker client and no broker-specific grammar: a concrete transport package
-supplies a connection adapter and a `SubjectGrammar`.
+[`event_bus_arch`](https://pub.dev/packages/event_bus_arch). It contains no broker client and no
+broker-specific grammar: a concrete transport package supplies a connection adapter and an
+`EventAddressMapper`.
 
-`event_bus_arch_nats` and `event_bus_arch_mqtt` are the adapters; they use the same layer
-and differ only in the client, the grammar and the wire metadata.
+`event_bus_arch_nats` and `event_bus_arch_mqtt` are the adapters; they use the same layer and
+differ only in the client, the grammar and the wire metadata.
 
 ## What is here
 
@@ -16,11 +16,11 @@ and differ only in the client, the grammar and the wire metadata.
 | `TransportMessage` | One message as it exists on the wire: subject, bytes, arguments, reply subject |
 | `ReconnectingTransportConnection` | Connection lifecycle, status/errors streams, subscription registry, reconnect backoff |
 | `ReconnectPolicy` | Exponential backoff |
-| `SubjectGrammar` | Separator and wildcard symbols (`*`/`>` locally, broker symbols on the wire) |
-| `TopicSubjectMapper` | Local topic ↔ wire subject, prefix, type tags, validation |
-| `TopicRegistryIndex<T>` | Exact → type → most-specific-pattern resolution |
-| `TransportEventBus` | An `EventBusImpl` that publishes to and subscribes from a broker |
-| `TransportEventNode<T>` | A node that publishes outbound events and delivers inbound ones locally |
+| `EventAddressMapper` | Event address ↔ wire subject, prefix, grammar validation |
+| `EventCodec` | One encoder/decoder pair for an address or a pattern |
+| `EventCodecRegistry` | Exact → most-specific-pattern codec resolution |
+| `TransportEventBus.keys` | An `EventBusImpl` that publishes to and subscribes from a broker |
+| `TransportKeyEventNode<T>` | A node that publishes outbound events and delivers inbound ones locally |
 | `EventBusTransportException` and subclasses | Error types |
 | `FakeTransportConnection` (`testing.dart`) | In-memory connection for tests |
 
@@ -50,40 +50,57 @@ and differ only in the client, the grammar and the wire metadata.
    }
    ```
 
-   The base replays registrations after a reconnect, filters self-echo by
-   `originId`, and implements `request` on top of `subscribe` + `publish`.
+   The base replays registrations after a reconnect, filters self-echo by `originId`, and
+   implements `request` on top of `subscribe` + `publish`.
 
-2. Implement a `SubjectGrammar` with the broker's separator and wildcard
-   symbols. Local topics always use `.` and the canonical wildcards `*` and
-   `>`, which the mapper translates.
+2. Implement an `EventAddressMapper` with the broker's separator and wildcard symbols. Local
+   addresses always use `.` and the canonical wildcards `*` and `>`, which the mapper translates
+   (`NatsAddressMapper`, `MqttAddressMapper`).
 
-3. Build a `TransportEventBus` with the connection, a `TopicSubjectMapper`, the
-   serializer/deserializer registries and an origin id. `event_bus_arch_nats` is a
-   thin subclass/factory around it.
+3. Build `TransportEventBus.keys(...)` with the connection, the mapper, an `EventCodecRegistry` and
+   an origin id. `event_bus_arch_nats` is a thin subclass/factory around it.
 
 ## Publishing and subscribing
 
-A topic is published only when a serializer resolves for it and subscribed only
-when a deserializer does. Resolution order is exact topic → type token →
-(deserializers only) most specific wildcard pattern.
+The event **address** is the wire subject. A key is published only when a codec with `encode`
+resolves for it, and subscribed only when a codec with `decode` resolves. Resolution order is exact
+address → most specific matching pattern.
 
-Nodes are created lazily and with a type: `listen<T>`, `setHandler<T>` and
-`fire<T>`/`request<T>` call `createNode<T>`, so the node can check incoming
-payload types. A node with a deserializer is a `KeepAliveNode`, so the core
-keeps it after its last listener unsubscribes.
+```dart
+final bus = TransportEventBus.keys(
+  connection: connection,
+  addresses: myAddressMapper,
+  codecs: EventCodecRegistry(
+    exact: {
+      EventAddress('orders.placed.v1'): EventCodec(
+        encode: (dto) => (null, encodeOrder(dto.data)),
+        decode: (data, address, {arguments}) => EventDTO.withKey(
+          EventKey<Order>(address.value),
+          decodeOrder(data),
+          arguments: arguments,
+        ),
+      ),
+    },
+  ),
+  originId: newTransportOriginId(),
+);
+```
 
-The explicit eviction `bus.removeTopic<T>(...)` bypasses that pin: the node is
-disposed and its broker subscription is cancelled. The next `listen`/`fire` for
-the topic creates a new node and subscribes again.
+Only the node whose exact key equals the DTO key publishes; a pattern or supertype node delivers
+locally without a second publication. A node with a decoder is a `KeepAliveNode`, so the core keeps
+it after its last listener unsubscribes.
+
+The explicit eviction `bus.remove(key)` / `removePattern(patternKey)` bypasses that pin: the node is
+disposed and its broker subscription is cancelled. The next `listen`/`fire` for the key creates a
+new node and subscribes again.
 
 ## Requests
 
-`TransportEventBus.request` keeps local semantics when a local handler exists.
-Otherwise it publishes the request with a reply subject and waits for the first
-response. A node that receives a message with `replyTo` invokes the local
-handler through the core `handleIncomingRequest` and publishes the encoded
-result back to that reply subject. The response always goes to the reply
-subject; a subject returned by the serializer is ignored for responses.
+`TransportEventBus.request(key, data)` keeps local semantics when a local handler exists. Otherwise
+it publishes the request with a reply subject and waits for the first response. A node that receives
+a message with `replyTo` invokes the local handler through the core `handleIncomingRequest` and
+publishes the encoded result back to that reply subject. The response always goes to the reply
+subject; a subject returned by the encoder is ignored for responses.
 
 ## Tests
 

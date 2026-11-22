@@ -45,7 +45,7 @@ mixin class Scope<T> {
     // A scope is a latest-value consumer: keep only the newest update while
     // the callback is busy. Older values are dropped and counted by the
     // subscription.
-    _scopeSubscription = bus.subscribeEventsKey<T>(
+    _scopeSubscription = bus.subscribeEvents<T>(
       key,
       bufferCapacity: 1,
       bufferOverflow: BufferOverflow.latest,

@@ -8,11 +8,12 @@ Repository: `event_bus_arch`, branch `version4`.
 
 The **factual description is correct** (with two precision notes), but calling all of it
 "defects" overstates the case. Three of the five points are deliberate, documented properties of
-a type-keyed local bus; one is a scope limitation; one is a real production risk — but it is a
-**default-policy risk**, not a missing capability, because `typeTags` already exists and is
-opt-in. The one thing worth changing now is the wire contract: stable wire names should be the
-explicit path for wire-facing buses, not a footnote. The local type-as-address model, the absence
-of subtype routing and the absence of a schema registry should stay.
+a type-keyed local bus; one is a scope limitation; one is a real production risk — and the
+existing `typeTags` mitigation is **not enough**: it is string-keyed and, as the obfuscation check
+in §7 shows, it does not survive web release minification for user-defined event classes. The one
+thing worth changing now is the wire contract: stable wire names and typed codec registries should
+be the explicit path for wire-facing buses, not a footnote. The local type-as-address model, the
+absence of subtype routing and the absence of a schema registry should stay.
 
 ## 1. Fact check
 
@@ -84,11 +85,19 @@ Proposed changes, in order of value:
    listing the missing types. Keep an explicit escape hatch (for tests and local fake
    connections), for example `allowUnstableTypeNames: true`, which preserves today's fallback and
    is documented as not for production.
-3. **Examples and tests** use tags in every wire-facing sample; the generic
+3. **Typed codec registries.** `Map<Type, String>` alone is not enough: the serializer and
+   deserializer maps are still keyed by the local type token, and under obfuscation that token is
+   minified (see §7). Add `codecs: Map<Type, EventCodec>` (or key codecs by an address object) and
+   resolve the wire tag and codec by `Type` at node creation. The reverse map is wire tag →
+   `Type`/codec; the local topic is rebuilt from the runtime type token so it matches the node's
+   address.
+4. **Examples and tests** use tags in every wire-facing sample; the generic
    `TransportEventBus`/`FakeTransportConnection` remain flexible for unit tests.
 
 This preserves `typeTags` for dynamic/external topics (where a type literal is not available)
-and adds a compile-safe path for the common case.
+and adds a compile-safe, obfuscation-safe path for the common case. A complete R1 (wire types +
+typed codecs + mapper changes) is roughly 2–3 days, not 1: the mapper currently receives only a
+`Topic` with a string type token and cannot resolve the wire tag by `Type`.
 
 ### R2 — Define a version convention
 
@@ -133,7 +142,7 @@ routing library; a schema/contract package can be built on top if the product ne
 
 | Item | Recommendation | Effort |
 |---|---|---|
-| R1 typed, required wire tags for NATS/MQTT | Do now (project is unpublished) | ~1 day with tests/docs |
+| R1 typed wire tags + typed codecs for NATS/MQTT | Do now (project is unpublished) | 2–3 days with tests/docs |
 | R2 version convention | Document now; no core field | 0.25 day |
 | R3 static-type recipe | Document | 0.25 day |
 | R4 subtype routing / schema registry | Do not do | — |
@@ -229,7 +238,7 @@ to take it.
 
 Typed `wireTypes: Map<Type, String>` plus required coverage in the NATS/MQTT factories, as in
 §4 R1. The local `Topic` stays type+paths, node identity stays safe, node collisions cannot
-happen. It solves the production risk without touching the address model. ~1 day.
+happen. It solves the production risk without touching the address model. 2–3 days because the codec registries must become typed as well (§7).
 
 ### Alternative E — an explicit `EventKey<T>` object
 
@@ -268,6 +277,104 @@ reasons.
 **Recommendation:** A now; E if the product wants type-free addresses; reject V1; treat V2 as a
 channel-first redesign with an ADR, not as an address tweak.
 
+## 7. Obfuscation check — does E survive?
+
+**Short answer: yes, if E uses user-supplied addresses and `Type` identity, and no
+`'$T'`/`Type.toString()` in identity, registries, wire or persisted keys.** The check also shows
+that the **current** `typeTags` and serializer registries do not survive obfuscation for
+user-defined event classes. That is independent of E and must be fixed in A or E.
+
+### What was run
+
+`dart compile js -O2` and Node, on two small checks and on the real `TransportEventBus` with
+`FakeTransportConnection` (2026-11-22; the temporary scripts were deleted after the run).
+
+**Type identity in the minified build:**
+
+```text
+EventKey<int>('x') == EventKey<int>('x')          -> true
+EventKey<int>('x') == EventKey<num>('x')          -> false
+EventKey<OrderPlaced>('o') == EventKey<OrderPlaced>('o') -> true
+EventKey<OrderPlaced>('o').type.toString()        -> minified:bd
+```
+
+`EventKey` here captures the type with `Type typeOf<T>() => T;` and compares `(address, type)`.
+
+**Type-keyed map:**
+
+```text
+Map<Type, String>{typeOf<OrderPlaced>(): 'order_placed_v1'}[typeOf<OrderPlaced>()]
+  -> order_placed_v1
+same map, lookup by the string 'OrderPlaced'
+  -> null
+```
+
+**The current transport bus:**
+
+```dart
+serializers:   {'OrderPlaced': (dto) => (null, Uint8List(0))},
+deserializers: {'OrderPlaced': ...},
+typeTags:      {'OrderPlaced': 'order_placed_v1'},
+```
+
+```text
+local topic:       minified:am
+runtime type string: minified:am
+accepted:          false
+publishes:         0
+```
+
+The serializer key `'OrderPlaced'` and the `typeTags` key `'OrderPlaced'` never match the runtime
+token `minified:am`, so the node is not created and nothing is published. The same code works on
+the VM, where the token is `OrderPlaced`.
+
+### Consequences
+
+1. `Type` equality and `is` checks survive minification/obfuscation; `Type.toString()` does not.
+2. The current `typeTags` mitigation is keyed by the local type-token string. It works for core
+   types (`int` → `'int'`) and on the VM, but not for user-defined event classes in a web release
+   build. The advice in `doc/08/09/10` is therefore incomplete: `typeTags` as currently shaped is
+   not a production fix for domain events.
+3. The same instability hits the serializer/deserializer registries, `TopicRegistryIndex`'s type
+   fallback, metric keys and any persisted key that uses `'$T'`, `topic.type` or
+   `runtimeType.toString()`. Within one build these strings are consistent, so local maps may
+   appear to work; they break across builds, persistence and the wire.
+4. The **wire address** can still be stable: it is a user literal. The instability is in the
+   local token used to find the codec and in the map that was supposed to translate it.
+
+### E after obfuscation — conditions
+
+E works if all of these hold:
+
+1. the address is a user-supplied literal (`'orders.placed'`), never `'$T'`;
+2. local identity is `(address, Type)` — capture `T` with `Type typeOf<T>() => T;` — or an
+   `is T` check;
+3. codec and registry lookup is by `Type` or by the `EventKey` object, not by a type-name string;
+4. a payload discriminator for a heterogeneous channel is a user-defined stable string, never
+   `runtimeType`/`'$T'`;
+5. diagnostics and persistence that must be stable use the address; `Type.toString()` is only a
+   debug aid.
+
+If E falls back to `address = '$T'`, or looks up codecs by `'$T'`, it inherits exactly the failure
+above.
+
+### A after obfuscation — conditions
+
+A works only as **A+**:
+
+* `wireTypes: Map<Type, String>` resolves the wire tag by `Type`;
+* `codecs: Map<Type, EventCodec>` (or `EventKey`-keyed) resolves codecs by `Type`;
+* the reverse map wire tag → `Type`/codec is built once at construction;
+* the mapper is handed the wire tag resolved by `Type`; it cannot look it up from the minified
+  local token;
+* pattern subscriptions use a typed pattern key (or a per-`Type` codec that also serves patterns).
+
+### AOT / Flutter
+
+The web check is the empirical demonstration of the mechanism: symbol names change, `Type`
+identity survives, `Type.toString()` is not a stable name. Flutter `--obfuscate`/AOT works the
+same way. The conditions above apply unchanged; an AOT-specific run was not made here.
+
 ## Evidence index
 
 * `lib/src/topic.dart:33-34` — `Topic.create<T>` builds the token from `'$T'`.
@@ -292,3 +399,7 @@ channel-first redesign with an ADR, not as an address tweak.
 * `packages/event_bus_arch_transport/lib/src/topic_subject_mapper.dart:71-75` — the wire
   subject's first token is parsed as the type.
 * `lib/src/observability.dart:307-308` — the default metric key is `topic.type`.
+* Local obfuscation check, 2026-11-22 — `dart compile js -O2` + Node: `Type` equality survives;
+  `Type.toString()` for a user class is `minified:…`; a `Map<Type, String>` lookup works; the
+  current `TransportEventBus` with string-keyed `serializers`/`typeTags` publishes 0 for a user
+  class (local topic `minified:…`).

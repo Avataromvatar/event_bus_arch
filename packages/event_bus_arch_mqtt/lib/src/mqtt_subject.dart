@@ -74,17 +74,6 @@ class MqttGrammar extends SubjectGrammar {
   }
 }
 
-///Maps local event topics to MQTT topics and back.
-///
-///By default the mapping is one-to-one but for the separator: the local topic
-///`int.sensor.temp` becomes `int/sensor/temp`. [prefix] namespaces every
-///topic, and [typeTags] replaces the first token (the Dart type token) with a
-///stable wire token.
-class MqttSubjectMapper extends TopicSubjectMapper {
-  MqttSubjectMapper({super.prefix, super.typeTags})
-    : super(grammar: const MqttGrammar());
-}
-
 ///Maps typed event addresses to MQTT topics (the E address model).
 class MqttAddressMapper extends EventAddressMapper {
   MqttAddressMapper({super.prefix}) : super(grammar: const MqttGrammar());

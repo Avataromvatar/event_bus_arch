@@ -354,29 +354,25 @@ mixin EventBusMixin implements EventBus {
     }
   }
 
-  /// Creates the node for a topic.
+  /// Creates the node for an address.
   ///
-  /// The topic is part of the node's identity: a transport bus overrides this
-  /// method and returns a node that publishes to and listens from its broker.
-  /// The default node is local-only and ignores the topic.
+  /// The address is part of the node's identity: a transport bus overrides
+  /// this method and returns a node that publishes to and listens from its
+  /// broker. The default node is local-only and ignores the address.
   EventNode<T> createNode<T>({
-    required Topic topic,
+    required String address,
     T? currentData,
   }) {
     return EventNode<T>.create(currentData: currentData);
   }
 
   ///Creates the node for an exact E key.
-  ///
-  ///The default bridges to the legacy [createNode] with a `Topic` view of the
-  ///address, so existing transport overrides keep working during the
-  ///migration. A transport that supports the E model overrides this hook.
   EventNode<T> createNodeForKey<T>({
     required EventKey<T> key,
     T? currentData,
   }) {
     return createNode<T>(
-        topic: Topic.parse(key.address.value), currentData: currentData);
+        address: key.address.value, currentData: currentData);
   }
 
   ///Creates the node for a typed pattern key.
@@ -385,72 +381,72 @@ mixin EventBusMixin implements EventBus {
     T? currentData,
   }) {
     return createNode<T>(
-        topic: Topic.parse(key.pattern.value), currentData: currentData);
+        address: key.pattern.value, currentData: currentData);
   }
 
   ///Whether a send on an exact E key should create a node.
   bool shouldCreateNodeOnSendKey<T>(EventKey<T> key) =>
-      shouldCreateNodeOnSend(Topic.parse(key.address.value));
+      shouldCreateNodeOnSend(key.address.value);
 
   ///Round-robin cursor of the handler dispatcher, per route.
   final Map<Object, int> _handlerCursors = {};
 
-  ///Active listener and handler subscriptions per topic, used by isolate
+  ///Active listener and handler subscriptions per address, used by isolate
   ///bridges to publish interest transitions.
-  final Map<Topic, int> _listenerCounts = {};
-  final Map<Topic, int> _handlerCounts = {};
+  final Map<String, int> _listenerCounts = {};
+  final Map<String, int> _handlerCounts = {};
 
-  ///Topics a model bus has a node for; a remote model bus accepts fire even
+  ///Addresses a model bus has a node for; a remote model bus accepts fire even
   ///without a listener because it stores the value.
-  final Set<Topic> _modelTopics = {};
+  final Set<String> _modelTopics = {};
 
   ///Hooks for isolate bridges; no-op for local and transport buses.
-  void _onListenerInterestChanged(Topic topic, bool present) {}
-  void _onHandlerInterestChanged(Topic topic, bool present) {}
-  void _onModelInterestChanged(Topic topic, bool present) {}
-  void _onTopicInterestRemoved(Topic topic) {}
+  void _onListenerInterestChanged(String address, bool present) {}
+  void _onHandlerInterestChanged(String address, bool present) {}
+  void _onModelInterestChanged(String address, bool present) {}
+  void _onTopicInterestRemoved(String address) {}
 
-  void _markModelTopic(Topic topic, bool present) {
+  void _markModelTopic(String address, bool present) {
     if (!isModelBus) return;
     if (present) {
-      if (_modelTopics.add(topic)) _onModelInterestChanged(topic, true);
-    } else if (_modelTopics.remove(topic)) {
-      _onModelInterestChanged(topic, false);
+      if (_modelTopics.add(address)) _onModelInterestChanged(address, true);
+    } else if (_modelTopics.remove(address)) {
+      _onModelInterestChanged(address, false);
     }
   }
 
-  void _subscriptionAdded(Topic topic,
+  void _subscriptionAdded(String address,
       {required bool listener, required bool handler}) {
     if (listener) {
-      final count = (_listenerCounts[topic] ?? 0) + 1;
-      _listenerCounts[topic] = count;
-      if (count == 1) _onListenerInterestChanged(topic, true);
+      final count = (_listenerCounts[address] ?? 0) + 1;
+      _listenerCounts[address] = count;
+      if (count == 1) _onListenerInterestChanged(address, true);
     }
     if (handler) {
-      final count = (_handlerCounts[topic] ?? 0) + 1;
-      _handlerCounts[topic] = count;
-      if (count == 1) _onHandlerInterestChanged(topic, true);
+      final count = (_handlerCounts[address] ?? 0) + 1;
+      _handlerCounts[address] = count;
+      if (count == 1) _onHandlerInterestChanged(address, true);
     }
   }
 
-  void _subscriptionRemoved(Topic topic,
+  void _subscriptionRemoved(String address,
       {required bool listener, required bool handler}) {
     if (listener) {
-      final count = _listenerCounts[topic] ?? 0;
+      final count = _listenerCounts[address] ?? 0;
       if (count == 1) {
-        _listenerCounts.remove(topic);
-        _onListenerInterestChanged(topic, false);
+        _listenerCounts.remove(address);
+        _onListenerInterestChanged(address, false);
       } else if (count > 1) {
-        _listenerCounts[topic] = count - 1;
+        _listenerCounts[address] = count - 1;
       }
     }
     if (handler) {
-      final count = _handlerCounts[topic] ?? 0;
+      final count = _handlerCounts[address] ?? 0;
       if (count == 1) {
-        _handlerCounts.remove(topic);
-        _onHandlerInterestChanged(topic, false);
+        _handlerCounts.remove(address);
+        _onHandlerInterestChanged(address, false);
       } else if (count > 1) {
-        _handlerCounts[topic] = count - 1;
+        _handlerCounts[address] = count - 1;
       }
     }
   }
@@ -461,7 +457,7 @@ mixin EventBusMixin implements EventBus {
   /// transport bus overrides this to create a node only for topics it
   /// actually knows. With the default `false`, `send` to a topic without a
   /// node returns `null`, exactly like the local bus.
-  bool shouldCreateNodeOnSend(Topic topic) => isModelBus;
+  bool shouldCreateNodeOnSend(String address) => isModelBus;
 
   /// Adds the event to the all-events stream if the bus is still alive.
   void _addAllEvent(EventDTO dto, bool delivered) {
@@ -470,11 +466,11 @@ mixin EventBusMixin implements EventBus {
     }
   }
 
-  /// The topic view of a selector, for the compatibility hooks.
-  Topic _topicForSelector(EventSelector selector) {
-    if (selector is EventPatternKey) return Topic.parse(selector.pattern.value);
-    return Topic.parse(selector.toString());
-  }
+  /// The address string of a selector.
+  String _addressForSelector(EventSelector selector) =>
+      selector is EventPatternKey
+          ? selector.pattern.value
+          : (selector as EventKey).address.value;
 
   Map<Type, EventNode> _exactBucket(EventAddress address) =>
       _eventsMap.putIfAbsent(address, () => <Type, EventNode>{});
@@ -504,20 +500,18 @@ mixin EventBusMixin implements EventBus {
       final bucket = _patternBucket(selector.pattern);
       final existing = bucket[selector.type];
       if (existing is EventNode<T>) return existing;
-      final topic = Topic.parse(selector.pattern.value);
       final created = createPatternNodeForKey<T>(key: selector);
       bucket[selector.type] = created;
-      _markModelTopic(topic, true);
+      _markModelTopic(selector.pattern.value, true);
       return created;
     }
     final key = selector as EventKey<T>;
     final bucket = _exactBucket(key.address);
     final existing = bucket[key.type];
     if (existing is EventNode<T>) return existing;
-    final topic = Topic.parse(key.address.value);
     final created = createNodeForKey<T>(key: key);
     bucket[key.type] = created;
-    _markModelTopic(topic, true);
+    _markModelTopic(key.address.value, true);
     return created;
   }
 
@@ -529,14 +523,14 @@ mixin EventBusMixin implements EventBus {
   ///delegates pause/resume, so no extra microtask hop is introduced.
   Stream<T> _valueStream<T>(EventSelector<T> selector) {
     final node = _nodeFor<T>(selector);
-    final topic = _topicForSelector(selector);
+    final address = _addressForSelector(selector);
     return _NodeStream<T>(
       node.streamControllerValue.stream,
       () {
-        _subscriptionRemoved(topic, listener: true, handler: false);
+        _subscriptionRemoved(address, listener: true, handler: false);
         _removeNode(selector, node);
       },
-      onListen: () => _subscriptionAdded(topic, listener: true, handler: false),
+      onListen: () => _subscriptionAdded(address, listener: true, handler: false),
     );
   }
 
@@ -612,7 +606,7 @@ mixin EventBusMixin implements EventBus {
           'node ${node.runtimeType} does not implement SubscriptionHost');
     }
     final host = node as SubscriptionHost<T>;
-    final topic = _topicForSelector(selector);
+    final address = _addressForSelector(selector);
     late final EventSubscription<T> subscription;
     subscription = EventSubscription<T>._(
       selector: selector,
@@ -629,7 +623,7 @@ mixin EventBusMixin implements EventBus {
       onError: onError,
       onDone: onDone,
       onCancel: () {
-        _subscriptionRemoved(topic,
+        _subscriptionRemoved(address,
             listener: onEvent != null, handler: handler != null);
         host.removeSubscription(subscription);
         _removeNode(selector, node);
@@ -637,7 +631,7 @@ mixin EventBusMixin implements EventBus {
       onBusError: reportError,
     );
     host.addSubscription(subscription);
-    _subscriptionAdded(topic,
+    _subscriptionAdded(address,
         listener: onEvent != null, handler: handler != null);
     if (initialData != null) {
       node.currentData = initialData;
@@ -723,11 +717,10 @@ mixin EventBusMixin implements EventBus {
   EventNode<T>? _sendNode<T>(EventKey<T> key) {
     final existing = _eventsMap[key.address]?[key.type];
     if (existing is EventNode<T>) return existing;
-    final topic = Topic.parse(key.address.value);
     if (shouldCreateNodeOnSendKey(key)) {
       final created = createNodeForKey<T>(key: key);
       _exactBucket(key.address)[key.type] = created;
-      _markModelTopic(topic, true);
+      _markModelTopic(key.address.value, true);
       return created;
     }
     return null;
@@ -778,15 +771,14 @@ mixin EventBusMixin implements EventBus {
     _checkNotDisposed();
     final bucket = _eventsMap.remove(address);
     if (bucket == null) return false;
-    final topic = Topic.parse(address.value);
     for (final node in bucket.values) {
       _handlerCursors.remove(node);
       unawaited(node.dispose());
     }
-    final hadInterest = (_listenerCounts.remove(topic) ?? 0) > 0 ||
-        (_handlerCounts.remove(topic) ?? 0) > 0;
-    if (hadInterest) _onTopicInterestRemoved(topic);
-    _markModelTopic(topic, false);
+    final hadInterest = (_listenerCounts.remove(address.value) ?? 0) > 0 ||
+        (_handlerCounts.remove(address.value) ?? 0) > 0;
+    if (hadInterest) _onTopicInterestRemoved(address.value);
+    _markModelTopic(address.value, false);
     return true;
   }
 
@@ -802,26 +794,6 @@ mixin EventBusMixin implements EventBus {
     }
     if (node == null) return false;
     return _detachNode(selector, node);
-  }
-
-  /// Removes every type node at a topic without forwarding a delete.
-  /// Also used by the isolate link when a delete arrives from the other side.
-  bool _removeTopicLocally(Topic topic) {
-    if (TopicPattern.isPattern(topic)) {
-      final pattern = EventPattern(topic.topic);
-      final bucket = _patternMap.remove(pattern);
-      if (bucket == null) return false;
-      for (final node in bucket.values) {
-        _handlerCursors.remove(node);
-        unawaited(node.dispose());
-      }
-      final hadInterest = (_listenerCounts.remove(topic) ?? 0) > 0 ||
-          (_handlerCounts.remove(topic) ?? 0) > 0;
-      if (hadInterest) _onTopicInterestRemoved(topic);
-      _markModelTopic(topic, false);
-      return true;
-    }
-    return removeAddress(EventAddress(topic.topic));
   }
 
   /// Unlinks [node] and disposes it, but only when the map still holds this
@@ -846,11 +818,11 @@ mixin EventBusMixin implements EventBus {
       }
     }
     if (removed) {
-      final topic = _topicForSelector(selector);
-      final hadInterest = (_listenerCounts.remove(topic) ?? 0) > 0 ||
-          (_handlerCounts.remove(topic) ?? 0) > 0;
-      if (hadInterest) _onTopicInterestRemoved(topic);
-      _markModelTopic(topic, false);
+      final address = _addressForSelector(selector);
+      final hadInterest = (_listenerCounts.remove(address) ?? 0) > 0 ||
+          (_handlerCounts.remove(address) ?? 0) > 0;
+      if (hadInterest) _onTopicInterestRemoved(address);
+      _markModelTopic(address, false);
       _handlerCursors.remove(node);
       unawaited(node.dispose());
     }
@@ -915,20 +887,20 @@ mixin _EventBusHandlersMixin on EventBusMixin {
             .any((candidate) => candidate.subscription.hasRequestCapacity);
   }
 
-  ///The registered topic of the tier that would answer [topic], or null when
-  ///no handler exists.
+  ///The registered address of the tier that would answer [address], or null
+  ///when no handler exists.
   ///
   ///Intended for transports: overlapping exact/pattern subscriptions must
   ///produce exactly one answer.
-  Topic? handlerTopicFor(Topic topic) {
-    final selector = TopicPattern.isPattern(topic)
-        ? EventPatternKey<Object?>(topic.topic)
-        : EventKey<Object?>(topic.topic);
+  String? handlerAddressFor(String address) {
+    final isPattern = address.contains('*') || address.contains('>');
+    final selector = isPattern
+        ? EventPatternKey<Object?>(address)
+        : EventKey<Object?>(address);
     final tier = _resolveTier(selector);
     if (tier == null) return null;
     final route = tier.route;
-    return Topic.parse(
-        route is EventPattern ? route.value : (route as EventAddress).value);
+    return route is EventPattern ? route.value : (route as EventAddress).value;
   }
 
   List<EventSubscription> _handlersOn(EventNode? node) {

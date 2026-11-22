@@ -32,6 +32,6 @@ mixin class EventBusLogger {
   }
 
   static void defaultLoggerHandler(EventDTO dto, bool hasListeners) {
-    print('Event:${dto.topic} hasListeners $hasListeners');
+    print('Event:${dto.address} hasListeners $hasListeners');
   }
 }

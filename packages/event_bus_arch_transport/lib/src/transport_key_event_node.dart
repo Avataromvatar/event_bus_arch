@@ -32,6 +32,7 @@ class TransportKeyEventNode<T>
     required this.originId,
     T? currentData,
     this.onError,
+    this.onRequest,
   }) : _local = EventNodeImp<T>(currentData: currentData) {
     if (_shouldSubscribe) {
       _subscription = connection.subscribe(
@@ -47,6 +48,11 @@ class TransportKeyEventNode<T>
   final EventSelector<T> selector;
   final String originId;
   final void Function(Object error, StackTrace? stackTrace)? onError;
+
+  ///Answers a request received from the broker; null means this node does not
+  ///answer requests.
+  final Future<Uint8List?> Function(
+      EventDTO dto, TransportMessage message, EventCodec codec)? onRequest;
 
   late final EventNodeImp<T> _local;
   TransportSubscription? _subscription;
@@ -118,8 +124,8 @@ class TransportKeyEventNode<T>
   void _onMessage(TransportMessage message) {
     final address = addresses.toAddress(message.subject);
     final codec = codecs.resolve(address);
-    final decode = codec?.decode;
-    if (decode == null) return;
+    if (codec == null || codec.decode == null) return;
+    final decode = codec.decode!;
 
     late EventDTO dto;
     try {
@@ -157,16 +163,48 @@ class TransportKeyEventNode<T>
     if (correlationId != null && dto.correlationId != correlationId) {
       dto = dto.copyWith(correlationId: correlationId);
     }
-    if (dto.key.address.value != address.value) {
+    // The wire carries no Dart type; the receiving node owns it. Normalise the
+    // decoded key to this node's T so exact-key publication and handler
+    // dispatch compare equal types.
+    final typedKey = EventKey<T>(address.value);
+    if (dto.key != typedKey) {
       dto = EventDTO<T>.withKey(
-        EventKey<T>(address.value),
+        typedKey,
         dto.data as T,
         arguments: dto.arguments,
         correlationId: dto.correlationId,
       );
     }
 
+    final replyTo = message.replyTo;
+    final onRequest = this.onRequest;
+    if (replyTo != null && onRequest != null) {
+      // handleIncomingRequest dispatches the request to listeners while
+      // resolving the handler, so it must not be delivered here as well.
+      unawaited(_answer(replyTo, dto, message, codec, onRequest));
+      return;
+    }
+
     _local.deliver(dto);
+  }
+
+  Future<void> _answer(
+    String replyTo,
+    EventDTO dto,
+    TransportMessage message,
+    EventCodec codec,
+    Future<Uint8List?> Function(
+            EventDTO dto, TransportMessage message, EventCodec codec)
+        onRequest,
+  ) async {
+    try {
+      final bytes = await onRequest(dto, message, codec);
+      if (bytes == null) return;
+      connection.publish(replyTo, bytes,
+          originId: originId, correlationId: dto.correlationId);
+    } catch (error, stackTrace) {
+      onError?.call(error, stackTrace);
+    }
   }
 
   bool _publish(EventDTO dto, EventEncoder encode) {

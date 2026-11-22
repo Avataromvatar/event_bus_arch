@@ -472,5 +472,72 @@ data: A-1
    (сейчас ~560 вызовов скрыты фасадом).
 4. Обновить `tool/migrate_3_to_4.dart` под адресную модель.
 
+### Этап 7c: удалены Topic и legacy-транспорт
+
+Выполнено:
+
+- `Topic`/`TopicPattern` удалены из ядра. Внутренние карты интересов, счётчики подписок,
+  model-topic set и хуки `createNode`/`shouldCreateNodeOnSend`/`_on*InterestChanged` переведены
+  на строковый адрес; `handlerTopicFor(Topic)` заменён на `handlerAddressFor(String)`.
+- Удалён старый isolate-протокол `_IsolateDelete`/`_link.removeTopic`/`_removeTopicLocally`;
+  типизированные `_IsolateDeleteSelector`/`_IsolateDeleteAddress` остались.
+- `EventDTO.topic`, legacy-фабрика `EventDTO(data, topic:/paths:)`, `EventDTO.create`,
+  `copyWith(topic/paths/separator)` и `_topicOverride` удалены; `toJson` теперь пишет
+  `address` (fromJson принимает `address` и старый `topic`). `EventSubscription.topic` удалён.
+- `EventBusError` хранит поле `address`, `topic` — геттер-алиас; `EventBusErrorSnapshot.byAddress`
+  добавлен как алиас `byTopic`; `TopicMetricsSnapshot` переименован в `AddressMetricsSnapshot`.
+- Legacy-транспорт удалён: старые конструкторы `TransportEventBus`/`EventBusNats`/`EventBusMqtt`,
+  `serializers`/`deserializers`/`typeTags`, `TopicSubjectMapper`, `TransportEventNode`,
+  `TopicRegistryIndex`, `NatsSubjectMapper`/`MqttSubjectMapper` и их registry/serialization
+  файлы. Экспорты пакетов обновлены.
+- Keyed-транспорт получил недостающую обработку входящих запросов: `TransportKeyEventNode`
+  отвечает на `replyTo` через `handleIncomingRequest`, нормализует тип декодированного ключа к
+  `T` узла и публикует ответ тем же кодеком; exact/pattern узлы отвечают один раз через
+  `handlerAddressFor`.
+- Тесты transport/NATS/MQTT переведены на keyed-конструкторы через тест-хелперы
+  `legacy_codecs.dart`, `legacy_nats.dart`, `legacy_mqtt.dart` (это тест-онли адаптеры старых
+  map'ов сериализаторов); удалены тесты legacy subject mapper/registry/typeTags.
+- `topic_dto_test.dart` удалён (его роль выполняет `event_address_key_test.dart`), из
+  `naming_test.dart`/`wildcard_test.dart` убраны Topic-проверки.
+- Тест-онли фасад `test/legacy_compat.dart` сохранён: он позволяет старым поведенческим тестам
+  работать без возврата legacy в продакшн; в приложении не используется.
+
+Прогоны:
+
+- core 243, patterns 20, transport 26, NATS 24 (+10 skipped), MQTT 19 (+7 skipped) — все зелёные;
+- `dart analyze` — 18 info, ошибок/предупреждений нет;
+- obfuscation-check `dart compile js -O2` + Node: `Type.toString()` = `minified:bJ`,
+  `EventKey<UserOrder>('orders.placed')` → `accepted=true publishes=1 subject=orders.placed`;
+- код не коммитился.
+
+Осталось (необязательный этап 7d):
+
+1. Перевести старые core-тесты с `test/legacy_compat.dart` на явные ключи и удалить фасад.
+   Продакшн-API от этого не меняется; фасад тест-онли.
+2. Обновить `tool/migrate_3_to_4.dart` под адресную модель (сейчас автоматически переписывает
+   только `handlers.setHandler` → `subscribeEvents`).
+
+### Этап 7d: миграционный инструмент и финальная проверка
+
+Выполнено:
+
+- `tool/migrate_3_to_4.dart` переведён в режим отчёта: он больше не переписывает
+  `handlers.setHandler` в невалидный вызов без селектора. Инструмент находит `setHandler`,
+  `removeHandler`, cross-bus copy, `EventBusHandlers` и rxdart и требует ручного выбора
+  `EventKey<T>`/адреса; тест обновлён.
+- Проверено, что в продакшн-коде не осталось `Topic`/`TopicPattern`, `paths`/`separator`,
+  `EventDTO.topic`, `EventSubscription.topic`, `serializers`/`deserializers`/`typeTags`,
+  `TopicSubjectMapper`, `TransportEventNode`, `TopicRegistryIndex`.
+- Тест-онли фасад `test/legacy_compat.dart` оставлен осознанно: он не экспортируется и не влияет
+  на API; его снятие — отдельная механическая миграция ~500 старых тестовых вызовов, не меняющая
+  поведение пакета.
+
+Финальные прогоны:
+
+- core 243, patterns 20, transport 26, NATS 24 (+10 skipped), MQTT 19 (+7 skipped) — зелёные;
+- `dart analyze` — 18 info, ошибок/предупреждений нет;
+- obfuscation-check: `Type.toString()` = `minified:bJ`, keyed-публикация одна;
+- код не коммитился.
+
 ## Ссылки
 Вверх: нет (локальная задача). ADR: doc/decisions/0009-event-key-and-address.md

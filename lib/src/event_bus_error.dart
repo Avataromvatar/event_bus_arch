@@ -39,19 +39,17 @@ class EventBusError {
     this.stackTrace,
     this.context = const <String, String>{},
     DateTime? timestamp,
-  })  : topic = address ?? topic,
+  })  : address = address ?? topic,
         timestamp = timestamp ?? DateTime.now();
 
   final EventBusErrorKind kind;
   final EventBusErrorSource source;
 
   ///The event address involved, when the error has one.
-  ///
-  ///This is the E name for the legacy [topic] field; both hold the same string.
-  String? get address => topic;
+  final String? address;
 
-  ///The topic/address involved, when the error has one.
-  final String? topic;
+  ///The old name of [address]; both hold the same string.
+  String? get topic => address;
 
   ///The event involved; null unless payload capture is enabled.
   final EventDTO? event;
@@ -70,7 +68,7 @@ class EventBusError {
 
   @override
   String toString() {
-    final where = topic == null ? '' : ' on "$topic"';
+    final where = address == null ? '' : ' on "$address"';
     return 'EventBusError(${kind.name}$where): $error';
   }
 }
@@ -97,6 +95,9 @@ class EventBusErrorSnapshot {
 
   ///Counts keyed by topic; errors without a topic use `__none__`.
   final Map<String, int> byTopic;
+
+  ///The same counts under the E name.
+  Map<String, int> get byAddress => byTopic;
 
   final List<EventBusError> recent;
 
@@ -174,7 +175,7 @@ class EventBusErrorMonitor {
 
     _total++;
     _counts[error.kind] = (_counts[error.kind] ?? 0) + 1;
-    final topic = error.topic ?? '__none__';
+    final topic = error.address ?? '__none__';
     _byTopic[topic] = (_byTopic[topic] ?? 0) + 1;
     _recent.add(error);
     while (_recent.length > recentLimit) {

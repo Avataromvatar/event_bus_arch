@@ -2,25 +2,25 @@ import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
 import 'legacy_compat.dart';
 
-///A bus that records the topic passed to [createNode] and can opt into
-///creating a node on send for every topic.
+///A bus that records the address passed to [createNode] and can opt into
+///creating a node on send for every address.
 class HookedBus extends EventBusImpl {
   HookedBus({this.createOnSend = false}) : super(false);
 
   final bool createOnSend;
-  final List<Topic> createdTopics = [];
+  final List<String> createdAddresses = [];
 
   @override
   EventNode<T> createNode<T>({
-    required Topic topic,
+    required String address,
     T? currentData,
   }) {
-    createdTopics.add(topic);
-    return super.createNode<T>(topic: topic, currentData: currentData);
+    createdAddresses.add(address);
+    return super.createNode<T>(address: address, currentData: currentData);
   }
 
   @override
-  bool shouldCreateNodeOnSend(Topic topic) => createOnSend;
+  bool shouldCreateNodeOnSend(String address) => createOnSend;
 }
 
 void main() {
@@ -30,7 +30,7 @@ void main() {
       final subscription = bus.listenLegacy<String>(paths: ['a', 'b']).listen((_) {});
       addTearDown(bus.dispose);
 
-      expect(bus.createdTopics.single.topic, 'String.a.b');
+      expect(bus.createdAddresses.single, 'String.a.b');
       await subscription.cancel();
     });
 
@@ -40,7 +40,7 @@ void main() {
 
       bus.subscribeEventsLegacy<int>(paths: ['x'], handler: (dto, last) async {});
 
-      expect(bus.createdTopics.single.topic, 'int.x');
+      expect(bus.createdAddresses.single, 'int.x');
     });
 
     test('fire creates a node when shouldCreateNodeOnSend allows it', () async {
@@ -52,7 +52,7 @@ void main() {
       expect(bus.fireLegacy<String>('v', paths: ['x']), isFalse);
       await Future<void>.delayed(Duration.zero);
 
-      expect(bus.createdTopics.single.topic, 'String.x');
+      expect(bus.createdAddresses.single, 'String.x');
       expect(bus.currentDataLegacy<String>(paths: ['x']), 'v');
     });
 
@@ -61,7 +61,7 @@ void main() {
       addTearDown(bus.dispose);
 
       expect(bus.fireLegacy<String>('v', paths: ['x']), isFalse);
-      expect(bus.createdTopics, isEmpty);
+      expect(bus.createdAddresses, isEmpty);
       expect(bus.currentDataLegacy<String>(paths: ['x']), isNull);
     });
   });

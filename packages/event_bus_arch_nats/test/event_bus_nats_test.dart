@@ -8,17 +8,18 @@ import 'package:test/test.dart';
 
 import 'fakes/fake_nats_connection.dart';
 import '../../../test/legacy_compat.dart';
+import 'legacy_nats.dart';
 
 void main() {
   test('the public types are exported', () {
     expect(EventBusNats, isNotNull);
-    expect(EventNodeNatsImpl, isNotNull);
+    expect(NatsAddressMapper, isNotNull);
     expect(DartNatsConnection, isNotNull);
   });
 
   test('the bus exposes the connection state', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       connection: connection,
     );
@@ -31,7 +32,7 @@ void main() {
 
   test('dispose closes the connection and can be repeated', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       connection: connection,
     );
@@ -46,7 +47,7 @@ void main() {
 
   test('fire creates a node for a registered topic and publishes it', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       serializers: {
         'int.sensor': (dto) =>
@@ -73,7 +74,7 @@ void main() {
 
   test('fire throws when the connection is down', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       serializers: {'int.sensor': (dto) => (null, Uint8List(0))},
       connection: connection,
@@ -92,7 +93,7 @@ void main() {
 
   test('fire without a registration keeps the local semantics', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       connection: connection,
     );
@@ -106,16 +107,13 @@ void main() {
     final connection = FakeNatsConnection();
     String? seenTopic;
     Map<String, String>? seenArguments;
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       deserializers: {
         'int.sensor.temp': (data, topic, {arguments}) {
           seenTopic = topic;
           seenArguments = arguments;
-          return EventDTO<int>(
-            int.parse(utf8.decode(data)),
-            topic: Topic.parse(topic),
-          );
+          return EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)));
         },
       },
       connection: connection,
@@ -149,15 +147,12 @@ void main() {
     () async {
       final connection = FakeNatsConnection();
       String? seenTopic;
-      final bus = EventBusNats(
+      final bus = legacyNats(
         Uri.parse('nats://localhost:4222'),
         deserializers: {
           'int.sensor.*': (data, topic, {arguments}) {
             seenTopic = topic;
-            return EventDTO<int>(
-              int.parse(utf8.decode(data)),
-              topic: Topic.parse(topic),
-            );
+            return EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)));
           },
         },
         connection: connection,
@@ -186,7 +181,7 @@ void main() {
 
   test('uses the serializer subject override', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       serializers: {
         'int.sensor': (dto) => ('custom.subject', Uint8List.fromList([1])),
@@ -202,11 +197,11 @@ void main() {
 
   test('dispose cancels node subscriptions', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       deserializers: {
         'int.sensor.temp': (data, topic, {arguments}) =>
-            EventDTO<int>(0, topic: Topic.parse(topic)),
+            EventDTO.withKey(EventKey<int>(topic), 0),
       },
       connection: connection,
     );
@@ -226,7 +221,7 @@ void main() {
 
   test('reports a serializer failure to the sender', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       serializers: {'int.sensor': (dto) => throw StateError('boom')},
       connection: connection,
@@ -244,11 +239,11 @@ void main() {
     () async {
       final connection = FakeNatsConnection();
       final errors = <Object>[];
-      final bus = EventBusNats(
+      final bus = legacyNats(
         Uri.parse('nats://localhost:4222'),
         deserializers: {
           'int.sensor': (data, topic, {arguments}) =>
-              EventDTO<String>('wrong', topic: Topic.parse(topic)),
+              EventDTO.withKey(EventKey<String>(topic), 'wrong'),
         },
         connection: connection,
       );
@@ -269,51 +264,16 @@ void main() {
     },
   );
 
-  test(
-    'resolves a deserializer by pattern and maps prefixed subjects',
-    () async {
-      final connection = FakeNatsConnection();
-      final bus = EventBusNats(
-        Uri.parse('nats://localhost:4222'),
-        subjectPrefix: 'acme',
-        deserializers: {
-          'int.sensor.*': (data, topic, {arguments}) =>
-              EventDTO<int>(0, topic: Topic.parse(topic)),
-        },
-        connection: connection,
-      );
-      addTearDown(bus.dispose);
-
-      expect(
-        bus.subjects.toSubject(
-          Topic.create<int>(paths: ['sensor', 'temp']),
-          subscription: true,
-        ),
-        'acme.int.sensor.temp',
-      );
-      expect(
-        bus.shouldCreateNodeOnSend(
-          Topic.create<int>(paths: ['sensor', 'temp']),
-        ),
-        isTrue,
-      );
-    },
-  );
-
   test('an outgoing request is answered through the connection', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       serializers: {
         'int.sensor': (dto) =>
             (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
       },
       deserializers: {
-        'int.sensor': (data, topic, {arguments}) => EventDTO<int>(
-          int.parse(utf8.decode(data)),
-          topic: Topic.parse(topic),
-          arguments: arguments,
-        ),
+        'int.sensor': (data, topic, {arguments}) => EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)), arguments: arguments),
       },
       connection: connection,
     );
@@ -341,18 +301,14 @@ void main() {
 
   test('an incoming request is answered by the local handler', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       serializers: {
         'int.sensor': (dto) =>
             (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
       },
       deserializers: {
-        'int.sensor': (data, topic, {arguments}) => EventDTO<int>(
-          int.parse(utf8.decode(data)),
-          topic: Topic.parse(topic),
-          arguments: arguments,
-        ),
+        'int.sensor': (data, topic, {arguments}) => EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)), arguments: arguments),
       },
       connection: connection,
     );
@@ -377,7 +333,7 @@ void main() {
 
   test('a request without a local handler or transport route throws', () async {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       connection: connection,
     );
@@ -391,7 +347,7 @@ void main() {
 
   test('a request with a wildcard path is rejected', () {
     final connection = FakeNatsConnection();
-    final bus = EventBusNats(
+    final bus = legacyNats(
       Uri.parse('nats://localhost:4222'),
       connection: connection,
     );
@@ -403,14 +359,4 @@ void main() {
     );
   });
 
-  test('rejects an invalid registry key at construction', () {
-    expect(
-      () => EventBusNats(
-        Uri.parse('nats://localhost:4222'),
-        serializers: {'int.*': (dto) => (null, Uint8List(0))},
-        connection: FakeNatsConnection(),
-      ),
-      throwsA(isA<NatsSubjectException>()),
-    );
-  });
 }

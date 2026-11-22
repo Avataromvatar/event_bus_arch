@@ -90,9 +90,9 @@ What you need to know right away:
 * Patterns: `event_bus_arch_patterns` 0.1.0 — `FSM`, `Scope`, `Command`.
 * Adapters: `event_bus_arch_transport` 0.2.0, `event_bus_arch_mqtt` 0.2.0,
   `event_bus_arch_nats` 1.1.0; all depend on core `^4.0.0`.
-* Tests: 273 in the core on the VM and 6 in Chrome (`test/` plus `dart test -p chrome
-  test/web_smoke_test.dart`). Package suites: patterns 20, transport 37, NATS 44 (+10 skipped
-  without a broker), MQTT 33 (+7 skipped without a broker).
+* Tests: 243 in the core on the VM and 6 in Chrome (`test/` plus `dart test -p chrome
+  test/web_smoke_test.dart`). Package suites: patterns 20, transport 26, NATS 24 (+10 skipped
+  without a broker), MQTT 19 (+7 skipped without a broker).
 * Web: the core bus, subscriptions, observability and the transport seam work; isolate APIs throw
   `UnsupportedError` (see [14](14-web.md)).
 * Examples: `example/event_bus_arch_exmple.dart` (isolate),

@@ -266,26 +266,22 @@ the transport metadata changed).
 
 ## 10. Migration script
 
-`tool/migrate_3_to_4.dart` performs the mechanical rewrite of the known handler surface:
+`tool/migrate_3_to_4.dart` scans for the known 3.x handler surface and reports every finding:
 
 ```bash
-# dry run — prints findings, writes nothing
 dart run tool/migrate_3_to_4.dart lib test
-
-# apply the automatic rewrite
-dart run tool/migrate_3_to_4.dart --write lib test
 ```
 
-* `bus.handlers.setHandler<T>(...)` → `bus.subscribeEvents<T>(...)` is the only automatic rewrite.
-  Store the returned `EventSubscription` if you will need to remove the handler later.
-* `removeHandler` is reported, not rewritten: cancelling the subscription replaces it.
+* `bus.handlers.setHandler<T>(...)` is reported: replace it with
+  `bus.subscribeEvents(EventKey<T>('stable.address'), handler: ...)` and keep the returned
+  `EventSubscription`.
+* `removeHandler` is reported: cancelling the subscription replaces it.
 * `addAllHandlerFromOtherBus` / `removeAllHandlerPresentInOtherBus` are reported for manual work.
 * `EventBusHandlers` type references and `rxdart` usage are reported; add rxdart to your own
   dependencies if you still need it.
-* The address rewrite (`paths` → `EventKey`) is not automatic: a script cannot choose the stable
-  address for you. Use the table in section 2.
 
-The script is regex-based by design and may match comments or strings. Run it on a clean working
-tree, review every finding, then follow the checklist above.
+Nothing is rewritten automatically. The address model is the breaking change: a script cannot
+choose the stable address, the `EventKey<T>` and the codec registry for you. Use the table in
+section 2, then run the analyzer and the package tests.
 
 [Back to the overview](00-overview.md)

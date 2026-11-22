@@ -120,7 +120,7 @@ Future<void> main(List<String> args) async {
     changedFiles++;
     print('${report.path}:');
     if (report.handlersChanged > 0) {
-      print('  setHandler -> subscribeEvents: ${report.handlersChanged}');
+      print('  setHandler: ${report.handlersChanged} — replace with subscribeEvents(selector, handler: ...)');
     }
     if (report.removalsFound > 0) {
       print('  removeHandler: ${report.removalsFound} — store the subscription and cancel it');

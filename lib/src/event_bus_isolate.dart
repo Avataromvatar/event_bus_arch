@@ -10,7 +10,6 @@ part of event_arch;
 //    _IsolateErrorResponse, including the case when there is no node (then null);
 //  * a reply always carries the request id, so the order of replies is irrelevant;
 //  * an unknown id (a late or duplicate reply) is silently ignored;
-//  * a _IsolateDelete is fire-and-forget like a _IsolateFire: no reply;
 //  * the port listener never throws.
 //---------------------------------------------------------------------------
 
@@ -55,13 +54,6 @@ class _IsolateRequest {
 class _IsolateFire {
   final EventDTO dto;
   const _IsolateFire(this.dto);
-}
-
-///A manual topic removal. The sender removes its own node before sending; the
-///receiver removes its node and does not reply.
-class _IsolateDelete {
-  final Topic topic;
-  const _IsolateDelete(this.topic);
 }
 
 ///A typed key removal for the E model.
@@ -235,12 +227,12 @@ class _IsolateLink {
           'EventBusIsolate is not available (ready=${port != null}, closed=$_closed)'));
     }
     if (cancelToken?.isCancelled ?? false) {
-      return Future.error(RequestCanceledException(dto.topic.topic));
+      return Future.error(RequestCanceledException(dto.address));
     }
 
     var id = _newId();
     var completer = Completer<dynamic>();
-    final pending = _PendingRequest(completer, dto.topic.topic);
+    final pending = _PendingRequest(completer, dto.address);
     _pending[id] = pending;
 
     void cancel(Object error) {
@@ -256,13 +248,13 @@ class _IsolateLink {
 
     if (timeout != null) {
       pending.timer = Timer(timeout, () {
-        cancel(RequestTimeoutException(dto.topic.topic, timeout));
+        cancel(RequestTimeoutException(dto.address, timeout));
       });
     }
     final token = cancelToken;
     if (token != null) {
       token.whenCancelled.then((_) {
-        cancel(RequestCanceledException(dto.topic.topic));
+        cancel(RequestCanceledException(dto.address));
       });
     }
 
@@ -297,18 +289,6 @@ class _IsolateLink {
       return false;
     }
     port.send(_IsolateFire(dto));
-    return true;
-  }
-
-  ///Sends a manual topic removal without waiting for a reply. Returns false
-  ///when the other side is not reachable; the local removal has already
-  ///happened in that case.
-  bool removeTopic(Topic topic) {
-    var port = sendPort;
-    if (port == null || _closed) {
-      return false;
-    }
-    port.send(_IsolateDelete(topic));
     return true;
   }
 
@@ -384,9 +364,6 @@ class _IsolateLink {
       } else if (host is _EventBusForIsolate) {
         host._reportRemoteFailure(message.message);
       }
-    } else if (message is _IsolateDelete) {
-      // Local only: forwarding here would bounce the delete between the sides.
-      _host._removeTopicLocally(message.topic);
     } else if (message is _IsolateDeleteSelector) {
       _host._removeSelectorLocally(message.selector);
     } else if (message is _IsolateDeleteAddress) {
@@ -626,36 +603,36 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  void _onListenerInterestChanged(Topic topic, bool present) {
-    _link.interest(topic.topic, listener: true, handler: false, present: present);
+  void _onListenerInterestChanged(String address, bool present) {
+    _link.interest(address, listener: true, handler: false, present: present);
   }
 
   @override
-  void _onHandlerInterestChanged(Topic topic, bool present) {
-    _link.interest(topic.topic, listener: false, handler: true, present: present);
+  void _onHandlerInterestChanged(String address, bool present) {
+    _link.interest(address, listener: false, handler: true, present: present);
   }
 
   @override
-  void _onModelInterestChanged(Topic topic, bool present) {
-    _link.interest(topic.topic,
+  void _onModelInterestChanged(String address, bool present) {
+    _link.interest(address,
         listener: false, handler: false, model: true, present: present);
   }
 
   @override
-  void _onTopicInterestRemoved(Topic topic) {
-    _link.interest(topic.topic,
+  void _onTopicInterestRemoved(String address) {
+    _link.interest(address,
         listener: true, handler: true, model: true, present: false);
   }
 
   void _sendInterestSnapshot() {
-    for (final topic in _listenerCounts.keys) {
-      _link.interest(topic.topic, listener: true, handler: false, present: true);
+    for (final address in _listenerCounts.keys) {
+      _link.interest(address, listener: true, handler: false, present: true);
     }
-    for (final topic in _handlerCounts.keys) {
-      _link.interest(topic.topic, listener: false, handler: true, present: true);
+    for (final address in _handlerCounts.keys) {
+      _link.interest(address, listener: false, handler: true, present: true);
     }
-    for (final topic in _modelTopics) {
-      _link.interest(topic.topic,
+    for (final address in _modelTopics) {
+      _link.interest(address,
           listener: false, handler: false, model: true, present: true);
     }
   }
@@ -965,36 +942,36 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  void _onListenerInterestChanged(Topic topic, bool present) {
-    _link.interest(topic.topic, listener: true, handler: false, present: present);
+  void _onListenerInterestChanged(String address, bool present) {
+    _link.interest(address, listener: true, handler: false, present: present);
   }
 
   @override
-  void _onHandlerInterestChanged(Topic topic, bool present) {
-    _link.interest(topic.topic, listener: false, handler: true, present: present);
+  void _onHandlerInterestChanged(String address, bool present) {
+    _link.interest(address, listener: false, handler: true, present: present);
   }
 
   @override
-  void _onModelInterestChanged(Topic topic, bool present) {
-    _link.interest(topic.topic,
+  void _onModelInterestChanged(String address, bool present) {
+    _link.interest(address,
         listener: false, handler: false, model: true, present: present);
   }
 
   @override
-  void _onTopicInterestRemoved(Topic topic) {
-    _link.interest(topic.topic,
+  void _onTopicInterestRemoved(String address) {
+    _link.interest(address,
         listener: true, handler: true, model: true, present: false);
   }
 
   void _sendInterestSnapshot() {
-    for (final topic in _listenerCounts.keys) {
-      _link.interest(topic.topic, listener: true, handler: false, present: true);
+    for (final address in _listenerCounts.keys) {
+      _link.interest(address, listener: true, handler: false, present: true);
     }
-    for (final topic in _handlerCounts.keys) {
-      _link.interest(topic.topic, listener: false, handler: true, present: true);
+    for (final address in _handlerCounts.keys) {
+      _link.interest(address, listener: false, handler: true, present: true);
     }
-    for (final topic in _modelTopics) {
-      _link.interest(topic.topic,
+    for (final address in _modelTopics) {
+      _link.interest(address,
           listener: false, handler: false, model: true, present: true);
     }
   }

@@ -81,26 +81,19 @@ void main() {
     });
   });
 
-  group('Parameter names: Topic and EventDTO', () {
-    test('Topic takes paths and separator', () {
-      var topic = Topic.create<String>(paths: ['a'], separator: '/');
+  group('Parameter names: EventAddress and EventDTO', () {
+    test('EventKey takes an address and EventDTO takes a key', () {
+      final key = EventKey<int>('orders.placed');
 
-      expect(topic.copy(paths: ['b']).topic, 'String/b');
-      expect(Topic.parse('String/a', separator: '/').paths, ['a']);
+      expect(key.address.value, 'orders.placed');
+      expect(key.address.tokens, ['orders', 'placed']);
 
-      final dto = EventDTO<int>(1,
-          topic: topic.copy(),
-          paths: ['p'],
-          separator: '/',
-          arguments: {'a': '1'});
-      expect(dto.topic, isA<Topic>());
+      final dto = EventDTO.withKey(key, 1, arguments: {'a': '1'});
+      expect(dto.key, key);
 
-      final created = EventDTO.create<int>(1,
-          paths: ['p'], separator: '/', arguments: {'a': '1'});
-      expect(created.topic.topic, 'int/p');
-
-      final restored = EventDTOImpl.fromJson<int>({'topic': 'int', 'data': 1},
-          dataConverter: (t, d) => d as int);
+      final restored = EventDTOImpl.fromJson<int>(
+          {'address': 'orders.placed', 'data': 1},
+          dataConverter: (address, data) => data as int);
       expect(restored.data, 1);
     });
   });

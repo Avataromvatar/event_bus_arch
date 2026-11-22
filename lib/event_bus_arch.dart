@@ -9,7 +9,6 @@ import 'dart:math' as math;
 
 part 'src/layers.dart';
 part 'src/event_address.dart';
-part 'src/topic.dart';
 part 'src/event_dto.dart';
 part 'src/event_bus_logger.dart';
 part 'src/exception.dart';

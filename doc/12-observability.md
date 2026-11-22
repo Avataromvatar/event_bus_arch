@@ -12,7 +12,7 @@ opt-in and add no work while they are disabled.
 class EventBusError {
   final EventBusErrorKind kind;       // listener, handler, busy, timeout, cancel, transport, ...
   final EventBusErrorSource source;   // core, isolate, transport, supervision
-  final String? topic;
+  final String? address;              // EventBusError.topic is an alias
   final EventDTO? event;              // only when capturePayloads is enabled
   final String? correlationId;        // when the envelope is built from a request DTO
   final Object error;
@@ -24,7 +24,7 @@ class EventBusError {
 
 ```dart
 final sub = bus.errors.listen((error) {
-  log('${error.kind.name} ${error.topic}: ${error.error}');
+  log('${error.kind.name} ${error.address}: ${error.error}');
 });
 ```
 
@@ -44,16 +44,16 @@ final sub = bus.errors.listen((error) {
 
 ```mermaid
 flowchart LR
-    SRC["Listener / handler /<br/>transport / isolate / pool"] --> ENV["EventBusError<br/>kind, source, topic, context"]
-    ENV --> RL{"rate limit:<br/>10 per (kind, topic)/s"}
+    SRC["Listener / handler /<br/>transport / isolate / pool"] --> ENV["EventBusError<br/>kind, source, address, context"]
+    ENV --> RL{"rate limit:<br/>10 per (kind, address)/s"}
     RL -- accepted --> RECENT["bounded recent buffer<br/>(100)"]
     RL -- accepted --> STREAM["bus.errors<br/>broadcast data stream"]
     RL -- suppressed --> COUNT["suppressedErrors++"]
     STREAM --> MON["EventBusErrorMonitor<br/>filter + per-second limit"]
-    MON --> SNAP["monitor.snapshot()<br/>by kind and topic"]
+    MON --> SNAP["monitor.snapshot()<br/>by kind and address"]
 ```
 
-* Rate limiting is per `(kind, topic)`, 10 per second by default; suppressed errors are counted in
+* Rate limiting is per `(kind, address)`, 10 per second by default; suppressed errors are counted in
   `suppressedErrors`. `recentErrors` keeps the last 100 envelopes for diagnostics.
 * `EventBusErrorMonitor(filter: ..., recentLimit: ..., maxErrorsPerSecond: ...)` aggregates several
   buses; it can filter before counting, keeps its own bounded recent buffer and snapshot:
@@ -64,7 +64,7 @@ final monitor = EventBusErrorMonitor(
   maxErrorsPerSecond: 50,
 );
 monitor.add(bus);
-final snapshot = monitor.snapshot(); // total, suppressed, byKind, byTopic, recent
+final snapshot = monitor.snapshot(); // total, suppressed, byKind, byAddress, recent
 await monitor.dispose();
 ```
 
@@ -127,7 +127,7 @@ classDiagram
         +List topics
         +List subscriptions
     }
-    class TopicMetricsSnapshot {
+    class AddressMetricsSnapshot {
         +String key
         +LatencySnapshot dispatchLatency
         +LatencySnapshot requestLatency
@@ -144,7 +144,7 @@ classDiagram
     }
     EventBus --> EventBusMetrics
     EventBusMetrics --> EventBusMetricsSnapshot
-    EventBusMetricsSnapshot *-- TopicMetricsSnapshot
+    EventBusMetricsSnapshot *-- AddressMetricsSnapshot
     EventBusMetricsSnapshot *-- SubscriptionMetricsSnapshot
     EventBusMetricsExporter ..> EventBusMetricsSnapshot
 ```

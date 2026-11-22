@@ -7,6 +7,7 @@ import 'package:event_bus_arch_transport/event_bus_arch_transport.dart';
 import 'package:event_bus_arch_transport/testing.dart';
 import 'package:test/test.dart';
 import '../../../test/legacy_compat.dart';
+import 'legacy_codecs.dart';
 
 class _TestGrammar extends SubjectGrammar {
   const _TestGrammar();
@@ -33,14 +34,14 @@ class _TestGrammar extends SubjectGrammar {
 
 EventDTO _decode(Uint8List data, String topic,
         {Map<String, String>? arguments}) =>
-    EventDTO<int>(int.parse(utf8.decode(data)), topic: Topic.parse(topic));
+    EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)));
 
 void main() {
   test('correlation id and metrics cross the transport seam', () async {
     final connection = FakeTransportConnection();
-    final bus = TransportEventBus(
+    final bus = legacyTransportBus(
       connection: connection,
-      subjects: TopicSubjectMapper(grammar: const _TestGrammar()),
+      grammar: const _TestGrammar(),
       serializers: {'int': _encode},
       deserializers: {'int': _decode},
       originId: 'origin',

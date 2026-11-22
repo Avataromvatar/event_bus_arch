@@ -10,17 +10,14 @@ import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_mqtt/event_bus_arch_mqtt.dart';
 import 'package:test/test.dart';
 import '../../../test/legacy_compat.dart';
+import 'legacy_mqtt.dart';
 
 EventDTO<int> _decode(
   Uint8List data,
   String topic, {
   Map<String, String>? arguments,
 }) {
-  return EventDTO<int>(
-    int.parse(utf8.decode(data)),
-    topic: Topic.parse(topic),
-    arguments: arguments,
-  );
+  return EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)), arguments: arguments);
 }
 
 void main() {
@@ -40,12 +37,12 @@ void main() {
       };
       final deserializers = {'int': _decode};
 
-      busA = EventBusMqtt(
+      busA = legacyMqtt(
         Uri.parse(url!),
         serializers: serializers,
         deserializers: deserializers,
       );
-      busB = EventBusMqtt(
+      busB = legacyMqtt(
         Uri.parse(url),
         serializers: serializers,
         deserializers: deserializers,
@@ -151,12 +148,12 @@ void main() {
 
     test('arguments travel with the event', () async {
       final received = Completer<Map<String, String>?>();
-      final busC = EventBusMqtt(
+      final busC = legacyMqtt(
         Uri.parse(url!),
         deserializers: {
           'int': (data, topic, {arguments}) {
             received.complete(arguments);
-            return EventDTO<int>(0, topic: Topic.parse(topic));
+            return EventDTO.withKey(EventKey<int>(topic), 0);
           },
         },
       );

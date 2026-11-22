@@ -1,7 +1,7 @@
 import 'package:event_bus_arch_transport/event_bus_arch_transport.dart';
 
 export 'package:event_bus_arch_transport/event_bus_arch_transport.dart'
-    show SubjectGrammar, TopicSubjectMapper, TransportSubjectException;
+    show SubjectGrammar, TransportSubjectException;
 
 ///The NATS subject grammar.
 ///
@@ -85,16 +85,6 @@ class NatsGrammar extends SubjectGrammar {
       );
     }
   }
-}
-
-///Maps local event topics to NATS subjects and back.
-///
-///By default the mapping is one-to-one: the local topic `int.sensor.temp` is
-///also the wire subject. [prefix] namespaces every subject, and [typeTags]
-///replaces the first token (the Dart type token) with a stable wire token.
-class NatsSubjectMapper extends TopicSubjectMapper {
-  NatsSubjectMapper({super.prefix, super.typeTags})
-    : super(grammar: const NatsGrammar());
 }
 
 ///Maps typed event addresses to NATS subjects (the E address model).

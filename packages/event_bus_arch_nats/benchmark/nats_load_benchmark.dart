@@ -27,6 +27,7 @@ import 'dart:typed_data';
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_nats/event_bus_arch_nats.dart';
 import '../../../test/legacy_compat.dart';
+import '../../event_bus_arch_transport/test/legacy_codecs.dart';
 
 ///Fire-and-forget event. `sentAtUs` comes from the benchmark stopwatch; both
 ///buses live in this isolate, so the subscriber can read the same clock.
@@ -56,9 +57,9 @@ EventDTO<LoadEvent> _decodeLoad(
   Map<String, String>? arguments,
 }) {
   final bytes = ByteData.sublistView(data);
-  return EventDTO<LoadEvent>(
+  return EventDTO.withKey(
+    EventKey<LoadEvent>(topic),
     LoadEvent(bytes.getInt64(0), bytes.getInt64(8)),
-    topic: Topic.parse(topic),
     arguments: arguments,
   );
 }
@@ -85,18 +86,10 @@ EventDTO<dynamic> _decodeRequest(
   final bytes = ByteData.sublistView(data);
   final tag = bytes.getUint8(0);
   final value = bytes.getInt64(1);
-  final localTopic = Topic.parse(topic);
   return tag == 0
-      ? EventDTO<RequestEvent>(
-          RequestEvent(value),
-          topic: localTopic,
-          arguments: arguments,
-        )
-      : EventDTO<int>(
-          value,
-          topic: localTopic,
-          arguments: arguments,
-        );
+      ? EventDTO.withKey(EventKey<RequestEvent>(topic), RequestEvent(value),
+          arguments: arguments)
+      : EventDTO.withKey(EventKey<int>(topic), value, arguments: arguments);
 }
 
 class _Options {
@@ -369,6 +362,17 @@ Future<_Result> _requestRun(
   );
 }
 
+EventBusNats _legacyNats(
+  Uri url, {
+  Map<String, EventDTOSerialization>? serializers,
+  Map<String, EventDTODeserialization>? deserializers,
+}) =>
+    EventBusNats.keys(
+      url,
+      codecs: legacyCodecs(
+          serializers: serializers, deserializers: deserializers),
+    );
+
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
   if (!const {'both', 'fire', 'request'}.contains(options.scenario)) {
@@ -407,20 +411,20 @@ Future<void> _runShared(_Options options, Stopwatch clock) async {
   final fireErrors = <Object>[];
   final requestErrors = <Object>[];
 
-  final publisher = EventBusNats(
+  final publisher = _legacyNats(
     options.url,
     serializers: {'LoadEvent': _encodeLoad},
   );
-  final subscriber = EventBusNats(
+  final subscriber = _legacyNats(
     options.url,
     deserializers: {'LoadEvent': _decodeLoad},
   );
-  final responder = EventBusNats(
+  final responder = _legacyNats(
     options.url,
     serializers: {'RequestEvent': _encodeRequest},
     deserializers: {'RequestEvent': _decodeRequest},
   );
-  final requester = EventBusNats(
+  final requester = _legacyNats(
     options.url,
     serializers: {'RequestEvent': _encodeRequest},
     deserializers: {'RequestEvent': _decodeRequest},
@@ -642,11 +646,11 @@ Future<void> _isolatedWorker(List<dynamic> args) async {
   final control = args[0] as SendPort;
   final url = Uri.parse(args[1] as String);
   final clock = Stopwatch()..start();
-  final publisher = EventBusNats(
+  final publisher = _legacyNats(
     url,
     serializers: {'LoadEvent': _encodeLoad},
   );
-  final requester = EventBusNats(
+  final requester = _legacyNats(
     url,
     serializers: {'RequestEvent': _encodeRequest},
     deserializers: {'RequestEvent': _decodeRequest},
@@ -755,11 +759,11 @@ Future<void> _runIsolated(_Options options, Stopwatch clock) async {
   var negatives = 0;
   int? offsetUs;
 
-  final subscriber = EventBusNats(
+  final subscriber = _legacyNats(
     options.url,
     deserializers: {'LoadEvent': _decodeLoad},
   );
-  final responder = EventBusNats(
+  final responder = _legacyNats(
     options.url,
     serializers: {'RequestEvent': _encodeRequest},
     deserializers: {'RequestEvent': _decodeRequest},

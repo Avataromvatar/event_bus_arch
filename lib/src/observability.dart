@@ -132,7 +132,7 @@ class _MetricEntry {
   final _LatencyHistogram dispatchLatency = _LatencyHistogram();
   final _LatencyHistogram requestLatency = _LatencyHistogram();
 
-  TopicMetricsSnapshot snapshot() => TopicMetricsSnapshot(
+  AddressMetricsSnapshot snapshot() => AddressMetricsSnapshot(
         key: key,
         fired: fired,
         delivered: delivered,
@@ -150,8 +150,8 @@ class _MetricEntry {
 }
 
 ///One topic in a metrics snapshot.
-class TopicMetricsSnapshot {
-  const TopicMetricsSnapshot({
+class AddressMetricsSnapshot {
+  const AddressMetricsSnapshot({
     required this.key,
     required this.fired,
     required this.delivered,
@@ -250,7 +250,7 @@ class EventBusMetricsSnapshot {
   ///and were counted into `__other__`.
   final int droppedMetricSeries;
 
-  final List<TopicMetricsSnapshot> topics;
+  final List<AddressMetricsSnapshot> topics;
   final List<SubscriptionMetricsSnapshot> subscriptions;
 
   @override
@@ -384,7 +384,7 @@ class EventBusMetrics {
     var fired = 0;
     var delivered = 0;
     var dropped = 0;
-    final topics = <TopicMetricsSnapshot>[];
+    final topics = <AddressMetricsSnapshot>[];
     for (final entry in _topics.values) {
       fired += entry.fired;
       delivered += entry.delivered;
@@ -438,7 +438,7 @@ class EventBusMetrics {
       delivered: delivered,
       dropped: dropped,
       droppedMetricSeries: _droppedSeries,
-      topics: List<TopicMetricsSnapshot>.unmodifiable(topics),
+      topics: List<AddressMetricsSnapshot>.unmodifiable(topics),
       subscriptions:
           List<SubscriptionMetricsSnapshot>.unmodifiable(subscriptions),
     );

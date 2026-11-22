@@ -291,12 +291,9 @@ tests in `test/key_nats_test.dart` cover codec publication and the address mappe
 | File | Responsibility |
 |---|---|
 | `event_bus_arch_nats_base.dart` | `EventBusNats`: NATS factory over `TransportEventBus` |
-| `event_node_nats.dart` | `EventNodeNatsImpl` alias for `TransportEventNode` (legacy) |
 | `nats_connection.dart` | `NatsConnection` aliases, statuses, message, options |
 | `dart_nats_connection.dart` | `dart_nats` client adapter: connect, headers, subscriptions |
-| `nats_subject.dart` | `NatsGrammar`, `NatsSubjectMapper` (legacy) and `NatsAddressMapper` |
-| `nats_registry.dart` | `NatsRegistryIndex` alias for `TopicRegistryIndex` (legacy) |
-| `nats_serialization.dart` | shared serializer/deserializer typedefs (legacy) |
+| `nats_subject.dart` | `NatsGrammar` and `NatsAddressMapper` |
 | `nats_reconnect_policy.dart` | `NatsReconnectPolicy` alias for `ReconnectPolicy` |
 | `nats_exception.dart` | `Nats*` aliases for the shared transport errors |
 

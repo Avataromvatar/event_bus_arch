@@ -185,7 +185,7 @@ class EventDTOImpl<T> implements EventDTO<T> {
       {EventKey<T>? key,
        T Function(String address, dynamic data)? dataConverter});
 
-  Map<String, dynamic> toJson();     // {'topic': address, 'data': ..., maybe 'correlationId'}
+  Map<String, dynamic> toJson();     // {'address': ..., 'data': ..., maybe 'correlationId'}
   bool operator ==(Object other);    // by (address, data)
   int get hashCode;                  // Object.hash(address, data)
   String toString();                 // 'EventDTO(<address>, data: <data>)'
@@ -484,8 +484,8 @@ class EventBusError {
     required EventBusErrorKind kind,
     required Object error,
     EventBusErrorSource source = EventBusErrorSource.core,
-    String? topic,                    // legacy spelling
-    String? address,                  // preferred; wins when both are passed
+    String? address,                  // the event address
+    String? topic,                    // old spelling; used when address is null
     EventDTO? event,                  // null unless payload capture is enabled
     String? correlationId,            // when the envelope came from a request DTO
     StackTrace? stackTrace,
@@ -493,8 +493,8 @@ class EventBusError {
     DateTime? timestamp,
   });
 
-  String? get address => topic;       // the event address
-  final String? topic;                // compatibility alias
+  final String? address;              // the event address
+  String? get topic => address;       // old name, same string
 }
 ```
 
@@ -519,12 +519,12 @@ Stream<EventBusError> get errors;
 List<EventBusError> get recentErrors;      // bounded by recentLimit
 Map<EventBusErrorKind, int> get counts;
 int get suppressed;                       // dropped by the monitor-wide limit
-EventBusErrorSnapshot snapshot();         // total, suppressed, byKind, byTopic, recent
+EventBusErrorSnapshot snapshot();         // total, suppressed, byKind, byAddress, recent
 void resetCounters();
 Future<void> dispose();
 ```
 
-`EventBusErrorSnapshot` exposes `total`, `suppressed`, `byKind`, `byTopic` (key `__none__` for an
+`EventBusErrorSnapshot` exposes `total`, `suppressed`, `byKind`, `byAddress` (key `__none__` for an
 error without an address) and `recent`. The monitor filters before counting; each bus keeps its own
 per-`(kind, address)` limit from ADR-0004.
 
@@ -556,7 +556,7 @@ abstract interface class EventBusMetricsExporter {
 ```
 
 `EventBusMetricsSnapshot` has `timestamp`, `fired`, `delivered`, `dropped`,
-`droppedMetricSeries`, `topics` (`TopicMetricsSnapshot`) and `subscriptions`
+`droppedMetricSeries`, `topics` (`AddressMetricsSnapshot`) and `subscriptions`
 (`SubscriptionMetricsSnapshot`). Each address has event/request counters and dispatch/request
 latency; each subscription has buffer/queue depth, in-flight, concurrency and queue-wait latency.
 The metric key defaults to the address string; `cardinalityLimit` routes new keys to `__other__`.

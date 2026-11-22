@@ -3,62 +3,6 @@ import 'package:test/test.dart';
 import 'legacy_compat.dart';
 
 void main() {
-  group('TopicPattern', () {
-    test('recognises whole-token wildcards', () {
-      expect(TopicPattern.isPattern(Topic.fromString('int.sensor.*')), isTrue);
-      expect(TopicPattern.isPattern(Topic.fromString('int.>')), isTrue);
-      expect(TopicPattern.isPattern(Topic.fromString('int.sen*or')), isTrue);
-      expect(
-          TopicPattern.isPattern(Topic.fromString('int.sensor.temp')), isFalse);
-    });
-
-    test('matches one token with * and one or more with >', () {
-      final pattern = Topic.fromString('int.sensor.*');
-
-      expect(TopicPattern.matches(pattern, Topic.fromString('int.sensor.temp')),
-          isTrue);
-      expect(
-          TopicPattern.matches(
-              pattern, Topic.fromString('int.sensor.temp.value')),
-          isFalse);
-      expect(TopicPattern.matches(pattern, Topic.fromString('int.sensor')),
-          isFalse);
-
-      final tail = Topic.fromString('int.sensor.>');
-      expect(TopicPattern.matches(tail, Topic.fromString('int.sensor.temp')),
-          isTrue);
-      expect(
-          TopicPattern.matches(tail, Topic.fromString('int.sensor.temp.value')),
-          isTrue);
-      expect(
-          TopicPattern.matches(tail, Topic.fromString('int.sensor')), isFalse);
-    });
-
-    test('does not match another type or another topic', () {
-      final pattern = Topic.fromString('int.sensor.*');
-
-      expect(
-          TopicPattern.matches(pattern, Topic.fromString('String.sensor.temp')),
-          isFalse);
-      expect(TopicPattern.matches(pattern, Topic.fromString('int.other.temp')),
-          isFalse);
-    });
-
-    test('counts literal tokens for specificity', () {
-      expect(TopicPattern.specificity(Topic.fromString('int.sensor.*')), 1);
-      expect(TopicPattern.specificity(Topic.fromString('int.>')), 0);
-    });
-
-    test('rejects an invalid pattern', () {
-      expect(() => TopicPattern.validate(Topic.fromString('int.>.value')),
-          throwsA(isA<EventBusException>()));
-      expect(() => TopicPattern.validate(Topic.fromString('int.sen*or')),
-          throwsA(isA<EventBusException>()));
-      expect(() => TopicPattern.validate(Topic.fromString('int.sensor.*')),
-          returnsNormally);
-    });
-  });
-
   group('EventBus: wildcard listeners', () {
     test('a pattern listener receives matching concrete events', () async {
       final bus = EventBus();
@@ -98,7 +42,7 @@ void main() {
       bus.subscribeEventsLegacy<int>(
           paths: ['sensor', '*'],
           handler: (dto, lastData) async {
-            seenTopic = dto.topic.topic;
+            seenTopic = dto.address;
             seenLast = lastData;
             return dto.data * 2;
           });

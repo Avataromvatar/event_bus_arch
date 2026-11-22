@@ -7,7 +7,7 @@
   force for subscriptions, handlers, requests, isolate interest and supervision respectively.
 - Related: [2026-11-22-event-address-analysis.md](../artifacts/plans/2026-11-22-event-address-analysis.md),
   [2026-11-22-defect-remediation-plan.md](../artifacts/plans/2026-11-22-defect-remediation-plan.md)
-- Implementation: pending; this ADR records the decision and the migration shape.
+- Implementation: implemented on `version4` (2026-11-22). The production API is E-only: `Topic`/`TopicPattern`, `paths`/`separator`, `*Legacy` methods and the legacy transport registries are removed. A test-only facade (`test/legacy_compat.dart`) keeps the old behaviour tests; it is not exported by the package.
 
 ## Context
 

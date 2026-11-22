@@ -87,7 +87,7 @@ final sub = bus.subscribeEvents(orderKey,
 | `pause()` | Paused handlers are not selected for new requests; queued requests wait |
 
 A handler returning a value answers `request`. An exception is both returned to the caller and
-reported through `errors` (kind `handler`). Requests are dispatched by **tier** — the exact topic
+reported through `errors` (kind `handler`). Requests are dispatched by **tier** — the exact key
 first, then the most specific pattern — and round-robin inside the tier. An exact tier never falls
 back to a pattern tier: if every exact handler is busy, the caller sees `BusyException`.
 

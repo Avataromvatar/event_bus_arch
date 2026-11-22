@@ -242,9 +242,7 @@ keyed tests in `test/key_mqtt_test.dart` cover codec publication and the address
 | `event_bus_arch_mqtt_base.dart` | `EventBusMqtt`: MQTT factory over `TransportEventBus` |
 | `mqtt5_client_connection.dart` | `mqtt5_client` adapter: connect, user properties, subscriptions, matching |
 | `mqtt_connection.dart` | `MqttConnection` aliases, options, QoS enum |
-| `mqtt_subject.dart` | `MqttGrammar`, `MqttSubjectMapper` (legacy) and `MqttAddressMapper` |
-| `mqtt_registry.dart` | `MqttRegistryIndex` alias for `TopicRegistryIndex` (legacy) |
-| `mqtt_serialization.dart` | shared serializer/deserializer typedefs (legacy) |
+| `mqtt_subject.dart` | `MqttGrammar` and `MqttAddressMapper` |
 | `mqtt_reconnect_policy.dart` | `MqttReconnectPolicy` alias for `ReconnectPolicy` |
 | `mqtt_exception.dart` | `Mqtt*` aliases for the shared transport errors |
 

@@ -238,8 +238,7 @@ void main() {
 
       expect(dto.key, key);
       expect(dto.address, 'counter');
-      expect(dto.topic.topic, 'counter');
-      expect(dto.toJson()['topic'], 'counter');
+      expect(dto.toJson()['address'], 'counter');
     });
   });
 }

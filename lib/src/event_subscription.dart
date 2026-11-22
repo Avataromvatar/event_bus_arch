@@ -38,7 +38,6 @@ enum DeliveryMode {
 class EventSubscription<T> {
   EventSubscription._({
     required this.selector,
-    Topic? topic,
     required this.onEvent,
     required this.handler,
     required this.handlerConcurrency,
@@ -54,8 +53,7 @@ class EventSubscription<T> {
     int? bufferCapacity,
     BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
   })  : _bufferCapacity = bufferCapacity,
-        _bufferOverflow = bufferOverflow,
-        _topicOverride = topic {
+        _bufferOverflow = bufferOverflow {
     if (bufferCapacity != null && bufferCapacity < 0) {
       throw ArgumentError.value(
           bufferCapacity, 'bufferCapacity', 'must be null or >= 0');
@@ -78,10 +76,10 @@ class EventSubscription<T> {
   ///The typed selector this subscription is attached to.
   final EventSelector<T> selector;
 
-  final Topic? _topicOverride;
-
-  ///A compatibility view of the subscription address as the old `Topic`.
-  Topic get topic => _topicOverride ?? Topic.parse(selector.toString());
+  ///The address (or pattern string) of this subscription.
+  String get address => selector is EventPatternKey
+      ? (selector as EventPatternKey).pattern.value
+      : (selector as EventKey).address.value;
 
   ///The listener callback. Null means this subscription is not a listener.
   final EventCallback<T>? onEvent;
@@ -259,7 +257,7 @@ class EventSubscription<T> {
     final queued = List<_RequestEntry>.of(_requestQueue);
     _requestQueue.clear();
     for (final entry in queued) {
-      entry.fail(NoHandlerException(topic.topic));
+      entry.fail(NoHandlerException(address));
     }
   }
 
@@ -468,12 +466,16 @@ class EventSubscription<T> {
 
   void _handleError(Object error, StackTrace stackTrace, T event) {
     onError?.call(error, stackTrace);
+    final selector = this.selector;
+    final captured = capturePayloads && selector is EventKey<T>
+        ? EventDTO<T>.withKey(selector, event)
+        : null;
     onBusError(EventBusError(
       kind: EventBusErrorKind.listener,
-      topic: topic.topic,
+      topic: address,
       error: error,
       stackTrace: stackTrace,
-      event: capturePayloads ? EventDTO<T>(event, topic: topic) : null,
+      event: captured,
     ));
     if (cancelOnError) {
       unawaited(cancel());
@@ -483,16 +485,16 @@ class EventSubscription<T> {
   void _reportOverflow(int capacity) {
     onBusError(EventBusError(
       kind: EventBusErrorKind.bufferOverflow,
-      topic: topic.topic,
+      topic: address,
       error: EventBusException(
-          'listener buffer overflow for "${topic.topic}"'),
+          'listener buffer overflow for "$address"'),
       context: {'capacity': '$capacity', 'dropped': '$_dropped'},
     ));
   }
 
   @override
   String toString() =>
-      'EventSubscription<$T>(${topic.topic}, buffered=$buffered, '
+      'EventSubscription<$T>($address, buffered=$buffered, '
       'dropped=$dropped, delivered=$delivered, inFlight=$inFlight)';
 }
 

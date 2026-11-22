@@ -6,57 +6,22 @@ import 'package:event_bus_arch/event_bus_arch.dart';
 
 import 'event_address_mapper.dart';
 import 'event_codec.dart';
-import 'topic_registry_index.dart';
-import 'topic_subject_mapper.dart';
 import 'transport_connection.dart';
-import 'transport_event_node.dart';
 import 'transport_exception.dart';
 import 'transport_key_event_node.dart';
-import 'transport_serialization.dart';
 
-///A bus that mirrors its topics to a broker.
+///A bus that mirrors its keys to a broker.
 ///
-///A topic is published to the broker only when [serializers] has an entry for
-///it; it is subscribed to only when [deserializers] has one. `fire` to a topic
-///outside both registries behaves exactly like a local bus: if no local node
-///exists, it returns false.
+///A key is published to the broker only when a codec with `encode` resolves
+///for its address; it is subscribed to only when a codec with `decode`
+///resolves. `fire` to an address outside the registry behaves exactly like a
+///local bus: if no local node exists, it returns false.
 ///
-///Node creation is lazy and typed: `listen<T>`, `subscribeEvents<T>(handler:)` and
-///`fire<T>`/`request<T>` call [createNode], which resolves the serializer and
-///the deserializer for the topic and returns a [TransportEventNode].
+///Node creation is lazy and typed: `listen<T>`, `subscribeEvents<T>(handler:)`
+///and `fire<T>`/`request<T>` call [createNodeForKey] or
+///[createPatternNodeForKey], which resolve the codec for the address and return
+///a [TransportKeyEventNode].
 class TransportEventBus extends EventBusImpl {
-  TransportEventBus({
-    required TransportConnection connection,
-    required TopicSubjectMapper subjects,
-    Map<String, EventDTOSerialization>? serializers,
-    Map<String, EventDTODeserialization>? deserializers,
-    required String originId,
-    ObservabilityConfig? observability,
-  })  : _keyMode = false,
-        _serializers =
-            Map<String, EventDTOSerialization>.unmodifiable(serializers ?? {}),
-        _deserializers = Map<String, EventDTODeserialization>.unmodifiable(
-            deserializers ?? {}),
-        _originId = originId,
-        super(false,
-            observability: observability ?? ObservabilityConfig.disabled) {
-    _subjects = subjects;
-    for (final key in _serializers.keys) {
-      _subjects.validatePublishKey(key);
-    }
-    for (final key in _deserializers.keys) {
-      _subjects.validateSubscribeKey(key);
-    }
-    _serializerIndex = TopicRegistryIndex(_serializers, allowPatterns: false);
-    _deserializerIndex =
-        TopicRegistryIndex(_deserializers, allowPatterns: true);
-
-    _connection = connection;
-    _connectionErrorsSubscription =
-        _connection.errors.listen((error) => _reportError(error));
-    unawaited(_connection.start());
-  }
-
   ///Creates a transport bus for the E address model.
   ///
   ///The wire subject is the event address; [codecs] resolve an encoder and a
@@ -67,10 +32,7 @@ class TransportEventBus extends EventBusImpl {
     required EventCodecRegistry codecs,
     required String originId,
     ObservabilityConfig? observability,
-  })  : _keyMode = true,
-        _serializers = const {},
-        _deserializers = const {},
-        _addresses = addresses,
+  })  : _addresses = addresses,
         _codecs = codecs,
         _originId = originId,
         super(false,
@@ -81,49 +43,20 @@ class TransportEventBus extends EventBusImpl {
     unawaited(_connection.start());
   }
 
-  final bool _keyMode;
-  final Map<String, EventDTOSerialization> _serializers;
-  final Map<String, EventDTODeserialization> _deserializers;
   final String _originId;
 
-  late final TopicSubjectMapper _subjects;
   late final EventAddressMapper _addresses;
   late final EventCodecRegistry _codecs;
-  late final TopicRegistryIndex<EventDTOSerialization> _serializerIndex;
-  late final TopicRegistryIndex<EventDTODeserialization> _deserializerIndex;
 
   late final TransportConnection _connection;
   StreamSubscription<Object>? _connectionErrorsSubscription;
   Future<void>? _disposeFuture;
 
-  ///The topic-to-subject mapper used by this bus.
-  ///
-  ///Only available on a legacy topic bus; a keyed bus uses [addresses].
-  TopicSubjectMapper get subjects {
-    if (_keyMode) {
-      throw UnsupportedError(
-          'a keyed transport bus has no TopicSubjectMapper; use addresses');
-    }
-    return _subjects;
-  }
+  ///The address-to-subject mapper of this bus.
+  EventAddressMapper get addresses => _addresses;
 
-  ///The address-to-subject mapper of a keyed transport bus.
-  EventAddressMapper get addresses {
-    if (!_keyMode) {
-      throw UnsupportedError(
-          'this transport bus uses the legacy topic API; use subjects');
-    }
-    return _addresses;
-  }
-
-  ///The codec registry of a keyed transport bus.
-  EventCodecRegistry get codecs {
-    if (!_keyMode) {
-      throw UnsupportedError(
-          'this transport bus uses the legacy serializer registry');
-    }
-    return _codecs;
-  }
+  ///The codec registry of this bus.
+  EventCodecRegistry get codecs => _codecs;
 
   ///The low-level connection. Exposed for the node and for tests.
   TransportConnection get connection => _connection;
@@ -150,28 +83,15 @@ class TransportEventBus extends EventBusImpl {
     return timeout == null ? future : future.timeout(timeout);
   }
 
-  ///Creates a node for a topic that is known to either registry.
   @override
-  bool shouldCreateNodeOnSend(Topic topic) =>
-      !_keyMode &&
-      (_serializerFor(topic) != null || _deserializerFor(topic) != null);
-
-  @override
-  bool shouldCreateNodeOnSendKey<T>(EventKey<T> key) {
-    if (!_keyMode) {
-      return shouldCreateNodeOnSend(Topic.parse(key.address.value));
-    }
-    return _codecs.resolve(key.address)?.canEncode == true;
-  }
+  bool shouldCreateNodeOnSendKey<T>(EventKey<T> key) =>
+      _codecs.resolve(key.address)?.canEncode == true;
 
   @override
   EventNode<T> createNodeForKey<T>({
     required EventKey<T> key,
     T? currentData,
   }) {
-    if (!_keyMode) {
-      return super.createNodeForKey(key: key, currentData: currentData);
-    }
     return TransportKeyEventNode<T>(
       connection: _connection,
       addresses: _addresses,
@@ -180,6 +100,8 @@ class TransportEventBus extends EventBusImpl {
       originId: _originId,
       currentData: currentData,
       onError: (error, stackTrace) => _reportError(error, stackTrace),
+      onRequest: (dto, message, codec) =>
+          _answerKeyedRequest(key, dto, message, codec),
     );
   }
 
@@ -188,9 +110,6 @@ class TransportEventBus extends EventBusImpl {
     required EventPatternKey<T> key,
     T? currentData,
   }) {
-    if (!_keyMode) {
-      return super.createPatternNodeForKey(key: key, currentData: currentData);
-    }
     return TransportKeyEventNode<T>(
       connection: _connection,
       addresses: _addresses,
@@ -199,52 +118,9 @@ class TransportEventBus extends EventBusImpl {
       originId: _originId,
       currentData: currentData,
       onError: (error, stackTrace) => _reportError(error, stackTrace),
+      onRequest: (dto, message, codec) =>
+          _answerKeyedRequest(key, dto, message, codec),
     );
-  }
-
-  @override
-  EventNode<T> createNode<T>({
-    required Topic topic,
-    T? currentData,
-  }) {
-    final deserializer = _deserializerFor(topic);
-    if (deserializer != null) {
-      // The node subscribes when it is created; reject an invalid pattern
-      // before a broker subscription is attempted.
-      _subjects.validateSubscribe(topic);
-    }
-    return TransportEventNode<T>(
-      connection: _connection,
-      subjects: _subjects,
-      originId: _originId,
-      onError: (error, stackTrace) => _reportError(error, stackTrace),
-      onRequest: (dto, message) => _answerRequest(topic, dto, message),
-      topic: topic,
-      currentData: currentData,
-      serializer: _serializerFor(topic),
-      deserializer: deserializer,
-    );
-  }
-
-  ///The legacy-topic form of a broker request, used while a transport bus is
-  ///constructed with the old serializer registries.
-  Future<dynamic> _requestTopicLegacy<T>(
-    EventKey<T> key,
-    T data, {
-    Map<String, String>? arguments,
-    Duration? timeout,
-    String? correlationId,
-  }) {
-    final topic = Topic.parse(key.address.value);
-    if (haveHandler<T>(key)) {
-      return super.request<T>(key, data,
-          arguments: arguments,
-          timeout: timeout,
-          correlationId: correlationId);
-    }
-    // Broker-side cancellation is not part of the 4.0.0 transport contract
-    // (D15); the caller's timeout bounds the wait.
-    return _requestTransport<T>(topic, data, arguments, timeout, correlationId);
   }
 
   ///A request on a keyed transport bus: a local handler wins, otherwise the
@@ -258,12 +134,6 @@ class TransportEventBus extends EventBusImpl {
     CancelToken? cancelToken,
     String? correlationId,
   }) {
-    if (!_keyMode) {
-      return _requestTopicLegacy<T>(key, data,
-          arguments: arguments,
-          timeout: timeout,
-          correlationId: correlationId);
-    }
     if (isDisposed) {
       throw StateError('EventBus is disposed: $this');
     }
@@ -341,161 +211,52 @@ class TransportEventBus extends EventBusImpl {
     }
   }
 
-  Future<dynamic> _requestTransport<T>(
-    Topic topic,
-    T data,
-    Map<String, String>? arguments,
-    Duration? timeout,
-    String? correlationId,
-  ) async {
-    final observing = isObservable && observabilityConfig.metrics;
-    final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    if (observing) metrics.recordRequestStarted(topic.topic);
-    try {
-      final value = await _requestTransportInner<T>(
-          topic, data, arguments, timeout, correlationId);
-      if (observing) {
-        metrics.recordRequestOutcome(topic.topic, RequestOutcome.completed,
-            DateTime.now().microsecondsSinceEpoch - started);
-      }
-      return value;
-    } catch (error) {
-      if (observing) {
-        metrics.recordRequestOutcome(
-            topic.topic,
-            error is TimeoutException
-                ? RequestOutcome.timeout
-                : RequestOutcome.errored,
-            DateTime.now().microsecondsSinceEpoch - started);
-      }
-      rethrow;
-    }
-  }
-
-  Future<dynamic> _requestTransportInner<T>(
-    Topic topic,
-    T data,
-    Map<String, String>? arguments,
-    Duration? timeout,
-    String? correlationId,
-  ) async {
-    final serializer = _serializerFor(topic);
-    final deserializer = _deserializerFor(topic);
-    if (serializer == null && deserializer == null) {
-      throw NoHandlerException(topic.topic);
-    }
-    if (serializer == null || deserializer == null) {
-      throw EventBusTransportException(
-        'a remote request on "${topic.topic}" needs both a serializer and a '
-        'deserializer; ${serializer == null ? 'no serializer' : 'no deserializer'} '
-        'is registered',
-      );
-    }
-
-    _subjects.validatePublish(topic);
-    final dto = EventDTO<T>(data,
-        topic: topic, arguments: arguments, correlationId: correlationId);
-
-    late final (String?, Uint8List) encoded;
-    try {
-      encoded = serializer(dto);
-    } catch (error, stackTrace) {
-      Error.throwWithStackTrace(
-        TransportSerializationException(
-          'serializer failed for "${topic.topic}": $error',
-          subject: topic.topic,
-          cause: error,
-        ),
-        stackTrace,
-      );
-    }
-
-    final (overrideSubject, bytes) = encoded;
-    final subject = overrideSubject ?? _subjects.toSubject(topic);
-    if (overrideSubject != null) {
-      _subjects.validatePublishSubject(overrideSubject);
-    }
-
-    final reply = await _connection.request(
-      subject,
-      bytes,
-      arguments: arguments,
-      correlationId: correlationId,
-      originId: _originId,
-      timeout: timeout,
-    );
-
-    try {
-      final response = deserializer(
-        reply.data,
-        topic.topic,
-        arguments: reply.arguments,
-      );
-      return response.data;
-    } catch (error, stackTrace) {
-      Error.throwWithStackTrace(
-        TransportDeserializationException(
-          'cannot decode the response for "${topic.topic}": $error',
-          subject: topic.topic,
-          cause: error,
-        ),
-        stackTrace,
-      );
-    }
-  }
-
   ///Invokes the local handler for an incoming request and encodes its result.
   ///The response always goes to the request's reply subject: a subject
-  ///returned by the serializer is ignored.
+  ///returned by the encoder is ignored.
   ///
   ///A request can reach several overlapping subscriptions (an exact listener
   ///node and a pattern handler node, for example). Only the node that owns the
-  ///handler's registration topic answers; the others stay silent.
-  Future<Uint8List?> _answerRequest(
-    Topic nodeTopic,
+  ///handler's registration address answers; the others stay silent.
+  Future<Uint8List?> _answerKeyedRequest(
+    EventSelector selector,
     EventDTO dto,
     TransportMessage message,
+    EventCodec codec,
   ) async {
-    if (handlerTopicFor(dto.topic) != nodeTopic) return null;
+    final nodeAddress = selector is EventPatternKey
+        ? selector.pattern.value
+        : (selector as EventKey).address.value;
+    if (handlerAddressFor(dto.address) != nodeAddress) return null;
 
     final result = await handleIncomingRequest(dto);
-    final serializer = _serializerFor(dto.topic);
-    if (serializer == null) {
+    final encode = codec.encode;
+    if (encode == null) {
       throw TransportSerializationException(
-        'no serializer to answer a request on "${dto.topic.topic}"',
-        subject: dto.topic.topic,
+        'no encoder to answer a request on "${dto.address}"',
+        subject: dto.address,
       );
     }
-
-    final response = EventDTO<dynamic>(
+    final response = EventDTO<dynamic>.withKey(
+      EventKey<dynamic>(dto.address),
       result,
-      topic: dto.topic,
       arguments: dto.arguments,
       correlationId: dto.correlationId,
     );
     try {
-      final (_, bytes) = serializer(response);
+      final (_, bytes) = encode(response);
       return bytes;
     } catch (error, stackTrace) {
       Error.throwWithStackTrace(
         TransportSerializationException(
-          'serializer failed to answer "${dto.topic.topic}": $error',
-          subject: dto.topic.topic,
+          'encoder failed to answer "${dto.address}": $error',
+          subject: dto.address,
           cause: error,
         ),
         stackTrace,
       );
     }
   }
-
-  ///The serializer for a concrete topic, falling back to its type token.
-  EventDTOSerialization? _serializerFor(Topic topic) =>
-      _serializerIndex.resolve(topic);
-
-  ///The deserializer for a concrete topic, falling back to its type token and
-  ///then to the most specific wildcard pattern.
-  EventDTODeserialization? _deserializerFor(Topic topic) =>
-      _deserializerIndex.resolve(topic);
 
   @override
   Future<void> dispose() => _disposeFuture ??= _disposeImpl();

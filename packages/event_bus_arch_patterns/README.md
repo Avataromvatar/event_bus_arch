@@ -36,11 +36,13 @@ class Loader with FSM<State> {
   Loader(EventBus bus) {
     initFSM(bus, State.idle);
     addFSMTransition<Start>(State.idle, State.loading,
+      selector: EventKey<Start>('start'),
       handler: (current, last, event, ignored) async {
         await load(event.url);
         return null;
       });
-    addFSMTransition<Done>(State.loading, State.ready);
+    addFSMTransition<Done>(State.loading, State.ready,
+      selector: EventKey<Done>('done'));
   }
 }
 ```
@@ -52,7 +54,7 @@ events collected during it are cleared, and the next event can drive the next tr
 
 ```dart
 final scope = Scope<int>();
-await scope.initScope(bus, paths: ['counter'], initialData: 0);
+await scope.initScope(bus, EventKey<int>('counter'), initialData: 0);
 await scope.call(1);
 await scope.undo();          // re-sends the previous value
 scope.disposeScope();

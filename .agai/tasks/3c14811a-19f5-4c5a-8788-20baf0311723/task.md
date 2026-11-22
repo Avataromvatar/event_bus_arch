@@ -161,5 +161,58 @@ pending: update
 - Этап 6: observability/errors — метрики по адресу, `EventBusError.address`.
 - Этап 7: удалить compatibility-слой и переименовать `*Key` в финальные имена; docs/tests.
 
+# Запись о работе над задачей
+
+### Задача
+
+- Репозиторий: e:/workspace/dart/event_bus_arch
+- ID и ссылка: 3c14811a-19f5-4c5a-8788-20baf0311723 (локальная запись, YouGile не подключён)
+- Название: Implement ADR-0009: event address and key model
+- Статус до / после: in progress / in progress (этап 3 из 7 — patterns package)
+- Сессия: 8bf51fbe-78ce-4a9f-892c-cae0d060cd75
+
+### Участники
+
+| Плагин | Агент или скил | Участие |
+|---|---|---|
+| agai-sdlc | records, task-sync | учёт и журнал |
+| agai-dev | backend-developer | Scope/Command/FSM на ключах, тесты, примеры |
+
+### Время и использование
+
+- Начало / завершение: 2026-11-22T20:45+04:00 / 2026-11-22T21:05+04:00
+- Активное время: ~20 минут (оценка)
+- Токены: недоступны в этой сессии
+- Стоимость: недоступна
+- Источники метрик: .agai/metrics/sessions/ (если хост предоставит)
+
+### Итог и доказательства
+
+Этап 3 (patterns package) выполнен:
+
+- `Scope.initScope(EventBus bus, EventKey<T> key, {...})` — ключ обязателен, `paths` удалён;
+  подписка идёт через `subscribeEventsKey`, команда — через `Command(bus, key)`.
+- `Command(EventBus bus, EventKey<T> key, {int maxLen})`; `Command.key` вместо `paths`;
+  `execute` использует `haveHandlerKey`/`requestKey`/`fireKey`.
+- `FSM.addFSMTransition<E>(from, to, {required EventSelector<E> selector, ...})` — exact или
+  pattern ключ; переходы матчатся по адресу и `data is E`, exact выигрывает у паттерна,
+  специфичность паттерна учитывается; повторная регистрация того же selector+fromState
+  заменяет переход.
+- `FSM` по-прежнему слушает `allEventStream`, использует `dto.key`; try/finally от залипания
+  сохранён.
+- Обновлены тесты (20), примеры и README пакета.
+
+Прогоны:
+- `dart analyze` (patterns) — **No issues found**;
+- `dart test` (patterns) — **20 passed**;
+- `fsm_example.dart` и `migration_target_example.dart` — отработали.
+- Код не коммитился.
+
+### Открытые вопросы и дальнейшие действия
+
+- Этап 4: transport — address-only subjects, типизированные codec'и, без `typeTags`/`wireTypes`,
+  публикация только с точного ключа, один subscription на адрес.
+- Затем isolate/pool/layers, observability/errors, удаление compatibility-слоя и docs.
+
 ## Ссылки
 Вверх: нет (локальная задача). ADR: doc/decisions/0009-event-key-and-address.md

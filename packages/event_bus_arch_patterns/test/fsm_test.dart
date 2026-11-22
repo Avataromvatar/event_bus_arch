@@ -16,11 +16,13 @@ class TestMachine with FSM<TestState> {
   TestMachine(EventBus bus) {
     initFSM(bus, TestState.a);
     addFSMTransition<EventA>(TestState.a, TestState.b,
+        selector: EventKey<EventA>('EventA'),
         handler: (current, last, event, ignored) async {
-      log.add('$last->$current');
-      return null;
-    });
+          log.add('$last->$current');
+          return null;
+        });
     addFSMTransition<EventB>(TestState.b, TestState.c,
+        selector: EventKey<EventB>('EventB'),
         filter: (current, last, event) => true,
         handler: (current, last, event, ignored) async {
           log.add('$last->$current');
@@ -78,6 +80,7 @@ void main() {
       final ignoredCounts = <int>[];
       final machine = TestMachine(bus);
       machine.addFSMTransition<EventB>(TestState.a, TestState.c,
+          selector: EventKey<EventB>('EventB'),
           handler: (current, last, event, ignored) async {
         await Future<void>.delayed(const Duration(milliseconds: 30));
         ignoredCounts.add(ignored.length);
@@ -107,6 +110,7 @@ void main() {
         machine = TestMachine(bus);
         // Replace the a -> b handler with one that fails.
         machine.addFSMTransition<EventA>(TestState.a, TestState.b,
+            selector: EventKey<EventA>('EventA'),
             handler: (current, last, event, ignored) {
           throw StateError('handler failed');
         });

@@ -10,6 +10,7 @@ class FSMTest with FSM<FSMTeststate> {
     addFSMTransition<int>(
       FSMTeststate.state0,
       FSMTeststate.state1,
+      selector: EventKey<int>('int'),
       filter: (currentState, lastState, event) {
         return event == 1;
       },
@@ -21,6 +22,7 @@ class FSMTest with FSM<FSMTeststate> {
     addFSMTransition<int>(
       FSMTeststate.state1,
       FSMTeststate.state2,
+      selector: EventKey<int>('int'),
       filter: (currentState, lastState, event) {
         return event == 2;
       },
@@ -32,6 +34,7 @@ class FSMTest with FSM<FSMTeststate> {
     addFSMTransition<String>(
       FSMTeststate.state2,
       FSMTeststate.state3,
+      selector: EventKey<String>('String'),
       handler: (currentState, lastState, event, ignoredEvents) async {
         print('$lastState -> $currentState with $event');
         return null;

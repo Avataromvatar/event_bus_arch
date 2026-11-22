@@ -2,6 +2,10 @@ import 'dart:collection';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 
+///The command abstraction behind a [Scope].
+///
+///The command is bound to an exact [EventKey]; it sends the value through the
+///bus and keeps a bounded call history for [undo].
 abstract class Command<T> {
   Future<dynamic> execute(T data, {Map<String, String>? arguments});
 
@@ -11,50 +15,50 @@ abstract class Command<T> {
 
   EventBus get bindedBus;
 
+  ///The exact key this command addresses.
+  EventKey<T> get key;
+
   ///Call history length
   int get queueLength;
 
-  List<String>? get paths;
   (T data, Map<String, String>? arguments)? get lastCall;
 
   ///[maxLen] is the call history length, at least 1.
-  factory Command(EventBus busBinded, {List<String>? paths, int maxLen = 10}) {
-    return CommandImpl(busBinded, paths: paths, maxLen: maxLen);
+  factory Command(EventBus busBinded, EventKey<T> key, {int maxLen = 10}) {
+    return CommandImpl(busBinded, key, maxLen: maxLen);
   }
 }
 
 class CommandImpl<T> implements Command<T> {
+  CommandImpl(this._bus, this._key, {int maxLen = 10})
+      : maxLen = maxLen < 1 ? 1 : maxLen;
+
   final EventBus _bus;
-  final List<String>? _paths;
+  final EventKey<T> _key;
   final int maxLen;
+
   @override
-  List<String>? get paths => _paths;
+  EventKey<T> get key => _key;
+
   @override
   EventBus get bindedBus => _bus;
+
   @override
   int get queueLength => _queue.length;
 
   ///data, arguments
   final Queue<(T, Map<String, String>?)> _queue = Queue();
+
   @override
   (T data, Map<String, String>? arguments)? get lastCall => getLastCall();
 
-  CommandImpl(this._bus, {List<String>? paths, int maxLen = 10})
-      : _paths = paths,
-        // a history depth below one makes no sense and used to crash on the
-        // very first call
-        maxLen = maxLen < 1 ? 1 : maxLen;
-
   @override
   Future<dynamic> execute(T data,
-      {String? fragment, Map<String, String>? arguments}) async {
+      {Map<String, String>? arguments}) async {
     if (_queue.length >= maxLen) {
       _queue.removeFirst();
     }
-    _queue.add((
-      data,
-      arguments,
-    ));
+    _queue.add((data, arguments));
     return _call(data, arguments);
   }
 
@@ -64,7 +68,7 @@ class CommandImpl<T> implements Command<T> {
       return null;
     }
     _queue.removeLast();
-    var previous = _queue.last;
+    final previous = _queue.last;
     return _call(previous.$1, previous.$2);
   }
 
@@ -72,10 +76,10 @@ class CommandImpl<T> implements Command<T> {
   ///value still goes through the bus (a model bus stores it), and the result
   ///is null.
   Future<dynamic> _call(T data, Map<String, String>? arguments) {
-    if (_bus.haveHandler<T>(paths: _paths)) {
-      return _bus.request<T>(data, paths: _paths, arguments: arguments);
+    if (_bus.haveHandlerKey<T>(_key)) {
+      return _bus.requestKey<T>(_key, data, arguments: arguments);
     }
-    _bus.fire<T>(data, paths: _paths, arguments: arguments);
+    _bus.fireKey<T>(_key, data, arguments: arguments);
     return Future.value(null);
   }
 

@@ -6,7 +6,8 @@ void main() {
   group('Command', () {
     test('maxLen: 0 does not break the first call', () async {
       final bus = EventBus(isModelBus: true);
-      final command = Command<int>(bus, maxLen: 0);
+      final key = EventKey<int>('counter');
+      final command = Command<int>(bus, key, maxLen: 0);
 
       await command.execute(1);
 
@@ -17,11 +18,12 @@ void main() {
 
     test('undo sends the previous value and can be repeated', () async {
       final bus = EventBus(isModelBus: true);
+      final key = EventKey<int>('counter');
       final log = <int>[];
-      bus.subscribeEvents<int>(handler: (dto, lastData) async {
+      bus.subscribeEventsKey<int>(key, handler: (dto, lastData) async {
         log.add(dto.data);
       });
-      final command = Command<int>(bus, maxLen: 10);
+      final command = Command<int>(bus, key, maxLen: 10);
 
       await command.execute(1);
       await command.execute(2);
@@ -38,7 +40,7 @@ void main() {
 
     test('undo without history returns null', () async {
       final bus = EventBus(isModelBus: true);
-      final command = Command<int>(bus, maxLen: 10);
+      final command = Command<int>(bus, EventKey<int>('counter'), maxLen: 10);
 
       expect(await command.undo(), null);
 
@@ -50,7 +52,7 @@ void main() {
 
     test('history is capped by maxLen', () async {
       final bus = EventBus(isModelBus: true);
-      final command = Command<int>(bus, maxLen: 2);
+      final command = Command<int>(bus, EventKey<int>('counter'), maxLen: 2);
 
       await command.execute(1);
       await command.execute(2);
@@ -63,7 +65,7 @@ void main() {
 
     test('the history keeps the arguments of the call', () async {
       final bus = EventBus(isModelBus: true);
-      final command = Command<int>(bus, maxLen: 5);
+      final command = Command<int>(bus, EventKey<int>('counter'), maxLen: 5);
 
       await command.execute(1, arguments: {'multiplier': '10'});
 
@@ -72,21 +74,20 @@ void main() {
       await bus.dispose();
     });
 
-    test('execute sends to the node of the command paths', () async {
+    test('execute sends to the command key', () async {
       final bus = EventBus(isModelBus: true);
+      final key = EventKey<int>('counter');
       final seen = <int>[];
-      bus.subscribeEvents<int>(
-          paths: ['counter'],
-          handler: (dto, lastData) async {
-            seen.add(dto.data);
-          });
-      final command = Command<int>(bus, paths: ['counter'], maxLen: 5);
+      bus.subscribeEventsKey<int>(key, handler: (dto, lastData) async {
+        seen.add(dto.data);
+      });
+      final command = Command<int>(bus, key, maxLen: 5);
 
       await command.execute(7);
 
       expect(seen, [7]);
-      // a command with other paths addresses another node
-      final other = Command<int>(bus, paths: ['other'], maxLen: 5);
+      // a command with another key addresses another node
+      final other = Command<int>(bus, EventKey<int>('other'), maxLen: 5);
       await other.execute(8);
       expect(seen, [7]);
       await bus.dispose();
@@ -98,7 +99,7 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
 
-      await scope.initScope(bus, initialData: 0);
+      await scope.initScope(bus, EventKey<int>('int'), initialData: 0);
       await scope.call(1);
       await Future<void>.delayed(Duration.zero);
 
@@ -113,7 +114,8 @@ void main() {
       final scope = Scope<int>();
       final updates = <int>[];
 
-      await scope.initScope(bus, maxLenForUndo: 10, onUpdate: updates.add);
+      await scope.initScope(bus, EventKey<int>('int'),
+          maxLenForUndo: 10, onUpdate: updates.add);
       await scope.call(5);
       await Future<void>.delayed(Duration.zero);
 
@@ -125,7 +127,7 @@ void main() {
     test('undo restores the previous value', () async {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
-      await scope.initScope(bus,
+      await scope.initScope(bus, EventKey<int>('int'),
           initialData: 0, initialDataNeedExecute: false, maxLenForUndo: 10);
 
       await scope.call(1);
@@ -150,16 +152,18 @@ void main() {
         () async {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
-      final handler = bus.subscribeEvents<int>(
-          paths: ['a'], handler: (dto, lastData) async {});
-      await scope.initScope(bus, paths: ['a'], maxLenForUndo: 10);
+      final keyA = EventKey<int>('a');
+      final keyB = EventKey<int>('b');
+      final handler = bus.subscribeEventsKey<int>(keyA,
+          handler: (dto, lastData) async {});
+      await scope.initScope(bus, keyA, maxLenForUndo: 10);
 
-      await scope.initScope(bus, paths: ['b'], maxLenForUndo: 10);
+      await scope.initScope(bus, keyB, maxLenForUndo: 10);
 
       // The handler is not owned by Scope and stays; the old listener is gone.
-      expect(bus.haveHandler<int>(paths: ['a']), true);
-      expect(bus.haveListener<int>(paths: ['a']), false);
-      expect(bus.haveListener<int>(paths: ['b']), true);
+      expect(bus.haveHandlerKey(keyA), true);
+      expect(bus.haveListenerKey(keyA), false);
+      expect(bus.haveListenerKey(keyB), true);
 
       scope.disposeScope();
       await handler.cancel();
@@ -169,13 +173,14 @@ void main() {
     test('disposeScope does not touch a handler it does not own', () async {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
-      final handler = bus.subscribeEvents<int>(
-          paths: ['a'], handler: (dto, lastData) async {});
-      await scope.initScope(bus, paths: ['a'], maxLenForUndo: 10);
+      final key = EventKey<int>('a');
+      final handler = bus.subscribeEventsKey<int>(key,
+          handler: (dto, lastData) async {});
+      await scope.initScope(bus, key, maxLenForUndo: 10);
 
       scope.disposeScope();
 
-      expect(bus.haveHandler<int>(paths: ['a']), true);
+      expect(bus.haveHandlerKey(key), true);
       await handler.cancel();
       await bus.dispose();
     });

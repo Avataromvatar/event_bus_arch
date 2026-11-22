@@ -35,7 +35,7 @@ Future<void> main() async {
 
   // Scope subscribes with latest(1); Command keeps the call history.
   final scope = Scope<int>();
-  await scope.initScope(bus, paths: ['state'], initialData: 0);
+  await scope.initScope(bus, EventKey<int>('state'), initialData: 0);
   await scope.call(1);
   await scope.call(2);
   await scope.undo();

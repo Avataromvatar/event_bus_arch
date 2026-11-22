@@ -4,11 +4,14 @@ import 'dart:typed_data';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 
+import 'event_address_mapper.dart';
+import 'event_codec.dart';
 import 'topic_registry_index.dart';
 import 'topic_subject_mapper.dart';
 import 'transport_connection.dart';
 import 'transport_event_node.dart';
 import 'transport_exception.dart';
+import 'transport_key_event_node.dart';
 import 'transport_serialization.dart';
 
 ///A bus that mirrors its topics to a broker.
@@ -29,7 +32,8 @@ class TransportEventBus extends EventBusImpl {
     Map<String, EventDTODeserialization>? deserializers,
     required String originId,
     ObservabilityConfig? observability,
-  })  : _serializers =
+  })  : _keyMode = false,
+        _serializers =
             Map<String, EventDTOSerialization>.unmodifiable(serializers ?? {}),
         _deserializers = Map<String, EventDTODeserialization>.unmodifiable(
             deserializers ?? {}),
@@ -53,11 +57,38 @@ class TransportEventBus extends EventBusImpl {
     unawaited(_connection.start());
   }
 
+  ///Creates a transport bus for the E address model.
+  ///
+  ///The wire subject is the event address; [codecs] resolve an encoder and a
+  ///decoder by address. No Dart type name and no `typeTags` are involved.
+  TransportEventBus.keys({
+    required TransportConnection connection,
+    required EventAddressMapper addresses,
+    required EventCodecRegistry codecs,
+    required String originId,
+    ObservabilityConfig? observability,
+  })  : _keyMode = true,
+        _serializers = const {},
+        _deserializers = const {},
+        _addresses = addresses,
+        _codecs = codecs,
+        _originId = originId,
+        super(false,
+            observability: observability ?? ObservabilityConfig.disabled) {
+    _connection = connection;
+    _connectionErrorsSubscription =
+        _connection.errors.listen((error) => _reportError(error));
+    unawaited(_connection.start());
+  }
+
+  final bool _keyMode;
   final Map<String, EventDTOSerialization> _serializers;
   final Map<String, EventDTODeserialization> _deserializers;
   final String _originId;
 
   late final TopicSubjectMapper _subjects;
+  late final EventAddressMapper _addresses;
+  late final EventCodecRegistry _codecs;
   late final TopicRegistryIndex<EventDTOSerialization> _serializerIndex;
   late final TopicRegistryIndex<EventDTODeserialization> _deserializerIndex;
 
@@ -66,7 +97,33 @@ class TransportEventBus extends EventBusImpl {
   Future<void>? _disposeFuture;
 
   ///The topic-to-subject mapper used by this bus.
-  TopicSubjectMapper get subjects => _subjects;
+  ///
+  ///Only available on a legacy topic bus; a keyed bus uses [addresses].
+  TopicSubjectMapper get subjects {
+    if (_keyMode) {
+      throw UnsupportedError(
+          'a keyed transport bus has no TopicSubjectMapper; use addresses');
+    }
+    return _subjects;
+  }
+
+  ///The address-to-subject mapper of a keyed transport bus.
+  EventAddressMapper get addresses {
+    if (!_keyMode) {
+      throw UnsupportedError(
+          'this transport bus uses the legacy topic API; use subjects');
+    }
+    return _addresses;
+  }
+
+  ///The codec registry of a keyed transport bus.
+  EventCodecRegistry get codecs {
+    if (!_keyMode) {
+      throw UnsupportedError(
+          'this transport bus uses the legacy serializer registry');
+    }
+    return _codecs;
+  }
 
   ///The low-level connection. Exposed for the node and for tests.
   TransportConnection get connection => _connection;
@@ -96,7 +153,52 @@ class TransportEventBus extends EventBusImpl {
   ///Creates a node for a topic that is known to either registry.
   @override
   bool shouldCreateNodeOnSend(Topic topic) =>
-      _serializerFor(topic) != null || _deserializerFor(topic) != null;
+      !_keyMode &&
+      (_serializerFor(topic) != null || _deserializerFor(topic) != null);
+
+  @override
+  bool shouldCreateNodeOnSendKey<T>(EventKey<T> key) {
+    if (!_keyMode) return super.shouldCreateNodeOnSendKey(key);
+    return _codecs.resolve(key.address)?.canEncode == true;
+  }
+
+  @override
+  EventNode<T> createNodeForKey<T>({
+    required EventKey<T> key,
+    T? currentData,
+  }) {
+    if (!_keyMode) {
+      return super.createNodeForKey(key: key, currentData: currentData);
+    }
+    return TransportKeyEventNode<T>(
+      connection: _connection,
+      addresses: _addresses,
+      codecs: _codecs,
+      selector: key,
+      originId: _originId,
+      currentData: currentData,
+      onError: (error, stackTrace) => _reportError(error, stackTrace),
+    );
+  }
+
+  @override
+  EventNode<T> createPatternNodeForKey<T>({
+    required EventPatternKey<T> key,
+    T? currentData,
+  }) {
+    if (!_keyMode) {
+      return super.createPatternNodeForKey(key: key, currentData: currentData);
+    }
+    return TransportKeyEventNode<T>(
+      connection: _connection,
+      addresses: _addresses,
+      codecs: _codecs,
+      selector: key,
+      originId: _originId,
+      currentData: currentData,
+      onError: (error, stackTrace) => _reportError(error, stackTrace),
+    );
+  }
 
   @override
   EventNode<T> createNode<T>({
@@ -161,6 +263,82 @@ class TransportEventBus extends EventBusImpl {
     // Broker-side cancellation is not part of the 4.0.0 transport contract
     // (D15); the caller's timeout bounds the wait.
     return _requestTransport<T>(topic, data, arguments, timeout, correlationId);
+  }
+
+  ///A request on a keyed transport bus: a local handler wins, otherwise the
+  ///codec publishes the request and decodes the first response.
+  @override
+  Future<dynamic> requestKey<T>(
+    EventKey<T> key,
+    T data, {
+    Map<String, String>? arguments,
+    Duration? timeout,
+    CancelToken? cancelToken,
+    String? correlationId,
+  }) {
+    if (!_keyMode) {
+      return super.requestKey<T>(key, data,
+          arguments: arguments,
+          timeout: timeout,
+          cancelToken: cancelToken,
+          correlationId: correlationId);
+    }
+    if (isDisposed) {
+      throw StateError('EventBus is disposed: $this');
+    }
+    if (cancelToken?.isCancelled ?? false) {
+      throw RequestCanceledException(key.address.value);
+    }
+    if (haveHandlerKey<T>(key)) {
+      return super.requestKey<T>(key, data,
+          arguments: arguments,
+          timeout: timeout,
+          cancelToken: cancelToken,
+          correlationId: correlationId);
+    }
+    final codec = _codecs.resolve(key.address);
+    if (codec == null) {
+      throw NoHandlerException(key.address.value);
+    }
+    if (codec.encode == null || codec.decode == null) {
+      throw EventBusTransportException(
+        'a keyed remote request on "${key.address.value}" needs both an '
+        'encoder and a decoder',
+      );
+    }
+    return _requestKeyTransport<T>(
+        key, codec, data, arguments, timeout, correlationId);
+  }
+
+  Future<dynamic> _requestKeyTransport<T>(
+    EventKey<T> key,
+    EventCodec codec,
+    T data,
+    Map<String, String>? arguments,
+    Duration? timeout,
+    String? correlationId,
+  ) async {
+    final dto = EventDTO<T>.withKey(key, data,
+        arguments: arguments, correlationId: correlationId);
+    final (override, bytes) = codec.encode!(dto);
+    final subject = override ?? _addresses.toSubject(key);
+    if (override != null) {
+      _addresses.validatePublishSubject(override);
+    }
+    final reply = await _connection.request(
+      subject,
+      bytes,
+      arguments: arguments,
+      correlationId: correlationId,
+      originId: _originId,
+      timeout: timeout,
+    );
+    final response = codec.decode!(
+      reply.data,
+      key.address,
+      arguments: reply.arguments,
+    );
+    return response.data;
   }
 
   Future<dynamic> _requestTransport<T>(

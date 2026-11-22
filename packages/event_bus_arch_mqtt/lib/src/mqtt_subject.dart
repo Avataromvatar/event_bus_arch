@@ -84,3 +84,8 @@ class MqttSubjectMapper extends TopicSubjectMapper {
   MqttSubjectMapper({super.prefix, super.typeTags})
     : super(grammar: const MqttGrammar());
 }
+
+///Maps typed event addresses to MQTT topics (the E address model).
+class MqttAddressMapper extends EventAddressMapper {
+  MqttAddressMapper({super.prefix}) : super(grammar: const MqttGrammar());
+}

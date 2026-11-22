@@ -50,6 +50,36 @@ class EventBusMqtt extends TransportEventBus {
     );
   }
 
+  ///Creates an MQTT bus for the E address model.
+  ///
+  ///The wire topic is the event address; [codecs] resolve the encoder and the
+  ///decoder by address. No Dart type name and no `typeTags` are involved.
+  factory EventBusMqtt.keys(
+    Uri broker, {
+    required EventCodecRegistry codecs,
+    MqttConnectionOptions options = const MqttConnectionOptions(),
+    MqttReconnectPolicy reconnect = const MqttReconnectPolicy(),
+    String? subjectPrefix,
+    String? originId,
+    MqttConnection? connection,
+    ObservabilityConfig? observability,
+  }) {
+    final id = originId ?? newTransportOriginId();
+    return EventBusMqtt._keys(
+      connection: connection ??
+          MqttServerConnection(
+            broker,
+            options: options,
+            reconnect: reconnect,
+            originId: id,
+          ),
+      addresses: MqttAddressMapper(prefix: subjectPrefix),
+      codecs: codecs,
+      originId: id,
+      observability: observability,
+    );
+  }
+
   EventBusMqtt._({
     required super.connection,
     required super.subjects,
@@ -59,7 +89,21 @@ class EventBusMqtt extends TransportEventBus {
     super.observability,
   });
 
-  ///The topic-to-subject mapper used by this bus.
+  EventBusMqtt._keys({
+    required TransportConnection connection,
+    required EventAddressMapper addresses,
+    required EventCodecRegistry codecs,
+    required String originId,
+    ObservabilityConfig? observability,
+  }) : super.keys(
+          connection: connection,
+          addresses: addresses,
+          codecs: codecs,
+          originId: originId,
+          observability: observability,
+        );
+
+  ///The topic-to-subject mapper used by a legacy bus.
   @override
   MqttSubjectMapper get subjects => super.subjects as MqttSubjectMapper;
 }

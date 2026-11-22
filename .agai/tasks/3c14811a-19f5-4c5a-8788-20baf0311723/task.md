@@ -214,5 +214,70 @@ pending: update
   публикация только с точного ключа, один subscription на адрес.
 - Затем isolate/pool/layers, observability/errors, удаление compatibility-слоя и docs.
 
+# Запись о работе над задачей
+
+### Задача
+
+- Репозиторий: e:/workspace/dart/event_bus_arch
+- ID и ссылка: 3c14811a-19f5-4c5a-8788-20baf0311723 (локальная запись, YouGile не подключён)
+- Название: Implement ADR-0009: event address and key model
+- Статус до / после: in progress / in progress (этап 4 из 7 — E transport)
+- Сессия: 8bf51fbe-78ce-4a9f-892c-cae0d060cd75
+
+### Участники
+
+| Плагин | Агент или скил | Участие |
+|---|---|---|
+| agai-sdlc | records, task-sync | учёт и журнал |
+| agai-dev | backend-developer | E transport, NATS/MQTT keyed factories, obfuscation-check |
+
+### Время и использование
+
+- Начало / завершение: 2026-11-22T21:10+04:00 / 2026-11-22T22:05+04:00
+- Активное время: ~55 минут (оценка)
+- Токены: недоступны в этой сессии
+- Стоимость: недоступна
+- Источники метрик: .agai/metrics/sessions/ (если хост предоставит)
+
+### Итог и доказательства
+
+Этап 4 (E transport) выполнен:
+
+- Core-хуки `createNodeForKey`, `createPatternNodeForKey`, `shouldCreateNodeOnSendKey`; старый
+  путь делегирует через `Topic`-view.
+- `EventAddressMapper`: локальный адрес ↔ wire subject, префикс, грамматика NATS/MQTT, без
+  type-token/typeTags.
+- `EventCodec` + `EventCodecRegistry` (exact → most-specific pattern).
+- `TransportKeyEventNode<T>`: инбаунд через codec, локальная типизированная доставка, публикация
+  только когда `dto.key == selector`; pattern/супертипные узлы не публикуют.
+- `TransportEventBus.keys(...)`: E-режим, E-узлы, `requestKey` через broker с codec.
+- `EventBusNats.keys(...)`, `EventBusMqtt.keys(...)`, `NatsAddressMapper`, `MqttAddressMapper`;
+  публичные ре-экспорты `EventAddressMapper`/`EventCodec`/`EventCodecRegistry`.
+
+Тесты:
+- transport: 28 старых + 9 новых E = **37 passed**;
+- NATS: 42 старых + 2 новых = **44 passed** (+10 skipped);
+- MQTT: 32 старых + 1 новый = **33 passed** (+7 skipped);
+- core 268, patterns 20 — passed;
+- `dart analyze` — 19 info, ошибок/предупреждений нет.
+
+Obfuscation-check (`dart compile js -O2` + Node) для E transport:
+```
+address: orders.placed
+accepted: true
+publishes: 1
+subject: orders.placed
+data: A-1
+```
+То есть typed codec'и и стабильный адрес работают после минификации; старый путь с
+`typeTags` для доменного класса публиковал 0.
+
+### Открытые вопросы и дальнейшие действия
+
+- Этап 5: isolate/pool/layers — address interest и E API; сейчас они работают через
+  compatibility-слой, а `*Key` методы на них не бриджатся.
+- Этап 6: observability/errors — метрики по адресу, `EventBusError.address`.
+- Этап 7: удалить compatibility-слой, переименовать `*Key` в финальные имена, docs/tests.
+
 ## Ссылки
 Вверх: нет (локальная задача). ADR: doc/decisions/0009-event-key-and-address.md

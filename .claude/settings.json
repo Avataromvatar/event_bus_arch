@@ -31,7 +31,12 @@
       "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 76bbb0e5-e2ce-435a-9955-8caae9d943d0 --doc adr=doc/decisions/0009-event-key-and-address.md --project-dir \"e:/workspace/dart/event_bus_arch\")",
       "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file \".agai/agent-work/tasks/3c14811a-19f5-4c5a-8788-20baf0311723-foundation-log.md\" --project-dir \"e:/workspace/dart/event_bus_arch\")",
       "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file \".agai/agent-work/tasks/3c14811a-19f5-4c5a-8788-20baf0311723-core-log.md\" --project-dir \"e:/workspace/dart/event_bus_arch\")",
-      "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file \".agai/agent-work/tasks/3c14811a-19f5-4c5a-8788-20baf0311723-patterns-log.md\" --project-dir \"e:/workspace/dart/event_bus_arch\")"
+      "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file \".agai/agent-work/tasks/3c14811a-19f5-4c5a-8788-20baf0311723-patterns-log.md\" --project-dir \"e:/workspace/dart/event_bus_arch\")",
+      "Bash(cd \"e:/workspace/dart/event_bus_arch/packages/event_bus_arch_patterns\" && dart test 2>&1 | tail -1; cd \"../event_bus_arch_transport\" && dart test 2>&1 | tail -1; cd \"../event_bus_arch_nats\" && dart test 2>&1 | tail -1; cd \"../event_bus_arch_mqtt\" && dart test 2>&1 | tail -1)",
+      "Read(//e/workspace/dart/**)",
+      "Bash(node tool/_key_obfuscation_check.js)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file \".agai/agent-work/tasks/3c14811a-19f5-4c5a-8788-20baf0311723-transport-log.md\" --project-dir \"e:/workspace/dart/event_bus_arch\")"
     ]
   }
 }

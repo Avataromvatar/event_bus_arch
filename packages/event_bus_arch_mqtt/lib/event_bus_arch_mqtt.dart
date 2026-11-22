@@ -1,6 +1,9 @@
 ///MQTT 5 transport for `event_bus_arch`.
 library;
 
+export 'package:event_bus_arch_transport/event_bus_arch_transport.dart'
+    show EventAddressMapper, EventCodec, EventCodecRegistry;
+
 export 'src/event_bus_arch_mqtt_base.dart';
 export 'src/mqtt5_client_connection.dart';
 export 'src/mqtt_connection.dart';

@@ -96,3 +96,8 @@ class NatsSubjectMapper extends TopicSubjectMapper {
   NatsSubjectMapper({super.prefix, super.typeTags})
     : super(grammar: const NatsGrammar());
 }
+
+///Maps typed event addresses to NATS subjects (the E address model).
+class NatsAddressMapper extends EventAddressMapper {
+  NatsAddressMapper({super.prefix}) : super(grammar: const NatsGrammar());
+}

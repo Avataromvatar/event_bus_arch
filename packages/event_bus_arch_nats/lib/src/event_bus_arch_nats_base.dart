@@ -53,6 +53,38 @@ class EventBusNats extends TransportEventBus {
     );
   }
 
+  ///Creates a NATS bus for the E address model.
+  ///
+  ///The wire subject is the event address; [codecs] resolve the encoder and the
+  ///decoder by address. No Dart type name and no `typeTags` are involved.
+  factory EventBusNats.keys(
+    Uri server, {
+    required EventCodecRegistry codecs,
+    NatsConnectionOptions options = const NatsConnectionOptions(),
+    NatsReconnectPolicy reconnect = const NatsReconnectPolicy(),
+    Duration pingInterval = const Duration(seconds: 5),
+    String? subjectPrefix,
+    String? originId,
+    NatsConnection? connection,
+    ObservabilityConfig? observability,
+  }) {
+    final id = originId ?? newTransportOriginId();
+    return EventBusNats._keys(
+      connection: connection ??
+          DartNatsConnection(
+            server,
+            options: options,
+            reconnect: reconnect,
+            pingInterval: pingInterval,
+            originId: id,
+          ),
+      addresses: NatsAddressMapper(prefix: subjectPrefix),
+      codecs: codecs,
+      originId: id,
+      observability: observability,
+    );
+  }
+
   EventBusNats._({
     required super.connection,
     required super.subjects,
@@ -62,7 +94,21 @@ class EventBusNats extends TransportEventBus {
     super.observability,
   });
 
-  ///The topic-to-subject mapper used by this bus.
+  EventBusNats._keys({
+    required TransportConnection connection,
+    required EventAddressMapper addresses,
+    required EventCodecRegistry codecs,
+    required String originId,
+    ObservabilityConfig? observability,
+  }) : super.keys(
+          connection: connection,
+          addresses: addresses,
+          codecs: codecs,
+          originId: originId,
+          observability: observability,
+        );
+
+  ///The topic-to-subject mapper used by a legacy bus.
   @override
   NatsSubjectMapper get subjects => super.subjects as NatsSubjectMapper;
 }

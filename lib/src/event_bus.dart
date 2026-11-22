@@ -472,6 +472,32 @@ mixin EventBusMixin implements EventBus {
     return EventNode<T>.create(currentData: currentData);
   }
 
+  ///Creates the node for an exact E key.
+  ///
+  ///The default bridges to the legacy [createNode] with a `Topic` view of the
+  ///address, so existing transport overrides keep working during the
+  ///migration. A transport that supports the E model overrides this hook.
+  EventNode<T> createNodeForKey<T>({
+    required EventKey<T> key,
+    T? currentData,
+  }) {
+    return createNode<T>(
+        topic: Topic.parse(key.address.value), currentData: currentData);
+  }
+
+  ///Creates the node for a typed pattern key.
+  EventNode<T> createPatternNodeForKey<T>({
+    required EventPatternKey<T> key,
+    T? currentData,
+  }) {
+    return createNode<T>(
+        topic: Topic.parse(key.pattern.value), currentData: currentData);
+  }
+
+  ///Whether a send on an exact E key should create a node.
+  bool shouldCreateNodeOnSendKey<T>(EventKey<T> key) =>
+      shouldCreateNodeOnSend(Topic.parse(key.address.value));
+
   ///Round-robin cursor of the handler dispatcher, per route.
   final Map<Object, int> _handlerCursors = {};
 
@@ -604,7 +630,7 @@ mixin EventBusMixin implements EventBus {
       final existing = bucket[selector.type];
       if (existing is EventNode<T>) return existing;
       final topic = Topic.parse(selector.pattern.value);
-      final created = createNode<T>(topic: topic);
+      final created = createPatternNodeForKey<T>(key: selector);
       bucket[selector.type] = created;
       _markModelTopic(topic, true);
       return created;
@@ -614,7 +640,7 @@ mixin EventBusMixin implements EventBus {
     final existing = bucket[key.type];
     if (existing is EventNode<T>) return existing;
     final topic = Topic.parse(key.address.value);
-    final created = createNode<T>(topic: topic);
+    final created = createNodeForKey<T>(key: key);
     bucket[key.type] = created;
     _markModelTopic(topic, true);
     return created;
@@ -902,8 +928,8 @@ mixin EventBusMixin implements EventBus {
     final existing = _eventsMap[key.address]?[key.type];
     if (existing is EventNode<T>) return existing;
     final topic = Topic.parse(key.address.value);
-    if (shouldCreateNodeOnSend(topic)) {
-      final created = createNode<T>(topic: topic);
+    if (shouldCreateNodeOnSendKey(key)) {
+      final created = createNodeForKey<T>(key: key);
       _exactBucket(key.address)[key.type] = created;
       _markModelTopic(topic, true);
       return created;

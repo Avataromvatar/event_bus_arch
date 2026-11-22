@@ -8,6 +8,8 @@
 ///grammar and, when its client API needs it, a subject mapper subclass.
 library;
 
+export 'src/event_address_mapper.dart';
+export 'src/event_codec.dart';
 export 'src/reconnecting_transport_connection.dart';
 export 'src/reconnect_policy.dart';
 export 'src/subject_grammar.dart';
@@ -16,5 +18,6 @@ export 'src/topic_subject_mapper.dart';
 export 'src/transport_connection.dart';
 export 'src/transport_event_bus.dart';
 export 'src/transport_event_node.dart';
+export 'src/transport_key_event_node.dart';
 export 'src/transport_exception.dart';
 export 'src/transport_serialization.dart';

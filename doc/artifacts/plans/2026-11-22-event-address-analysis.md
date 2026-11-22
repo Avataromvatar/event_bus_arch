@@ -4,6 +4,12 @@ Date: 2026-11-22
 Scope: the review claim that building the event address from `'$T'` is a set of defects.
 Repository: `event_bus_arch`, branch `version4`.
 
+**Decision (2026-11-22): Option E is accepted.** The address is an explicit user-supplied string,
+the type is a local key, and `Topic` is replaced by `EventAddress`/`EventKey`. The record is
+[ADR-0009](../decisions/0009-event-key-and-address.md). The A recommendation in §4 and the
+variant comparison in §6 are historical; where they differ from ADR-0009, the ADR wins. §7 (the
+obfuscation check) remains the evidence for the E conditions.
+
 ## Verdict in one paragraph
 
 The **factual description is correct** (with two precision notes), but calling all of it

@@ -12,6 +12,7 @@ Decisions for the 4.0.0 work. The roadmap is [../../ROADMAP.md](../../ROADMAP.md
 | [0006](0006-observability-and-metrics.md) | Observability and per-topic metrics | Accepted |
 | [0007](0007-worker-pool-and-supervision.md) | WorkerPool and supervision | Accepted |
 | [0008](0008-library-layout-web-rxdart-migration.md) | Library layout, Web, rxdart and migration | Accepted |
+| [0009](0009-event-key-and-address.md) | Explicit event address and local type (`EventKey`), replacing type-as-address | Accepted |
 
 ## Conventions
 

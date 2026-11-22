@@ -16,6 +16,20 @@ constraint. Decisions taken:
 Part I remains valid; FIX-03 was applied while the FSM file was moved. The other Part I bugs are
 unchanged, so the remaining estimate is 4.75 human-days.
 
+**Further status update (2026-11-22):** the address-model decision E is accepted
+([ADR-0009](../decisions/0009-event-key-and-address.md)). Consequences for this plan:
+
+* **CHG-11a is superseded:** the separator is removed from the public API entirely (no
+  `separator:`, no `defaultTopicPathSeparator`); `EventKey`/`EventPatternKey` own a fixed address
+  grammar.
+* **FIX-01 becomes structural:** only the node whose key equals the DTO key publishes; supertype
+  and pattern nodes deliver locally. The duplicate-publication fix is part of the E rewrite.
+* **REF-01 remains**, but FSM/Scope/Command move to the key API as part of the E stages.
+* FIX-03 (FSM `try/finally`) is already applied.
+* The other Part I fixes (FIX-05, 06, 07, 08, 09, 10) are unaffected by the address model and
+  still stand.
+
+
 This document has two parts:
 
 * **Part I** is an implementation plan for the eight confirmed bugs.

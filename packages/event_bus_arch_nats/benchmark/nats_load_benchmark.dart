@@ -26,6 +26,7 @@ import 'dart:typed_data';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_nats/event_bus_arch_nats.dart';
+import '../../../test/legacy_compat.dart';
 
 ///Fire-and-forget event. `sentAtUs` comes from the benchmark stopwatch; both
 ///buses live in this isolate, so the subscriber can read the same clock.

@@ -3,6 +3,7 @@ library;
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 ///A minimal web-target smoke test: the local bus must work in a browser.
 ///

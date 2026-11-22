@@ -1,5 +1,6 @@
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 ///The names of public parameters are part of the API. This file calls the
 ///members with named arguments on purpose: renaming one breaks the build here

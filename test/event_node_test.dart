@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 ///A handler that throws SYNCHRONOUSLY (not an async function).
 Future<void> syncThrowingHandler(EventDTO<String> dto, String? lastData) {
@@ -211,14 +212,5 @@ void main() {
   });
 
   group('EventNode: request validation', () {
-    test('request rejects wildcard paths', () async {
-      final bus = EventBus();
-
-      await expectLater(
-        bus.requestLegacy<String>('x', paths: ['sensor', '*']),
-        throwsA(isA<EventBusException>()),
-      );
-      await bus.dispose();
-    });
   });
 }

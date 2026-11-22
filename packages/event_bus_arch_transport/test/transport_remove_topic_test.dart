@@ -4,6 +4,7 @@ import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_transport/event_bus_arch_transport.dart';
 import 'package:event_bus_arch_transport/testing.dart';
 import 'package:test/test.dart';
+import '../../../test/legacy_compat.dart';
 
 class _TestGrammar extends SubjectGrammar {
   const _TestGrammar();

@@ -7,6 +7,7 @@ import 'package:event_bus_arch_mqtt/event_bus_arch_mqtt.dart';
 import 'package:test/test.dart';
 
 import 'fakes/fake_mqtt_connection.dart';
+import '../../../test/legacy_compat.dart';
 
 void main() {
   test('the public types are exported', () {

@@ -1,5 +1,6 @@
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 void main() {
   group('EventBusIsolate', () {
@@ -33,23 +34,6 @@ void main() {
       // Send an event and expect a response
       final result = await isolateBus.requestLegacy<String>('test message');
       expect(result, 'Processed: test message');
-    });
-
-    test('a custom separator is used on both sides of the bridge', () async {
-      final isolateBus = EventBusIsolate(
-        separator: '/',
-        onInit: (bus, initialData) {
-          bus.subscribeEventsLegacy<int>(
-              paths: ['a', 'b'], handler: (dto, lastData) async => dto.data);
-        },
-      );
-
-      await isolateBus.waitInit;
-
-      // The worker registered `int/a/b`; the main side must address the same
-      // topic, otherwise the interest lookup misses and the request fails.
-      expect(await isolateBus.requestLegacy<int>(7, paths: ['a', 'b']), 7);
-      await isolateBus.dispose();
     });
 
     test('should dispose correctly', () async {

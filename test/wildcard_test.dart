@@ -1,5 +1,6 @@
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 void main() {
   group('TopicPattern', () {

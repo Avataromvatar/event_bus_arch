@@ -207,7 +207,7 @@ registration.
 ```dart
 T? currentData;                                 // the last delivered value
 bool get isDisposed;
-StreamController<T> get streamControllerValue;  // legacy stream facade
+StreamController<T> get streamControllerValue;  // raw stream view
 
 bool deliver(EventDTO dto);                     // store the value, fan out to subscriptions
 EventNode<T> copy();                            // independent node with the same value
@@ -374,6 +374,7 @@ EventSubscription<T> subscribeEvents<T>(EventSelector<T> selector, {
 });
 
 T? currentData<T>(EventKey<T> key);
+T? currentDataFor<T>(EventSelector<T> selector); // includes a pattern key
 bool remove<T>(EventKey<T> key);
 bool removePattern<T>(EventPatternKey<T> key);
 bool removeAddress(EventAddress address);
@@ -391,7 +392,7 @@ listener/model interest; in both cases a handler subscription alone does not mak
 `request` throws `NoHandlerException` when no handler matches, `BusyException` when handlers exist
 but none has capacity, `RequestTimeoutException` on timeout and `RequestCanceledException` when its
 `CancelToken` is cancelled. It requires an `EventKey<T>`; an `EventPatternKey` does not compile.
-`currentData` reads only the exact node of that key. `correlationId` is optional; it reaches
+`currentData` reads only the exact node of that key; `currentDataFor(selector)` also reads a pattern node. `correlationId` is optional; it reaches
 handlers and crosses isolates and transports.
 
 `remove(key)` removes one type node; `removePattern(patternKey)` removes one pattern type node;

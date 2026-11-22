@@ -15,6 +15,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:event_bus_arch/event_bus_arch.dart';
+import '../test/legacy_compat.dart';
 
 const _fires = 200000;
 const _requests = 20000;

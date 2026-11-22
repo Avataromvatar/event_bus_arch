@@ -189,9 +189,9 @@ A concrete request finds the pattern tier when the exact bucket has no accepting
 final last = bus.currentData(serviceKey);
 ```
 
-`currentData` takes an exact key and reads only that node. For a pattern use
-`currentData(patternKey)` — it returns the last value delivered to the pattern node (the pattern's
-own type node), not a search across matching concrete nodes. On a model bus the value survives
+`currentData` takes an exact key and reads only that node. `currentDataFor(patternKey)` returns the
+last value delivered to the pattern node (the pattern's own type node), not a search across
+matching concrete nodes. On a model bus the value survives
 until `remove`/`dispose`.
 
 The handler's `lastData` is the previous `currentData` of the handler's own node.

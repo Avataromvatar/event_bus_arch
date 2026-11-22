@@ -171,7 +171,6 @@ class WorkerPool {
     this.initialDataFor,
     this.isModelBus = false,
     this.keySelector,
-    this.separator = '.',
   }) {
     _requireIsolates('WorkerPool');
     if (workers < 1) {
@@ -216,13 +215,8 @@ class WorkerPool {
   ///Whether every worker bus is a model bus.
   final bool isModelBus;
 
-  ///The key used by [DispatchStrategy.keyed]; null means the topic path.
+  ///The key used by [DispatchStrategy.keyed]; null means the event address.
   final WorkerKeySelector? keySelector;
-
-  ///The fallback separator for calls that do not pass one. Every worker bus is
-  ///created with the same separator, so both sides of the bridge agree on the
-  ///topic strings.
-  final String separator;
 
   final List<_WorkerSlot> _slots = <_WorkerSlot>[];
   final StreamController<EventBusError> _errors =
@@ -289,91 +283,6 @@ class WorkerPool {
     final completer = Completer<void>();
     _readyWaiters.add(completer);
     return completer.future;
-  }
-
-  ///Sends an event according to [dispatch]. Returns true when at least one
-  ///worker accepted it; false when it reached no worker.
-  bool fireLegacy<T>(T data,
-      {List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      String? correlationId}) {
-    _checkOpen();
-    final topic =
-        Topic.create<T>(paths: paths, separator: separator ?? this.separator);
-    final dto = EventDTO<T>(data,
-        topic: topic, arguments: arguments, correlationId: correlationId);
-    _counters.fired++;
-
-    if (dispatch == DispatchStrategy.broadcast) {
-      var accepted = false;
-      var delivered = false;
-      for (final slot in _slots) {
-        final bus = slot.bus;
-        if (!slot.ready || bus == null) continue;
-        delivered = true;
-        accepted = _fireOn<T>(
-                slot, bus, data, paths, separator, arguments, correlationId) ||
-            accepted;
-      }
-      if (!delivered) _counters.dropped++;
-      return accepted;
-    }
-
-    final slot = _select(dto);
-    return _fireOnSelected<T>(
-        slot, data, paths, separator, arguments, correlationId);
-  }
-
-  ///Sends a request to the worker selected by [dispatch] and waits for its
-  ///answer. [DispatchStrategy.broadcast] is rejected with [UnsupportedError].
-  Future<dynamic> requestLegacy<T>(T data,
-      {List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      Duration? timeout,
-      CancelToken? cancelToken,
-      String? correlationId}) async {
-    _checkOpen();
-    if (dispatch == DispatchStrategy.broadcast) {
-      throw UnsupportedError(
-          'DispatchStrategy.broadcast cannot route requests: a request needs '
-          'exactly one answering worker');
-    }
-    final topic =
-        Topic.create<T>(paths: paths, separator: separator ?? this.separator);
-    final dto = EventDTO<T>(data,
-        topic: topic, arguments: arguments, correlationId: correlationId);
-    final slot = _select(dto);
-    if (slot == null || !_available(slot)) {
-      _counters.failedRequests++;
-      throw BusyException(topic.topic,
-          'no ready worker with a free credit for dispatch strategy ${dispatch.name}');
-    }
-    final bus = slot.bus!;
-
-    _counters.requests++;
-    slot.requests++;
-    slot.inFlight++;
-    try {
-      return await bus.requestLegacy<T>(data,
-          paths: paths,
-          separator: separator,
-          arguments: arguments,
-          timeout: timeout,
-          cancelToken: cancelToken,
-          correlationId: correlationId);
-    } on StateError {
-      // the worker died between the readiness check and the send
-      _counters.failedRequests++;
-      throw BusyException(
-          topic.topic, 'worker ${slot.index} is not ready any more');
-    } catch (_) {
-      _counters.failedRequests++;
-      rethrow;
-    } finally {
-      slot.inFlight--;
-    }
   }
 
   ///Sends an event on an exact E key according to [dispatch].
@@ -521,45 +430,6 @@ class WorkerPool {
 
   int _positiveHash(Object? key) => (key ?? '').hashCode & 0x7fffffff;
 
-  bool _fireOnSelected<T>(
-      _WorkerSlot? slot,
-      T data,
-      List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      String? correlationId) {
-    if (slot == null || !_available(slot)) {
-      _counters.dropped++;
-      return false;
-    }
-    return _fireOn<T>(
-        slot, slot.bus!, data, paths, separator, arguments, correlationId);
-  }
-
-  bool _fireOn<T>(
-      _WorkerSlot slot,
-      EventBusIsolate bus,
-      T data,
-      List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      String? correlationId) {
-    slot.fired++;
-    try {
-      final accepted = bus.fireLegacy<T>(data,
-          paths: paths,
-          separator: separator,
-          arguments: arguments,
-          correlationId: correlationId);
-      if (accepted) _counters.accepted++;
-      return accepted;
-    } on StateError {
-      // the worker died between the readiness check and the send
-      _counters.dropped++;
-      return false;
-    }
-  }
-
   bool _fireKeyOnSelected<T>(
       _WorkerSlot? slot,
       EventKey<T> key,
@@ -631,7 +501,6 @@ class WorkerPool {
       onInit: onInit,
       initialData: data,
       isModelBus: isModelBus,
-      separator: separator,
     );
     slot.bus = bus;
     slot.errorSub =

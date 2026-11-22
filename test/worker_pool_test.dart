@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 // --- workers (top-level only: they run in separate isolates) ---
 
@@ -105,19 +106,6 @@ void main() {
       await pool.close();
     });
 
-    test('a custom separator is used for topics and worker buses', () async {
-      final pool = WorkerPool(
-        onInit: pathWorker,
-        workers: 1,
-        separator: '/',
-        initialDataFor: (index) => index,
-      );
-      await pool.waitInit;
-
-      // The worker registered `int/a/b`; the pool must build the same topic.
-      expect(await pool.requestLegacy<int>(7, paths: ['a', 'b']), 7);
-      await pool.close();
-    });
   });
 
   group('WorkerPool: strategies', () {

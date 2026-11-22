@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 // --- layer init functions (top-level only: they run inside isolates) ---
 

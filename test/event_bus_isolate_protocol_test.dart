@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 // --- functions that run IN THE WORKER (top-level only) ---
 

@@ -431,5 +431,46 @@ data: A-1
 4. Обновить `tool/migrate_3_to_4.dart` под адресную модель (сейчас он умеет только
    `handlers.setHandler` → `subscribeEvents`).
 
+### Этап 7b-core: удалён legacy-API шины
+
+Выполнено:
+
+- Из `EventBus`, `EventBusMixin`, `_EventBusHandlersMixin`, `EventBusIsolate`,
+  `_EventBusForIsolate` и `WorkerPool` удалены все методы `*Legacy` и параметры
+  `paths`/`separator`. Публичная шина теперь принимает только `EventKey`/`EventPatternKey`.
+- Удалён `EventBus.defaultTopicPathSeparator` и конструкторные параметры `separator:` у
+  `EventBus`, `EventBusImpl`, `EventBusIsolate`, `WorkerPool`; адресная грамматика всегда `.`.
+- Добавлен `currentDataFor<T>(EventSelector<T>)` — чтение значения pattern-узла (нужно для
+  сохранения поведения старых тестов и полезно в E-API).
+- Добавлен тест-онли фасад `test/legacy_compat.dart`: расширения `EventBus`/`WorkerPool`
+  воспроизводят старые имена и строят type-prefixed адрес (`int.a`), поэтому старые
+  поведенческие тесты продолжают работать, не возвращая legacy в продакшн-API. Файл помечен
+  «do not use in application code».
+- Удалены 4 теста, проверявшие настраиваемый separator, и 1 тест, ожидавший runtime-ошибку
+  `request` с wildcard paths (теперь pattern key не компилируется в `request`).
+- Legacy-режим `TransportEventBus` сохранён, но его новый `request(key, data)` в non-key режиме
+  теперь вызывает приватный `_requestTopicLegacy`; `shouldCreateNodeOnSendKey` в non-key режиме
+  проверяет старый реестр сериализаторов. Все transport/NATS/MQTT тесты остались зелёными.
+- `tool/web_compile_check.dart` переведён на ключи.
+
+Прогоны:
+
+- core 273 (минус 5 удалённых тестов), patterns 20, transport 37, NATS 44 (+10 skipped),
+  MQTT 33 (+7 skipped) — все зелёные;
+- `dart analyze` — 19 info, ошибок/предупреждений нет;
+- код не коммитился.
+
+Осталось (этап 7c):
+
+1. Убрать `Topic`/`TopicPattern` из публичного ядра: перевести внутренние карты интересов и
+   lifecycle с `Topic` на строковый адрес, убрать `EventDTO.topic`/legacy-фабрики,
+   `EventSubscription.topic`.
+2. Удалить legacy-транспорт: старые конструкторы `TransportEventBus`/`EventBusNats`/`EventBusMqtt`,
+   `serializers`/`deserializers`/`typeTags`, `TopicSubjectMapper`, `TransportEventNode`,
+   `TopicRegistryIndex`; перевести ~2.8 тыс. строк тестов transport/NATS/MQTT на keyed-режим.
+3. Убрать тест-фасад `legacy_compat.dart`, переведя старые core-тесты на явные ключи
+   (сейчас ~560 вызовов скрыты фасадом).
+4. Обновить `tool/migrate_3_to_4.dart` под адресную модель.
+
 ## Ссылки
 Вверх: нет (локальная задача). ADR: doc/decisions/0009-event-key-and-address.md

@@ -40,6 +40,7 @@
       "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file \".agai/agent-work/tasks/3c14811a-19f5-4c5a-8788-20baf0311723-isolate-log.md\" --project-dir \"e:/workspace/dart/event_bus_arch\")",
       "Bash(python3 \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file \".agai/agent-work/tasks/3c14811a-19f5-4c5a-8788-20baf0311723-observability-log.md\" --project-dir \"e:/workspace/dart/event_bus_arch\")",
       "Bash(python -)",
+      "Bash(python *)",
       "Bash(wc -l README.md doc/*.md packages/*/README.md)",
       "Bash(fire)",
       "Bash(request)",
@@ -48,7 +49,12 @@
       "Bash(python -I build/rewrite_api_bus.py)",
       "Bash(python -I build/rewrite_api_tail.py)",
       "Bash(node build/obfuscation_check.js)",
-      "Bash(python \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file build/stage7-journal.md --project-dir \"e:/workspace/dart/event_bus_arch\")"
+      "Bash(python \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file build/stage7-journal.md --project-dir \"e:/workspace/dart/event_bus_arch\")",
+      "Bash(python -I build/remove_core_legacy.py)",
+      "Bash(python -I build/remove_isolate_legacy.py)",
+      "Bash(python -I build/remove_pool_legacy.py)",
+      "Bash(python -I build/add_legacy_imports.py)",
+      "Bash(python \"C:/Users/Avatar/.claude/plugins/cache/avatarsgame/agai-sdlc/0.2.60/skills/records/scripts/record_update.py\" --uuid 3c14811a-19f5-4c5a-8788-20baf0311723 --section \"Журнал работы агента\" --text-file build/stage7b-journal.md --project-dir \"e:/workspace/dart/event_bus_arch\")"
     ]
   }
 }

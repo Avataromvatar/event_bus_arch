@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
+import '../test/legacy_compat.dart';
 
 Future<void> _pump() => Future<void>.delayed(Duration.zero);
 

@@ -17,6 +17,7 @@ import 'dart:isolate';
 import 'dart:math';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
+import '../test/legacy_compat.dart';
 
 ///One event delivered through the bus. `sentAtUs` is main-isolate stopwatch
 ///time, so the worker needs a calibrated offset to interpret it.

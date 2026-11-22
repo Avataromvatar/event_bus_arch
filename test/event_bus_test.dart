@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 void main() {
   group('EventBus Tests', () {
@@ -253,45 +254,5 @@ void main() {
       expect(received, ['a: to a', 'b: to b']);
     });
 
-    test('Should separate topics by a custom separator', () async {
-      final bus = EventBus();
-      var called = false;
-
-      bus.subscribeEventsLegacy<String>(
-        paths: ['a', 'b'],
-        separator: '/',
-        handler: (dto, lastData) async {
-          called = true;
-          return 'slash';
-        },
-      );
-
-      // the default separator builds a different address, so nothing is found
-      await expectLater(bus.requestLegacy('x', paths: ['a', 'b']),
-          throwsA(isA<NoHandlerException>()));
-      expect(called, false);
-
-      expect(
-          await bus.requestLegacy('x', paths: ['a', 'b'], separator: '/'), 'slash');
-      expect(called, true);
-    });
-
-    test('Should use the constructor separator for calls without one',
-        () async {
-      final bus = EventBus(separator: '/');
-      var called = false;
-
-      bus.subscribeEventsLegacy<String>(
-        paths: ['a', 'b'],
-        handler: (dto, lastData) async {
-          called = true;
-        },
-      );
-
-      await bus.requestLegacy('x', paths: ['a', 'b']);
-
-      expect(called, true);
-      expect(bus.haveHandlerLegacy<String>(paths: ['a', 'b']), true);
-    });
   });
 }

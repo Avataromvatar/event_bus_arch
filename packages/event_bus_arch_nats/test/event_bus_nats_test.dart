@@ -7,6 +7,7 @@ import 'package:event_bus_arch_nats/event_bus_arch_nats.dart';
 import 'package:test/test.dart';
 
 import 'fakes/fake_nats_connection.dart';
+import '../../../test/legacy_compat.dart';
 
 void main() {
   test('the public types are exported', () {

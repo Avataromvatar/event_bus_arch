@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_patterns/event_bus_arch_patterns.dart';
 import 'package:test/test.dart';
+import '../../../test/legacy_compat.dart';
 
 enum TestState { a, b, c }
 

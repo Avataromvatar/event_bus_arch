@@ -1,5 +1,6 @@
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
+import 'legacy_compat.dart';
 
 ///A bus that records the topic passed to [createNode] and can opt into
 ///creating a node on send for every topic.

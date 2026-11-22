@@ -134,7 +134,6 @@ class EventNodeImp<T> implements EventNode<T>, SubscriptionHost<T> {
 
 abstract class EventBus {
   bool get isModelBus;
-  String get defaultTopicPathSeparator;
 
   /// Closes the all-events stream and every node of the bus. Safe to call twice.
   /// After dispose the bus is unusable: fire/request/listen/subscribe/subscribeEvents
@@ -162,21 +161,6 @@ abstract class EventBus {
   ///The metric collector of this bus. Safe to read when observability is off:
   ///the snapshot is empty in that case.
   EventBusMetrics get metrics;
-
-  /// Returns true if the bus contains a listener for the specified topic
-  bool haveListenerLegacy<T>({List<String>? paths, String? separator});
-
-  /// Returns true if the bus contains a handler for the specified topic,
-  /// including paused handlers.
-  bool haveHandlerLegacy<T>({List<String>? paths, String? separator});
-
-  /// Returns true if a matching handler could accept a request right now.
-  bool haveAvailableHandlerLegacy<T>({List<String>? paths, String? separator});
-
-  // ---------------------------------------------------------------------------
-  // E key API (ADR-0009). The paths/separator methods above are the legacy
-  // compatibility layer; they are removed when the migration completes.
-  // ---------------------------------------------------------------------------
 
   /// Publishes [data] on an exact typed key.
   bool fire<T>(
@@ -227,6 +211,9 @@ abstract class EventBus {
   /// The value stored for an exact typed key.
   T? currentData<T>(EventKey<T> key);
 
+  /// The value stored for a selector, including a pattern key.
+  T? currentDataFor<T>(EventSelector<T> selector);
+
   /// Whether a selector has a listener.
   bool haveListener<T>(EventSelector<T> selector);
 
@@ -245,99 +232,13 @@ abstract class EventBus {
   /// Removes every type node registered at an exact address.
   bool removeAddress(EventAddress address);
 
-  /// Publishes an event to local listeners and forgets about it.
-  ///
-  /// Handler subscriptions are not invoked by [fire]; their result is ignored.
-  /// Returns true when the event was accepted: there
-  /// is a local node (or the bus created one) or a transport accepted it.
-  /// A false result means nobody is listening and no transport knows the
-  /// topic. [correlationId] is stored in the event and reaches handlers,
-  /// isolates and transport headers; it is optional.
-  bool fireLegacy<T>(
-    T data, {
-    List<String>? paths,
-    String? separator,
-    Map<String, String>? arguments,
-    String? correlationId,
-  });
-
-  /// Sends a request and waits for the result of a handler.
-  ///
-  /// Wildcard paths are not supported: `*` and `>` throw [EventBusException].
-  /// When no handler is registered the returned future fails with
-  /// [NoHandlerException]. Use [fire] when no answer is expected.
-  Future<dynamic> requestLegacy<T>(
-    T data, {
-    List<String>? paths,
-    String? separator,
-    Map<String, String>? arguments,
-    Duration? timeout,
-    CancelToken? cancelToken,
-    String? correlationId,
-  });
-
-  /// Listens to events on a specific topic.
-  /// Returns a Stream of the data type T.
-  Stream<T> listenLegacy<T>({List<String>? paths, String? separator});
-
-  ///Subscribe to events on a specific topic.
-  StreamSubscription<T> subscribeLegacy<T>(
-      {List<String>? paths,
-      String? separator,
-      void Function(T e)? onData,
-      Function? onError,
-      void Function()? onDone,
-      bool? cancelOnError});
-
-  ///Creates a listener and/or handler subscription with its own lifecycle.
-  ///
-  ///[onEvent] makes it a listener for [fire]; [handler] makes it a responder
-  ///for [request]. Both may be set. The subscription owns its listener buffer,
-  ///its handler queue and its pause/cancel state.
-  EventSubscription<T> subscribeEventsLegacy<T>({
-    List<String>? paths,
-    String? separator,
-    EventCallback<T>? onEvent,
-    Handler<T>? handler,
-    T? initialData,
-    int handlerConcurrency = 1,
-    int? requestQueueCapacity,
-    int? bufferCapacity,
-    BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
-    DeliveryMode deliveryMode = DeliveryMode.async,
-    void Function(Object error, StackTrace? stackTrace)? onError,
-    void Function()? onDone,
-    bool cancelOnError = false,
-  });
-
-  /// Gets the last data sent to a specific topic.
-  T? currentDataLegacy<T>({List<String>? paths, String? separator});
-
-  /// Removes the node of a topic and forgets its value, even on a model bus.
-  ///
-  /// Unlike the automatic cleanup after the last subscription, this ignores
-  /// [isModelBus] and a `KeepAliveNode` pin: a transport node cancels its
-  /// broker subscription. Active listeners receive `done`; handler
-  /// subscriptions are cancelled with the node. A model bus creates the node
-  /// again on
-  /// the next `fire`, `request` or `listen`.
-  ///
-  /// Returns true when a node was removed.
-  bool removeTopicLegacy<T>({List<String>? paths, String? separator});
-
   /// Factory constructor for EventBus.
   /// Creates an EventBusImpl instance.
-  ///
-  ///[separator] is the fallback separator for every address parameter; it is
-  ///fixed for the lifetime of the bus (see [defaultTopicPathSeparator]).
   factory EventBus(
-      {bool isModelBus = false,
-      ObservabilityConfig? observability,
-      String separator = '.'}) {
+      {bool isModelBus = false, ObservabilityConfig? observability}) {
     return EventBusImpl(
       isModelBus,
       observability: observability ?? ObservabilityConfig.disabled,
-      separator: separator,
     );
   }
 }
@@ -350,18 +251,11 @@ class EventBusImpl with EventBusMixin, _EventBusHandlersMixin {
   @override
   final ObservabilityConfig observabilityConfig;
 
-  ///The fallback separator for every address parameter; fixed at construction.
-  @override
-  final String defaultTopicPathSeparator;
-
   /// Creates an EventBusImpl instance.
   /// If isModelBus is true, the bus behaves as a model bus.
-  /// [separator] is the fallback for calls without an explicit separator.
   EventBusImpl(this._isModelBus,
-      {ObservabilityConfig observability = ObservabilityConfig.disabled,
-      String separator = '.'})
-      : observabilityConfig = observability,
-        defaultTopicPathSeparator = separator;
+      {ObservabilityConfig observability = ObservabilityConfig.disabled})
+      : observabilityConfig = observability;
 }
 
 mixin EventBusMixin implements EventBus {
@@ -582,45 +476,26 @@ mixin EventBusMixin implements EventBus {
     return Topic.parse(selector.toString());
   }
 
-  /// Builds the legacy synthetic key: the old topic string becomes the address.
-  EventKey<T> _legacyKey<T>(List<String>? paths, String? separator) {
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    return EventKey<T>(topic.topic);
-  }
-
-  EventSelector<T> _legacySelector<T>(List<String>? paths, String? separator) {
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    return TopicPattern.isPattern(topic)
-        ? EventPatternKey<T>(topic.topic)
-        : EventKey<T>(topic.topic);
-  }
-
   Map<Type, EventNode> _exactBucket(EventAddress address) =>
       _eventsMap.putIfAbsent(address, () => <Type, EventNode>{});
 
   Map<Type, EventNode> _patternBucket(EventPattern pattern) =>
       _patternMap.putIfAbsent(pattern, () => <Type, EventNode>{});
 
-  /// Gets the last data sent to a specific topic.
-  /// Returns null if no data has been sent to that topic.
-  @override
-  T? currentDataLegacy<T>({List<String>? paths, String? separator}) =>
-      _currentDataFor<T>(_legacySelector<T>(paths, separator));
-
-  T? _currentDataFor<T>(EventSelector<T> selector) {
-    if (selector is EventPatternKey<T>) {
-      final node = _patternMap[selector.pattern]?[selector.type];
-      return node is EventNode<T> ? node.currentData : null;
-    }
-    return currentData(selector as EventKey<T>);
-  }
-
   @override
   T? currentData<T>(EventKey<T> key) {
     final node = _eventsMap[key.address]?[key.type];
     return node is EventNode<T> ? node.currentData : null;
+  }
+
+  @override
+  T? currentDataFor<T>(EventSelector<T> selector) {
+    _checkNotDisposed();
+    if (selector is EventPatternKey<T>) {
+      final node = _patternMap[selector.pattern]?[selector.type];
+      return node is EventNode<T> ? node.currentData : null;
+    }
+    return currentData<T>(selector as EventKey<T>);
   }
 
   /// Returns the typed node of a selector, creating it when needed.
@@ -665,35 +540,10 @@ mixin EventBusMixin implements EventBus {
     );
   }
 
-  /// Listens to events on a specific topic.
-  /// Creates a new EventNode if one doesn't exist for that topic.
-  /// Returns a Stream of the data type T.
-  @override
-  Stream<T> listenLegacy<T>({List<String>? paths, String? separator}) {
-    _checkNotDisposed();
-    return listen<T>(_legacySelector<T>(paths, separator));
-  }
-
   @override
   Stream<T> listen<T>(EventSelector<T> selector) {
     _checkNotDisposed();
     return _valueStream<T>(selector);
-  }
-
-  @override
-  StreamSubscription<T> subscribeLegacy<T>(
-      {List<String>? paths,
-      String? separator,
-      void Function(T e)? onData,
-      Function? onError,
-      void Function()? onDone,
-      bool? cancelOnError}) {
-    _checkNotDisposed();
-    return subscribe<T>(_legacySelector<T>(paths, separator),
-        onData: onData,
-        onError: onError,
-        onDone: onDone,
-        cancelOnError: cancelOnError);
   }
 
   @override
@@ -705,45 +555,6 @@ mixin EventBusMixin implements EventBus {
     _checkNotDisposed();
     return _valueStream<T>(selector).listen(onData,
         cancelOnError: cancelOnError, onDone: onDone, onError: onError);
-  }
-
-  @override
-  EventSubscription<T> subscribeEventsLegacy<T>({
-    List<String>? paths,
-    String? separator,
-    EventCallback<T>? onEvent,
-    Handler<T>? handler,
-    T? initialData,
-    int handlerConcurrency = 1,
-    int? requestQueueCapacity,
-    int? bufferCapacity,
-    BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
-    DeliveryMode deliveryMode = DeliveryMode.async,
-    void Function(Object error, StackTrace? stackTrace)? onError,
-    void Function()? onDone,
-    bool cancelOnError = false,
-  }) {
-    _checkNotDisposed();
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (TopicPattern.isPattern(topic)) {
-      TopicPattern.validate(topic);
-    }
-    return _subscribeEvents<T>(
-      _legacySelector<T>(paths, separator),
-      topicOverride: topic,
-      onEvent: onEvent,
-      handler: handler,
-      initialData: initialData,
-      handlerConcurrency: handlerConcurrency,
-      requestQueueCapacity: requestQueueCapacity,
-      bufferCapacity: bufferCapacity,
-      bufferOverflow: bufferOverflow,
-      deliveryMode: deliveryMode,
-      onError: onError,
-      onDone: onDone,
-      cancelOnError: cancelOnError,
-    );
   }
 
   @override
@@ -780,7 +591,6 @@ mixin EventBusMixin implements EventBus {
 
   EventSubscription<T> _subscribeEvents<T>(
     EventSelector<T> selector, {
-    Topic? topicOverride,
     EventCallback<T>? onEvent,
     Handler<T>? handler,
     T? initialData,
@@ -802,11 +612,10 @@ mixin EventBusMixin implements EventBus {
           'node ${node.runtimeType} does not implement SubscriptionHost');
     }
     final host = node as SubscriptionHost<T>;
-    final topic = topicOverride ?? _topicForSelector(selector);
+    final topic = _topicForSelector(selector);
     late final EventSubscription<T> subscription;
     subscription = EventSubscription<T>._(
       selector: selector,
-      topic: topicOverride,
       onEvent: onEvent,
       handler: handler,
       handlerConcurrency: handlerConcurrency,
@@ -834,19 +643,6 @@ mixin EventBusMixin implements EventBus {
       node.currentData = initialData;
     }
     return subscription;
-  }
-
-  /// Publishes an event to local listeners without waiting for a handler.
-  @override
-  bool fireLegacy<T>(T data,
-      {List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      String? correlationId}) {
-    _checkNotDisposed();
-    _rejectWildcardPaths(paths, 'fire');
-    return fire<T>(_legacyKey<T>(paths, separator), data,
-        arguments: arguments, correlationId: correlationId);
   }
 
   @override
@@ -961,25 +757,6 @@ mixin EventBusMixin implements EventBus {
         (node as SubscriptionHost).hasListenerSubscriptions;
   }
 
-  /// Removes the node of a topic and forgets its value, even on a model bus.
-  ///
-  /// The model-bus rule and a `KeepAliveNode` pin are ignored on purpose: this
-  /// is the explicit "forget this topic" operation. A transport node cancels
-  /// its broker subscription on [EventNode.dispose]. Active listeners receive
-  /// `done`; a registered handler stays and a model bus creates the node again
-  /// on the next event.
-  @override
-  bool removeTopicLegacy<T>({List<String>? paths, String? separator}) {
-    _checkNotDisposed();
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (TopicPattern.isPattern(topic)) {
-      TopicPattern.validate(topic);
-      return removePattern<T>(EventPatternKey<T>(topic.topic));
-    }
-    return remove<T>(EventKey<T>(topic.topic));
-  }
-
   @override
   bool remove<T>(EventKey<T> key) {
     _checkNotDisposed();
@@ -1080,16 +857,6 @@ mixin EventBusMixin implements EventBus {
     return removed;
   }
 
-  /// Checks if the bus contains a listener for the specified topic.
-  ///
-  ///For a concrete topic a matching pattern listener also counts.
-  @override
-  bool haveListenerLegacy<T>({
-    List<String>? paths,
-    String? separator,
-  }) =>
-      haveListener<T>(_legacySelector<T>(paths, separator));
-
   @override
   bool haveListener<T>(EventSelector<T> selector) {
     _checkNotDisposed();
@@ -1136,14 +903,6 @@ mixin EventBusMixin implements EventBus {
 ///A handler is a capability of [EventSubscription]; this mixin only routes a
 ///request to the resolved tier and owns the request lifecycle.
 mixin _EventBusHandlersMixin on EventBusMixin {
-  @override
-  bool haveHandlerLegacy<T>({List<String>? paths, String? separator}) =>
-      haveHandler<T>(_legacySelector<T>(paths, separator));
-
-  @override
-  bool haveAvailableHandlerLegacy<T>({List<String>? paths, String? separator}) =>
-      haveAvailableHandler<T>(_legacySelector<T>(paths, separator));
-
   @override
   bool haveHandler<T>(EventSelector<T> selector) =>
       _resolveTier(selector) != null;
@@ -1223,23 +982,6 @@ mixin _EventBusHandlersMixin on EventBusMixin {
     final start = (_handlerCursors[tier.route] ?? 0) % candidates.length;
     _handlerCursors[tier.route] = start + 1;
     return candidates[start];
-  }
-
-  @override
-  Future<dynamic> requestLegacy<T>(T data,
-      {List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      Duration? timeout,
-      CancelToken? cancelToken,
-      String? correlationId}) async {
-    _checkNotDisposed();
-    _rejectWildcardPaths(paths, 'request');
-    return request<T>(_legacyKey<T>(paths, separator), data,
-        arguments: arguments,
-        timeout: timeout,
-        cancelToken: cancelToken,
-        correlationId: correlationId);
   }
 
   @override
@@ -1373,18 +1115,6 @@ class _HandlerTier {
   ///The exact [EventAddress] or the [EventPattern] that owns the tier.
   final Object route;
   final List<_HandlerCandidate> candidates;
-}
-
-///A fire or request must address one concrete topic: wildcards are not
-///allowed in the call itself.
-void _rejectWildcardPaths(List<String>? paths, String operation) {
-  if (paths == null) return;
-  for (final path in paths) {
-    if (path.contains('*') || path.contains('>')) {
-      throw EventBusException(
-          '$operation does not support wildcard paths ("$path")');
-    }
-  }
 }
 
 ///A stream view of a node that runs [onCancel] when its subscription is

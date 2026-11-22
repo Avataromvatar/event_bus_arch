@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_mqtt/event_bus_arch_mqtt.dart';
 import 'package:test/test.dart';
+import '../../../test/legacy_compat.dart';
 
 EventDTO<int> _decode(
   Uint8List data,

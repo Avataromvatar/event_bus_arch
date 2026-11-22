@@ -624,7 +624,10 @@ change is free. `EventBus`, `EventBusImpl`, `EventBusIsolate` and `WorkerPool` t
 forwards the separator to the worker-side bus, so interest keys and topics agree on both sides
 of the bridge. `TransportEventBus` keeps `.` because the wiring grammar requires it.
 
-**Acceptability:** done; `doc/02`, `doc/06`, `README.md` and `CHANGELOG.md` updated.
+**Acceptability:** done, then superseded by ADR-0009. The `separator:` parameter and
+`defaultTopicPathSeparator` were removed from `EventBus`, `EventBusImpl`, `EventBusIsolate` and
+`WorkerPool` during stage 7b-core; the address grammar is the `EventAddress.separator` constant.
+`doc/02`, `doc/06`, `README.md` and `CHANGELOG.md` were updated again for the final API.
 
 ### CHG-11b — `Topic.paths`
 

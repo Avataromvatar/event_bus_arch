@@ -158,7 +158,9 @@ class TransportEventBus extends EventBusImpl {
 
   @override
   bool shouldCreateNodeOnSendKey<T>(EventKey<T> key) {
-    if (!_keyMode) return super.shouldCreateNodeOnSendKey(key);
+    if (!_keyMode) {
+      return shouldCreateNodeOnSend(Topic.parse(key.address.value));
+    }
     return _codecs.resolve(key.address)?.canEncode == true;
   }
 
@@ -224,41 +226,21 @@ class TransportEventBus extends EventBusImpl {
     );
   }
 
-  ///Requests without a local handler are sent to the broker, and the first
-  ///response is decoded with the deserializer registered for the topic.
-  ///
-  ///A local handler always wins: when one exists, the request never leaves the
-  ///process. Without a local handler both a serializer and a deserializer are
-  ///required; otherwise [NoHandlerException] is thrown.
-  @override
-  Future<dynamic> requestLegacy<T>(
+  ///The legacy-topic form of a broker request, used while a transport bus is
+  ///constructed with the old serializer registries.
+  Future<dynamic> _requestTopicLegacy<T>(
+    EventKey<T> key,
     T data, {
-    List<String>? paths,
-    String? separator,
     Map<String, String>? arguments,
     Duration? timeout,
-    CancelToken? cancelToken,
     String? correlationId,
   }) {
-    if (isDisposed) {
-      throw StateError('EventBus is disposed: $this');
-    }
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (TopicPattern.isPattern(topic)) {
-      throw EventBusException(
-          'request does not support wildcard paths ("${topic.topic}")');
-    }
-    if (haveHandlerLegacy<T>(paths: paths, separator: separator)) {
-      return super.requestLegacy<T>(
-        data,
-        paths: paths,
-        separator: separator,
-        arguments: arguments,
-        timeout: timeout,
-        cancelToken: cancelToken,
-        correlationId: correlationId,
-      );
+    final topic = Topic.parse(key.address.value);
+    if (haveHandler<T>(key)) {
+      return super.request<T>(key, data,
+          arguments: arguments,
+          timeout: timeout,
+          correlationId: correlationId);
     }
     // Broker-side cancellation is not part of the 4.0.0 transport contract
     // (D15); the caller's timeout bounds the wait.
@@ -277,10 +259,9 @@ class TransportEventBus extends EventBusImpl {
     String? correlationId,
   }) {
     if (!_keyMode) {
-      return super.request<T>(key, data,
+      return _requestTopicLegacy<T>(key, data,
           arguments: arguments,
           timeout: timeout,
-          cancelToken: cancelToken,
           correlationId: correlationId);
     }
     if (isDisposed) {

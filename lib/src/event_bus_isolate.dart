@@ -501,10 +501,9 @@ class EventBusIsolate extends EventBusImpl {
     Object? initialData,
     bool isModelBus = false,
     ObservabilityConfig observability = ObservabilityConfig.disabled,
-    String separator = '.',
   })  : _initialData = initialData,
         _workerIsModelBus = isModelBus,
-        super(isModelBus, observability: observability, separator: separator) {
+        super(isModelBus, observability: observability) {
     _requireIsolates('EventBusIsolate');
     unawaited(_init());
   }
@@ -541,39 +540,6 @@ class EventBusIsolate extends EventBusImpl {
     oldIsolate?.kill(priority: Isolate.immediate);
     unawaited(_init());
     return waitInit;
-  }
-
-  @override
-  bool fireLegacy<T>(T data,
-      {List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      String? correlationId}) {
-    if (isDisposed) {
-      throw StateError('EventBusIsolate is disposed');
-    }
-    if (!_ready) {
-      throw StateError(
-          'EventBusIsolate is not initialized: await waitInit before fire');
-    }
-    _rejectWildcardPaths(paths, 'fire');
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    // A bridge is a directional port: local listeners receive incoming events,
-    // fire goes to the other side. Delivering the fire locally as well would
-    // feed a listener that fires the same topic straight back into itself.
-    // Local pub/sub belongs to an ordinary EventBus (Layer.current in Layers).
-    final observing = _metricsEnabled;
-    final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    final accepted = _link.remoteInterest.hasListener(topic.topic) &&
-        _link.fire(EventDTO<T>(data,
-            topic: topic, arguments: arguments, correlationId: correlationId));
-    if (observing) {
-      metrics.recordFire(topic.topic,
-          accepted: accepted,
-          elapsedMicros: DateTime.now().microsecondsSinceEpoch - started);
-    }
-    return accepted;
   }
 
   @override
@@ -660,72 +626,6 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  Future<dynamic> requestLegacy<T>(T data,
-      {List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      Duration? timeout,
-      CancelToken? cancelToken,
-      String? correlationId}) async {
-    if (isDisposed) {
-      throw StateError('EventBusIsolate is disposed');
-    }
-    if (!_ready) {
-      throw StateError(
-          'EventBusIsolate is not initialized: await waitInit before request');
-    }
-    _rejectWildcardPaths(paths, 'request');
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (cancelToken?.isCancelled ?? false) {
-      if (_metricsEnabled) {
-        metrics.recordRequestStarted(topic.topic);
-        metrics.recordRequestOutcome(topic.topic, RequestOutcome.canceled, 0);
-      }
-      throw RequestCanceledException(topic.topic);
-    }
-    if (haveHandlerLegacy<T>(paths: paths, separator: separator)) {
-      return super.requestLegacy<T>(data,
-          paths: paths,
-          separator: separator,
-          arguments: arguments,
-          timeout: timeout,
-          cancelToken: cancelToken,
-          correlationId: correlationId);
-    }
-    final observing = _metricsEnabled;
-    final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    if (observing) metrics.recordRequestStarted(topic.topic);
-    void finish(RequestOutcome outcome) {
-      if (observing) {
-        metrics.recordRequestOutcome(
-            topic.topic, outcome, DateTime.now().microsecondsSinceEpoch - started);
-      }
-    }
-
-    if (!_link.remoteInterest.hasHandler(topic.topic)) {
-      finish(RequestOutcome.noHandler);
-      throw NoHandlerException(topic.topic);
-    }
-    try {
-      final result = await _link.request(
-          EventDTO<T>(data,
-              topic: topic, arguments: arguments, correlationId: correlationId),
-          timeout: timeout,
-          cancelToken: cancelToken);
-      finish(RequestOutcome.completed);
-      return result;
-    } catch (error) {
-      finish(error is RequestTimeoutException
-          ? RequestOutcome.timeout
-          : error is RequestCanceledException
-              ? RequestOutcome.canceled
-              : RequestOutcome.errored);
-      rethrow;
-    }
-  }
-
-  @override
   void _onListenerInterestChanged(Topic topic, bool present) {
     _link.interest(topic.topic, listener: true, handler: false, present: present);
   }
@@ -758,31 +658,6 @@ class EventBusIsolate extends EventBusImpl {
       _link.interest(topic.topic,
           listener: false, handler: false, model: true, present: true);
     }
-  }
-
-  ///Removes the topic on this side and asks the worker to remove it too.
-  ///
-  ///The call is synchronous for the main-side bus; the worker applies the
-  ///delete in message order before the next event sent to it. A handler
-  ///registered in the worker for this topic stays; cancel its handler
-  ///subscription on the worker bus for a full forget.
-  @override
-  bool removeTopicLegacy<T>({List<String>? paths, String? separator}) {
-    if (isDisposed) {
-      throw StateError('EventBusIsolate is disposed');
-    }
-    if (!_ready) {
-      throw StateError(
-          'EventBusIsolate is not initialized: await waitInit before removeTopic');
-    }
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (TopicPattern.isPattern(topic)) {
-      TopicPattern.validate(topic);
-    }
-    final removed = _removeTopicLocally(topic);
-    _link.removeTopic(topic);
-    return removed;
   }
 
   @override
@@ -871,7 +746,6 @@ class EventBusIsolate extends EventBusImpl {
         onInit,
         _initialData,
         _workerIsModelBus,
-        defaultTopicPathSeparator,
       ]);
       if (generation != _generation || isDisposed) {
         // superseded by a restart or by dispose
@@ -982,14 +856,12 @@ void _worker(dynamic data) async {
   var onInit = data[1] as FutureOr<void> Function(EventBus, Object?);
   Object? initialData = data[2];
   bool isModelBus = data[3] as bool;
-  String separator = data[4] as String;
   var innerReceivePort = ReceivePort();
   var s = innerReceivePort.asBroadcastStream();
 
   // the bus is created before the handshake: its listener subscribes to the port
   // right away, so no message from main can be lost
-  var eventBus =
-      _EventBusForIsolate(isModelBus, s, sendPort, separator: separator);
+  var eventBus = _EventBusForIsolate(isModelBus, s, sendPort);
   eventBus._startParentWatchdog();
   sendPort.send(innerReceivePort.sendPort);
 
@@ -1019,8 +891,8 @@ class _EventBusForIsolate extends EventBusImpl {
   late final _IsolateLink _link = _IsolateLink(this);
   Timer? _watchdog;
 
-  _EventBusForIsolate(super._isModelBus, this._receivePort, this._sendPort,
-      {super.separator}) {
+  _EventBusForIsolate(
+      super._isModelBus, this._receivePort, this._sendPort) {
     _link.sendPort = _sendPort;
     _receivePort.listen(_link.handleMessage);
   }
@@ -1050,27 +922,6 @@ class _EventBusForIsolate extends EventBusImpl {
   ///Sends a failure of this worker's child to the parent.
   void _sendFailure(String message) {
     _link.sendFailure(message);
-  }
-
-  @override
-  bool fireLegacy<T>(T data,
-      {List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      String? correlationId}) {
-    if (isDisposed) {
-      throw StateError('EventBus is disposed');
-    }
-    _rejectWildcardPaths(paths, 'fire');
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    // A bridge is a directional port: local listeners receive incoming events,
-    // fire goes to the other side. Delivering the fire locally as well would
-    // feed a listener that fires the same topic straight back into itself.
-    // Local pub/sub belongs to an ordinary EventBus (Layer.current in Layers).
-    return _link.remoteInterest.hasListener(topic.topic) &&
-        _link.fire(EventDTO<T>(data,
-            topic: topic, arguments: arguments, correlationId: correlationId));
   }
 
   @override
@@ -1114,42 +965,6 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  Future<dynamic> requestLegacy<T>(T data,
-      {List<String>? paths,
-      String? separator,
-      Map<String, String>? arguments,
-      Duration? timeout,
-      CancelToken? cancelToken,
-      String? correlationId}) async {
-    if (isDisposed) {
-      throw StateError('EventBus is disposed');
-    }
-    _rejectWildcardPaths(paths, 'request');
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (cancelToken?.isCancelled ?? false) {
-      throw RequestCanceledException(topic.topic);
-    }
-    if (haveHandlerLegacy<T>(paths: paths, separator: separator)) {
-      return super.requestLegacy<T>(data,
-          paths: paths,
-          separator: separator,
-          arguments: arguments,
-          timeout: timeout,
-          cancelToken: cancelToken,
-          correlationId: correlationId);
-    }
-    if (!_link.remoteInterest.hasHandler(topic.topic)) {
-      throw NoHandlerException(topic.topic);
-    }
-    return _link.request(
-        EventDTO<T>(data,
-            topic: topic, arguments: arguments, correlationId: correlationId),
-        timeout: timeout,
-        cancelToken: cancelToken);
-  }
-
-  @override
   void _onListenerInterestChanged(Topic topic, bool present) {
     _link.interest(topic.topic, listener: true, handler: false, present: present);
   }
@@ -1182,22 +997,6 @@ class _EventBusForIsolate extends EventBusImpl {
       _link.interest(topic.topic,
           listener: false, handler: false, model: true, present: true);
     }
-  }
-
-  ///Removes the topic on this side and asks the main isolate to remove it too.
-  @override
-  bool removeTopicLegacy<T>({List<String>? paths, String? separator}) {
-    if (isDisposed) {
-      throw StateError('EventBus is disposed');
-    }
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (TopicPattern.isPattern(topic)) {
-      TopicPattern.validate(topic);
-    }
-    final removed = _removeTopicLocally(topic);
-    _link.removeTopic(topic);
-    return removed;
   }
 
   @override

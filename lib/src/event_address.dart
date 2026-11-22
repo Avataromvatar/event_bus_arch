@@ -83,6 +83,13 @@ final class EventPattern {
           token == EventAddress.singleWildcard ||
           token == EventAddress.tailWildcard);
 
+  ///The number of literal tokens; more specific patterns win.
+  int get specificity => tokens
+      .where((token) =>
+          token != EventAddress.singleWildcard &&
+          token != EventAddress.tailWildcard)
+      .length;
+
   static String _validatePattern(String value) {
     if (value.isEmpty) {
       throw EventBusException('event pattern must not be empty');

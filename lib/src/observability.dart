@@ -408,15 +408,14 @@ class EventBusMetrics {
     topics.sort((a, b) => a.key.compareTo(b.key));
 
     final subscriptions = <SubscriptionMetricsSnapshot>[];
-    void collect(Map<Topic, EventNode> nodes) {
-      for (final entry in nodes.entries) {
-        final node = entry.value;
+    void collectNodes(Iterable<EventNode> nodes) {
+      for (final node in nodes) {
         if (node is! SubscriptionHost) continue;
         final host = node as SubscriptionHost;
         for (final subscription in host.subscriptions) {
           subscriptions.add(SubscriptionMetricsSnapshot(
-            topic: entry.key.topic,
-            pattern: TopicPattern.isPattern(entry.key),
+            topic: subscription.topic.topic,
+            pattern: TopicPattern.isPattern(subscription.topic),
             hasListener: subscription.hasListener,
             hasHandler: subscription.hasHandler,
             isCanceled: subscription.isCanceled,
@@ -435,8 +434,10 @@ class EventBusMetrics {
       }
     }
 
-    collect(_bus._eventsMap);
-    collect(_bus._patternMap);
+    collectNodes(
+        _bus._eventsMap.values.expand((bucket) => bucket.values));
+    collectNodes(
+        _bus._patternMap.values.expand((bucket) => bucket.values));
     subscriptions.sort((a, b) => a.topic.compareTo(b.topic));
 
     return EventBusMetricsSnapshot(

@@ -173,6 +173,78 @@ abstract class EventBus {
   /// Returns true if a matching handler could accept a request right now.
   bool haveAvailableHandler<T>({List<String>? paths, String? separator});
 
+  // ---------------------------------------------------------------------------
+  // E key API (ADR-0009). The paths/separator methods above are the legacy
+  // compatibility layer; they are removed when the migration completes.
+  // ---------------------------------------------------------------------------
+
+  /// Publishes [data] on an exact typed key.
+  bool fireKey<T>(
+    EventKey<T> key,
+    T data, {
+    Map<String, String>? arguments,
+    String? correlationId,
+  });
+
+  /// Sends a request on an exact typed key and waits for the handler result.
+  Future<dynamic> requestKey<T>(
+    EventKey<T> key,
+    T data, {
+    Map<String, String>? arguments,
+    Duration? timeout,
+    CancelToken? cancelToken,
+    String? correlationId,
+  });
+
+  /// Listens to a typed exact or pattern selector.
+  Stream<T> listenKey<T>(EventSelector<T> selector);
+
+  /// Subscribes to a typed selector as a raw stream subscription.
+  StreamSubscription<T> subscribeKey<T>(
+    EventSelector<T> selector, {
+    void Function(T e)? onData,
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  });
+
+  /// Creates a listener and/or handler subscription for a typed selector.
+  EventSubscription<T> subscribeEventsKey<T>(
+    EventSelector<T> selector, {
+    EventCallback<T>? onEvent,
+    Handler<T>? handler,
+    T? initialData,
+    int handlerConcurrency = 1,
+    int? requestQueueCapacity,
+    int? bufferCapacity,
+    BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
+    DeliveryMode deliveryMode = DeliveryMode.async,
+    void Function(Object error, StackTrace? stackTrace)? onError,
+    void Function()? onDone,
+    bool cancelOnError = false,
+  });
+
+  /// The value stored for an exact typed key.
+  T? currentDataKey<T>(EventKey<T> key);
+
+  /// Whether a selector has a listener.
+  bool haveListenerKey<T>(EventSelector<T> selector);
+
+  /// Whether a selector has a handler, including paused handlers.
+  bool haveHandlerKey<T>(EventSelector<T> selector);
+
+  /// Whether a handler for the selector could accept a request now.
+  bool haveAvailableHandlerKey<T>(EventSelector<T> selector);
+
+  /// Removes the type node for an exact key.
+  bool removeKey<T>(EventKey<T> key);
+
+  /// Removes the type node for a pattern key.
+  bool removePatternKey<T>(EventPatternKey<T> key);
+
+  /// Removes every type node registered at an exact address.
+  bool removeAddress(EventAddress address);
+
   /// Publishes an event to local listeners and forgets about it.
   ///
   /// Handler subscriptions are not invoked by [fire]; their result is ignored.
@@ -365,11 +437,11 @@ mixin EventBusMixin implements EventBus {
     }
   }
 
-  /// Map storing exact event nodes by their topic
-  final Map<Topic, EventNode> _eventsMap = {};
+  /// Exact nodes: address -> local type -> node.
+  final Map<EventAddress, Map<Type, EventNode>> _eventsMap = {};
 
-  /// Map storing wildcard pattern nodes ('*', '>') by their topic
-  final Map<Topic, EventNode> _patternMap = {};
+  /// Pattern nodes: pattern -> local type -> node.
+  final Map<EventPattern, Map<Type, EventNode>> _patternMap = {};
 
   bool _disposed = false;
   Future<void>? _disposeFuture;
@@ -400,8 +472,8 @@ mixin EventBusMixin implements EventBus {
     return EventNode<T>.create(currentData: currentData);
   }
 
-  ///Round-robin cursor of the handler dispatcher, per node.
-  final Map<EventNode, int> _handlerCursors = {};
+  ///Round-robin cursor of the handler dispatcher, per route.
+  final Map<Object, int> _handlerCursors = {};
 
   ///Active listener and handler subscriptions per topic, used by isolate
   ///bridges to publish interest transitions.
@@ -478,52 +550,90 @@ mixin EventBusMixin implements EventBus {
     }
   }
 
+  /// The topic view of a selector, for the compatibility hooks.
+  Topic _topicForSelector(EventSelector selector) {
+    if (selector is EventPatternKey) return Topic.parse(selector.pattern.value);
+    return Topic.parse(selector.toString());
+  }
+
+  /// Builds the legacy synthetic key: the old topic string becomes the address.
+  EventKey<T> _legacyKey<T>(List<String>? paths, String? separator) {
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    return EventKey<T>(topic.topic);
+  }
+
+  EventSelector<T> _legacySelector<T>(List<String>? paths, String? separator) {
+    final topic = Topic.create<T>(
+        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    return TopicPattern.isPattern(topic)
+        ? EventPatternKey<T>(topic.topic)
+        : EventKey<T>(topic.topic);
+  }
+
+  Map<Type, EventNode> _exactBucket(EventAddress address) =>
+      _eventsMap.putIfAbsent(address, () => <Type, EventNode>{});
+
+  Map<Type, EventNode> _patternBucket(EventPattern pattern) =>
+      _patternMap.putIfAbsent(pattern, () => <Type, EventNode>{});
+
   /// Gets the last data sent to a specific topic.
   /// Returns null if no data has been sent to that topic.
   @override
-  T? currentData<T>({List<String>? paths, String? separator}) {
-    var t = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    final pattern = TopicPattern.isPattern(t);
-    if (pattern) {
-      TopicPattern.validate(t);
+  T? currentData<T>({List<String>? paths, String? separator}) =>
+      _currentDataFor<T>(_legacySelector<T>(paths, separator));
+
+  T? _currentDataFor<T>(EventSelector<T> selector) {
+    if (selector is EventPatternKey<T>) {
+      final node = _patternMap[selector.pattern]?[selector.type];
+      return node is EventNode<T> ? node.currentData : null;
     }
-    var node = pattern ? _patternMap[t] : _eventsMap[t];
-    if (node != null && node is EventNode<T>) {
-      return node.currentData;
-    }
-    return null;
+    return currentDataKey(selector as EventKey<T>);
   }
 
-  /// Returns the node of a topic, creating it when needed.
-  EventNode<T> _nodeFor<T>(Topic topic) {
-    final pattern = TopicPattern.isPattern(topic);
-    if (pattern) {
-      TopicPattern.validate(topic);
+  @override
+  T? currentDataKey<T>(EventKey<T> key) {
+    final node = _eventsMap[key.address]?[key.type];
+    return node is EventNode<T> ? node.currentData : null;
+  }
+
+  /// Returns the typed node of a selector, creating it when needed.
+  EventNode<T> _nodeFor<T>(EventSelector<T> selector) {
+    if (selector is EventPatternKey<T>) {
+      final bucket = _patternBucket(selector.pattern);
+      final existing = bucket[selector.type];
+      if (existing is EventNode<T>) return existing;
+      final topic = Topic.parse(selector.pattern.value);
+      final created = createNode<T>(topic: topic);
+      bucket[selector.type] = created;
+      _markModelTopic(topic, true);
+      return created;
     }
-    final map = pattern ? _patternMap : _eventsMap;
-    var node = map[topic];
-    if (node != null && node is EventNode<T>) {
-      return node;
-    }
-    var created = createNode<T>(topic: topic);
-    map[topic] = created;
+    final key = selector as EventKey<T>;
+    final bucket = _exactBucket(key.address);
+    final existing = bucket[key.type];
+    if (existing is EventNode<T>) return existing;
+    final topic = Topic.parse(key.address.value);
+    final created = createNode<T>(topic: topic);
+    bucket[key.type] = created;
     _markModelTopic(topic, true);
     return created;
   }
 
-  /// Value stream of a topic; the node may be removed when the last subscription is cancelled.
+  /// Value stream of a selector; the node may be removed when the last
+  /// subscription is cancelled.
   ///
   ///The source stays an ordinary asynchronous broadcast stream. The wrapper
   ///only adds the cancellation hook (the former rxdart `doOnCancel`) and
   ///delegates pause/resume, so no extra microtask hop is introduced.
-  Stream<T> _valueStream<T>(Topic topic) {
-    var node = _nodeFor<T>(topic);
+  Stream<T> _valueStream<T>(EventSelector<T> selector) {
+    final node = _nodeFor<T>(selector);
+    final topic = _topicForSelector(selector);
     return _NodeStream<T>(
       node.streamControllerValue.stream,
       () {
         _subscriptionRemoved(topic, listener: true, handler: false);
-        _removeNode(topic, node);
+        _removeNode(selector, node);
       },
       onListen: () => _subscriptionAdded(topic, listener: true, handler: false),
     );
@@ -535,8 +645,13 @@ mixin EventBusMixin implements EventBus {
   @override
   Stream<T> listen<T>({List<String>? paths, String? separator}) {
     _checkNotDisposed();
-    return _valueStream<T>(Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator));
+    return listenKey<T>(_legacySelector<T>(paths, separator));
+  }
+
+  @override
+  Stream<T> listenKey<T>(EventSelector<T> selector) {
+    _checkNotDisposed();
+    return _valueStream<T>(selector);
   }
 
   @override
@@ -548,10 +663,22 @@ mixin EventBusMixin implements EventBus {
       void Function()? onDone,
       bool? cancelOnError}) {
     _checkNotDisposed();
-    return _valueStream<T>(Topic.create<T>(
-            paths: paths, separator: separator ?? defaultTopicPathSeparator))
-        .listen(onData,
-            cancelOnError: cancelOnError, onDone: onDone, onError: onError);
+    return subscribeKey<T>(_legacySelector<T>(paths, separator),
+        onData: onData,
+        onError: onError,
+        onDone: onDone,
+        cancelOnError: cancelOnError);
+  }
+
+  @override
+  StreamSubscription<T> subscribeKey<T>(EventSelector<T> selector,
+      {void Function(T e)? onData,
+      Function? onError,
+      void Function()? onDone,
+      bool? cancelOnError}) {
+    _checkNotDisposed();
+    return _valueStream<T>(selector).listen(onData,
+        cancelOnError: cancelOnError, onDone: onDone, onError: onError);
   }
 
   @override
@@ -571,23 +698,89 @@ mixin EventBusMixin implements EventBus {
     bool cancelOnError = false,
   }) {
     _checkNotDisposed();
-    if (onEvent == null && handler == null) {
-      throw ArgumentError('subscribeEvents needs onEvent, handler, or both');
-    }
     final topic = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
     if (TopicPattern.isPattern(topic)) {
       TopicPattern.validate(topic);
     }
-    final node = _nodeFor<T>(topic);
+    return _subscribeEvents<T>(
+      _legacySelector<T>(paths, separator),
+      topicOverride: topic,
+      onEvent: onEvent,
+      handler: handler,
+      initialData: initialData,
+      handlerConcurrency: handlerConcurrency,
+      requestQueueCapacity: requestQueueCapacity,
+      bufferCapacity: bufferCapacity,
+      bufferOverflow: bufferOverflow,
+      deliveryMode: deliveryMode,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
+
+  @override
+  EventSubscription<T> subscribeEventsKey<T>(
+    EventSelector<T> selector, {
+    EventCallback<T>? onEvent,
+    Handler<T>? handler,
+    T? initialData,
+    int handlerConcurrency = 1,
+    int? requestQueueCapacity,
+    int? bufferCapacity,
+    BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
+    DeliveryMode deliveryMode = DeliveryMode.async,
+    void Function(Object error, StackTrace? stackTrace)? onError,
+    void Function()? onDone,
+    bool cancelOnError = false,
+  }) {
+    _checkNotDisposed();
+    return _subscribeEvents<T>(
+      selector,
+      onEvent: onEvent,
+      handler: handler,
+      initialData: initialData,
+      handlerConcurrency: handlerConcurrency,
+      requestQueueCapacity: requestQueueCapacity,
+      bufferCapacity: bufferCapacity,
+      bufferOverflow: bufferOverflow,
+      deliveryMode: deliveryMode,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
+
+  EventSubscription<T> _subscribeEvents<T>(
+    EventSelector<T> selector, {
+    Topic? topicOverride,
+    EventCallback<T>? onEvent,
+    Handler<T>? handler,
+    T? initialData,
+    int handlerConcurrency = 1,
+    int? requestQueueCapacity,
+    int? bufferCapacity,
+    BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
+    DeliveryMode deliveryMode = DeliveryMode.async,
+    void Function(Object error, StackTrace? stackTrace)? onError,
+    void Function()? onDone,
+    bool cancelOnError = false,
+  }) {
+    if (onEvent == null && handler == null) {
+      throw ArgumentError('subscribeEvents needs onEvent, handler, or both');
+    }
+    final node = _nodeFor<T>(selector);
     if (node is! SubscriptionHost<T>) {
       throw UnsupportedError(
           'node ${node.runtimeType} does not implement SubscriptionHost');
     }
     final host = node as SubscriptionHost<T>;
+    final topic = topicOverride ?? _topicForSelector(selector);
     late final EventSubscription<T> subscription;
     subscription = EventSubscription<T>._(
-      topic: topic,
+      selector: selector,
+      topic: topicOverride,
       onEvent: onEvent,
       handler: handler,
       handlerConcurrency: handlerConcurrency,
@@ -604,7 +797,7 @@ mixin EventBusMixin implements EventBus {
         _subscriptionRemoved(topic,
             listener: onEvent != null, handler: handler != null);
         host.removeSubscription(subscription);
-        _removeNode(topic, node);
+        _removeNode(selector, node);
       },
       onBusError: reportError,
     );
@@ -626,42 +819,52 @@ mixin EventBusMixin implements EventBus {
       String? correlationId}) {
     _checkNotDisposed();
     _rejectWildcardPaths(paths, 'fire');
+    return fireKey<T>(_legacyKey<T>(paths, separator), data,
+        arguments: arguments, correlationId: correlationId);
+  }
+
+  @override
+  bool fireKey<T>(EventKey<T> key, T data,
+      {Map<String, String>? arguments, String? correlationId}) {
+    _checkNotDisposed();
     final observing = _metricsEnabled;
     final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    var dto = EventDTO<T>(data,
-        paths: paths,
-        // the same fallback as subscribeEvents/listen/currentData: otherwise a send
-        // would address a node nobody else can address
-        separator: separator ?? defaultTopicPathSeparator,
-        arguments: arguments,
-        correlationId: correlationId);
-    // A model or transport bus may create the exact node for this topic.
-    _sendNode<T>(dto.topic);
+    final dto = EventDTO<T>.withKey(key, data,
+        arguments: arguments, correlationId: correlationId);
+    // A model or transport bus may create the exact node for this key.
+    _sendNode<T>(key);
     final matched = _dispatchToListeners(dto);
     // A model bus accepted the value even when nobody is listening. A handler
     // subscription alone does not count for fire (D14).
-    final accepted = matched || (isModelBus && _nodeByTopic(dto.topic) != null);
+    final accepted = matched ||
+        (isModelBus && _eventsMap[key.address]?[key.type] != null);
     _addAllEvent(dto, accepted);
     if (observing) {
-      metrics.recordFire(dto.topic,
+      metrics.recordFire(_topicForSelector(key),
           accepted: accepted,
           elapsedMicros: DateTime.now().microsecondsSinceEpoch - started);
     }
     return accepted;
   }
 
-  ///Delivers to the exact node and to every matching pattern node.
+  ///Delivers to every typed node at the address and to every matching pattern
+  ///node. Each node filters by its own type.
   ///
   ///An [incoming] event came from another process: a transport node delivers it
   ///locally without publishing it back.
   bool _dispatchToListeners(EventDTO dto, {bool incoming = false}) {
     var accepted = false;
-    final exact = _eventsMap[dto.topic];
+    final address = dto.key.address;
+    final exact = _eventsMap[address];
     if (exact != null) {
-      accepted = _deliverNode(exact, dto, incoming) || accepted;
+      for (final node in exact.values) {
+        accepted = _deliverNode(node, dto, incoming) || accepted;
+      }
     }
-    for (final entry in _matchingPatternEntries(dto.topic)) {
-      accepted = _deliverNode(entry.value, dto, incoming) || accepted;
+    for (final entry in _matchingPatternEntries(address)) {
+      for (final node in entry.value.values) {
+        accepted = _deliverNode(node, dto, incoming) || accepted;
+      }
     }
     return accepted;
   }
@@ -674,38 +877,34 @@ mixin EventBusMixin implements EventBus {
     return node.deliver(dto);
   }
 
-  ///Pattern nodes matching a concrete topic, most specific first.
-  List<MapEntry<Topic, EventNode>> _matchingPatternEntries(Topic topic) {
-    if (TopicPattern.isPattern(topic)) return const [];
-    final insertion = <Topic, int>{};
-    final matches = <MapEntry<Topic, EventNode>>[];
+  ///Pattern buckets matching a concrete address, most specific first.
+  List<MapEntry<EventPattern, Map<Type, EventNode>>>
+      _matchingPatternEntries(EventAddress address) {
+    final insertion = <EventPattern, int>{};
+    final matches = <MapEntry<EventPattern, Map<Type, EventNode>>>[];
     var index = 0;
     for (final entry in _patternMap.entries) {
       insertion[entry.key] = index++;
-      if (TopicPattern.matches(entry.key, topic)) {
+      if (entry.key.matches(address)) {
         matches.add(entry);
       }
     }
     matches.sort((a, b) {
-      final byScore = TopicPattern.specificity(b.key)
-          .compareTo(TopicPattern.specificity(a.key));
+      final byScore = b.key.specificity.compareTo(a.key.specificity);
       if (byScore != 0) return byScore;
       return insertion[a.key]!.compareTo(insertion[b.key]!);
     });
     return matches;
   }
 
-  ///The node stored for a concrete or pattern topic, without creating one.
-  EventNode? _nodeByTopic(Topic topic) =>
-      TopicPattern.isPattern(topic) ? _patternMap[topic] : _eventsMap[topic];
-
-  ///The node an event is sent to, created when the bus allows it.
-  EventNode<T>? _sendNode<T>(Topic topic) {
-    var node = _eventsMap[topic];
-    if (node is EventNode<T>) return node;
+  ///The typed node an event is sent to, created when the bus allows it.
+  EventNode<T>? _sendNode<T>(EventKey<T> key) {
+    final existing = _eventsMap[key.address]?[key.type];
+    if (existing is EventNode<T>) return existing;
+    final topic = Topic.parse(key.address.value);
     if (shouldCreateNodeOnSend(topic)) {
-      var created = createNode<T>(topic: topic);
-      _eventsMap[topic] = created;
+      final created = createNode<T>(topic: topic);
+      _exactBucket(key.address)[key.type] = created;
       _markModelTopic(topic, true);
       return created;
     }
@@ -715,7 +914,7 @@ mixin EventBusMixin implements EventBus {
   /// This method is called every time a listener closes the stream.
   /// The node is kept when it has listeners, a request handler, a pin from a
   /// transport, or when this is a model bus.
-  bool _removeNode(Topic topic, EventNode node) {
+  bool _removeNode(EventSelector selector, EventNode node) {
     final pinned = node is KeepAliveNode && (node as KeepAliveNode).keepAlive;
     final hasSubscriptions =
         node is SubscriptionHost && (node as SubscriptionHost).hasSubscriptions;
@@ -723,7 +922,7 @@ mixin EventBusMixin implements EventBus {
         !hasSubscriptions &&
         !isModelBus &&
         !pinned) {
-      return _detachNode(topic, node);
+      return _detachNode(selector, node);
     }
     return false;
   }
@@ -750,32 +949,87 @@ mixin EventBusMixin implements EventBus {
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
     if (TopicPattern.isPattern(topic)) {
       TopicPattern.validate(topic);
+      return removePatternKey<T>(EventPatternKey<T>(topic.topic));
     }
-    return _removeTopicLocally(topic);
+    return removeKey<T>(EventKey<T>(topic.topic));
   }
 
-  /// Removes a topic without any guard. Also used by the isolate link when a
-  /// delete arrives from the other side: it must not forward anything back.
-  bool _removeTopicLocally(Topic topic) {
-    final node = _nodeByTopic(topic);
+  @override
+  bool removeKey<T>(EventKey<T> key) {
+    _checkNotDisposed();
+    final node = _eventsMap[key.address]?[key.type];
     if (node == null) return false;
-    return _detachNode(topic, node);
+    return _detachNode(key, node);
+  }
+
+  @override
+  bool removePatternKey<T>(EventPatternKey<T> key) {
+    _checkNotDisposed();
+    final node = _patternMap[key.pattern]?[key.type];
+    if (node == null) return false;
+    return _detachNode(key, node);
+  }
+
+  @override
+  bool removeAddress(EventAddress address) {
+    _checkNotDisposed();
+    final bucket = _eventsMap.remove(address);
+    if (bucket == null) return false;
+    final topic = Topic.parse(address.value);
+    for (final node in bucket.values) {
+      _handlerCursors.remove(node);
+      unawaited(node.dispose());
+    }
+    final hadInterest = (_listenerCounts.remove(topic) ?? 0) > 0 ||
+        (_handlerCounts.remove(topic) ?? 0) > 0;
+    if (hadInterest) _onTopicInterestRemoved(topic);
+    _markModelTopic(topic, false);
+    return true;
+  }
+
+  /// Removes every type node at a topic without forwarding a delete.
+  /// Also used by the isolate link when a delete arrives from the other side.
+  bool _removeTopicLocally(Topic topic) {
+    if (TopicPattern.isPattern(topic)) {
+      final pattern = EventPattern(topic.topic);
+      final bucket = _patternMap.remove(pattern);
+      if (bucket == null) return false;
+      for (final node in bucket.values) {
+        _handlerCursors.remove(node);
+        unawaited(node.dispose());
+      }
+      final hadInterest = (_listenerCounts.remove(topic) ?? 0) > 0 ||
+          (_handlerCounts.remove(topic) ?? 0) > 0;
+      if (hadInterest) _onTopicInterestRemoved(topic);
+      _markModelTopic(topic, false);
+      return true;
+    }
+    return removeAddress(EventAddress(topic.topic));
   }
 
   /// Unlinks [node] and disposes it, but only when the map still holds this
   /// very node. A late `doOnCancel` of an already removed node must not delete
-  /// a node created later for the same topic.
-  bool _detachNode(Topic topic, EventNode node) {
+  /// a node created later for the same key.
+  bool _detachNode(EventSelector selector, EventNode node) {
     var removed = false;
-    if (identical(_eventsMap[topic], node)) {
-      _eventsMap.remove(topic);
-      removed = true;
-    }
-    if (identical(_patternMap[topic], node)) {
-      _patternMap.remove(topic);
-      removed = true;
+    if (selector is EventPatternKey) {
+      final bucket = _patternMap[selector.pattern];
+      if (bucket != null && identical(bucket[selector.type], node)) {
+        bucket.remove(selector.type);
+        if (bucket.isEmpty) _patternMap.remove(selector.pattern);
+        removed = true;
+      }
+    } else {
+      final key = selector as EventKey;
+      final bucket = _eventsMap[key.address];
+      if (bucket != null && identical(bucket[key.type], node)) {
+        bucket.remove(key.type);
+        if (bucket.isEmpty) _eventsMap.remove(key.address);
+        removed = true;
+      }
     }
     if (removed) {
+      final topic = _topicForSelector(selector);
       final hadInterest = (_listenerCounts.remove(topic) ?? 0) > 0 ||
           (_handlerCounts.remove(topic) ?? 0) > 0;
       if (hadInterest) _onTopicInterestRemoved(topic);
@@ -793,16 +1047,19 @@ mixin EventBusMixin implements EventBus {
   bool haveListener<T>({
     List<String>? paths,
     String? separator,
-  }) {
-    var t = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (TopicPattern.isPattern(t)) {
-      TopicPattern.validate(t);
-      return _nodeHasListener(_patternMap[t]);
+  }) =>
+      haveListenerKey<T>(_legacySelector<T>(paths, separator));
+
+  @override
+  bool haveListenerKey<T>(EventSelector<T> selector) {
+    _checkNotDisposed();
+    if (selector is EventPatternKey<T>) {
+      return _nodeHasListener(_patternMap[selector.pattern]?[selector.type]);
     }
-    if (_nodeHasListener(_eventsMap[t])) return true;
-    return _matchingPatternEntries(t)
-        .any((entry) => _nodeHasListener(entry.value));
+    final key = selector as EventKey<T>;
+    if (_nodeHasListener(_eventsMap[key.address]?[key.type])) return true;
+    return _matchingPatternEntries(key.address)
+        .any((entry) => _nodeHasListener(entry.value[key.type]));
   }
 
   /// Closes the all-events stream and every node of the bus.
@@ -820,7 +1077,10 @@ mixin EventBusMixin implements EventBus {
       await metricsInstance.dispose();
     }
     _errorWindows.clear();
-    var nodes = [..._eventsMap.values, ..._patternMap.values];
+    final nodes = <EventNode>[
+      for (final bucket in _eventsMap.values) ...bucket.values,
+      for (final bucket in _patternMap.values) ...bucket.values,
+    ];
     _eventsMap.clear();
     _patternMap.clear();
     _handlerCursors.clear();
@@ -837,26 +1097,23 @@ mixin EventBusMixin implements EventBus {
 ///request to the resolved tier and owns the request lifecycle.
 mixin _EventBusHandlersMixin on EventBusMixin {
   @override
-  bool haveHandler<T>({List<String>? paths, String? separator}) {
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (TopicPattern.isPattern(topic)) {
-      TopicPattern.validate(topic);
-    }
-    return _resolveTier(topic) != null;
-  }
+  bool haveHandler<T>({List<String>? paths, String? separator}) =>
+      haveHandlerKey<T>(_legacySelector<T>(paths, separator));
 
   @override
-  bool haveAvailableHandler<T>({List<String>? paths, String? separator}) {
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
-    if (TopicPattern.isPattern(topic)) {
-      TopicPattern.validate(topic);
-    }
-    final tier = _resolveTier(topic);
+  bool haveAvailableHandler<T>({List<String>? paths, String? separator}) =>
+      haveAvailableHandlerKey<T>(_legacySelector<T>(paths, separator));
+
+  @override
+  bool haveHandlerKey<T>(EventSelector<T> selector) =>
+      _resolveTier(selector) != null;
+
+  @override
+  bool haveAvailableHandlerKey<T>(EventSelector<T> selector) {
+    final tier = _resolveTier(selector);
     return tier != null &&
-        tier.subscriptions
-            .any((subscription) => subscription.hasRequestCapacity);
+        tier.candidates
+            .any((candidate) => candidate.subscription.hasRequestCapacity);
   }
 
   ///The registered topic of the tier that would answer [topic], or null when
@@ -864,7 +1121,16 @@ mixin _EventBusHandlersMixin on EventBusMixin {
   ///
   ///Intended for transports: overlapping exact/pattern subscriptions must
   ///produce exactly one answer.
-  Topic? handlerTopicFor(Topic topic) => _resolveTier(topic)?.topic;
+  Topic? handlerTopicFor(Topic topic) {
+    final selector = TopicPattern.isPattern(topic)
+        ? EventPatternKey<Object?>(topic.topic)
+        : EventKey<Object?>(topic.topic);
+    final tier = _resolveTier(selector);
+    if (tier == null) return null;
+    final route = tier.route;
+    return Topic.parse(
+        route is EventPattern ? route.value : (route as EventAddress).value);
+  }
 
   List<EventSubscription> _handlersOn(EventNode? node) {
     if (node is! SubscriptionHost) return const [];
@@ -874,32 +1140,48 @@ mixin _EventBusHandlersMixin on EventBusMixin {
         .toList(growable: false);
   }
 
-  _HandlerTier? _resolveTier(Topic topic) {
-    if (TopicPattern.isPattern(topic)) {
-      final node = _patternMap[topic];
-      final handlers = _handlersOn(node);
-      return handlers.isEmpty ? null : _HandlerTier(topic, node!, handlers);
+  List<_HandlerCandidate> _candidatesOn(Map<Type, EventNode> bucket) {
+    final candidates = <_HandlerCandidate>[];
+    for (final node in bucket.values) {
+      for (final subscription in _handlersOn(node)) {
+        candidates.add(_HandlerCandidate(node, subscription));
+      }
+    }
+    return candidates;
+  }
+
+  _HandlerTier? _resolveTier(EventSelector selector) {
+    if (selector is EventPatternKey) {
+      final bucket = _patternMap[selector.pattern];
+      final candidates =
+          bucket == null ? const <_HandlerCandidate>[] : _candidatesOn(bucket);
+      return candidates.isEmpty
+          ? null
+          : _HandlerTier(selector.pattern, candidates);
     }
 
-    final exactNode = _eventsMap[topic];
-    final exactHandlers = _handlersOn(exactNode);
-    if (exactHandlers.isNotEmpty) {
-      return _HandlerTier(topic, exactNode!, exactHandlers);
+    final key = selector as EventKey;
+    final exact = _eventsMap[key.address];
+    if (exact != null) {
+      final candidates = _candidatesOn(exact);
+      if (candidates.isNotEmpty) {
+        return _HandlerTier(key.address, candidates);
+      }
     }
 
-    for (final entry in _matchingPatternEntries(topic)) {
-      final handlers = _handlersOn(entry.value);
-      if (handlers.isNotEmpty) {
-        return _HandlerTier(entry.key, entry.value, handlers);
+    for (final entry in _matchingPatternEntries(key.address)) {
+      final candidates = _candidatesOn(entry.value);
+      if (candidates.isNotEmpty) {
+        return _HandlerTier(entry.key, candidates);
       }
     }
     return null;
   }
 
-  EventSubscription _pickHandler(
-      EventNode node, List<EventSubscription> candidates) {
-    final start = (_handlerCursors[node] ?? 0) % candidates.length;
-    _handlerCursors[node] = start + 1;
+  _HandlerCandidate _pickHandler(
+      _HandlerTier tier, List<_HandlerCandidate> candidates) {
+    final start = (_handlerCursors[tier.route] ?? 0) % candidates.length;
+    _handlerCursors[tier.route] = start + 1;
     return candidates[start];
   }
 
@@ -913,23 +1195,36 @@ mixin _EventBusHandlersMixin on EventBusMixin {
       String? correlationId}) async {
     _checkNotDisposed();
     _rejectWildcardPaths(paths, 'request');
-    final topic = Topic.create<T>(
-        paths: paths, separator: separator ?? defaultTopicPathSeparator);
+    return requestKey<T>(_legacyKey<T>(paths, separator), data,
+        arguments: arguments,
+        timeout: timeout,
+        cancelToken: cancelToken,
+        correlationId: correlationId);
+  }
+
+  @override
+  Future<dynamic> requestKey<T>(EventKey<T> key, T data,
+      {Map<String, String>? arguments,
+      Duration? timeout,
+      CancelToken? cancelToken,
+      String? correlationId}) async {
+    _checkNotDisposed();
     if (cancelToken?.isCancelled ?? false) {
       if (_metricsEnabled) {
+        final topic = Topic.parse(key.address.value);
         metrics.recordRequestStarted(topic);
         metrics.recordRequestOutcome(topic, RequestOutcome.canceled, 0);
       }
-      throw RequestCanceledException(topic.topic);
+      throw RequestCanceledException(key.address.value);
     }
-    final dto = EventDTO<T>(data,
-        topic: topic, arguments: arguments, correlationId: correlationId);
+    final dto = EventDTO<T>.withKey(key, data,
+        arguments: arguments, correlationId: correlationId);
     return _dispatchRequest(
       dto,
       incoming: false,
       timeout: timeout,
       cancelToken: cancelToken,
-      onAccepted: () => _sendNode<T>(topic),
+      onAccepted: () => _sendNode<T>(key),
     );
   }
 
@@ -942,54 +1237,55 @@ mixin _EventBusHandlersMixin on EventBusMixin {
   }) {
     final observing = _metricsEnabled;
     final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    if (observing) metrics.recordRequestStarted(dto.topic);
+    final topic = Topic.parse(dto.address);
+    if (observing) metrics.recordRequestStarted(topic);
     void finish(RequestOutcome outcome) {
       if (observing) {
-        metrics.recordRequestOutcome(dto.topic, outcome,
+        metrics.recordRequestOutcome(topic, outcome,
             DateTime.now().microsecondsSinceEpoch - started);
       }
     }
 
-    final tier = _resolveTier(dto.topic);
+    final tier = _resolveTier(EventKey<Object?>(dto.address));
     if (tier == null) {
       _addAllEvent(dto, false);
       finish(RequestOutcome.errored);
-      throw NoHandlerException(dto.topic.topic);
+      throw NoHandlerException(dto.address);
     }
 
-    final accepting = tier.subscriptions
-        .where((subscription) => subscription.acceptsData(dto.data))
+    final accepting = tier.candidates
+        .where((candidate) => candidate.subscription.acceptsData(dto.data))
         .toList(growable: false);
     if (accepting.isEmpty) {
       _addAllEvent(dto, false);
       finish(RequestOutcome.errored);
-      throw NoHandlerException(dto.topic.topic);
+      throw NoHandlerException(dto.address);
     }
 
     final candidates = accepting
-        .where((subscription) => subscription.hasRequestCapacity)
+        .where((candidate) => candidate.subscription.hasRequestCapacity)
         .toList(growable: false);
     if (candidates.isEmpty) {
-      final busy = BusyException(dto.topic.topic);
+      final busy = BusyException(dto.address);
       _addAllEvent(dto, false);
       reportError(EventBusError(
         kind: EventBusErrorKind.busy,
-        topic: dto.topic.topic,
+        topic: dto.address,
         error: busy,
       ));
       finish(RequestOutcome.busy);
       throw busy;
     }
 
-    final subscription = _pickHandler(tier.node, candidates);
+    final picked = _pickHandler(tier, candidates);
     onAccepted?.call();
-    final previous = tier.node.currentData;
+    final previous = picked.node.currentData;
     final matched = _dispatchToListeners(dto, incoming: incoming);
     _addAllEvent(dto, matched);
 
     final entry = _RequestEntry(
-      topic: dto.topic.topic,
-      invoke: () => subscription.invokeRequest(dto, previous),
+      topic: dto.address,
+      invoke: () => picked.subscription.invokeRequest(dto, previous),
       onBusError: reportError,
     );
     entry.dto = dto;
@@ -998,8 +1294,8 @@ mixin _EventBusHandlersMixin on EventBusMixin {
       entry.onFinished = finish;
     }
     entry.arm(timeout: timeout, cancelToken: cancelToken);
-    if (!subscription._enqueueRequest(entry)) {
-      entry.fail(BusyException(dto.topic.topic));
+    if (!picked.subscription._enqueueRequest(entry)) {
+      entry.fail(BusyException(dto.address));
     }
     return entry.future;
   }
@@ -1025,12 +1321,19 @@ mixin _EventBusHandlersMixin on EventBusMixin {
   }
 }
 
-class _HandlerTier {
-  _HandlerTier(this.topic, this.node, this.subscriptions);
+class _HandlerCandidate {
+  _HandlerCandidate(this.node, this.subscription);
 
-  final Topic topic;
   final EventNode node;
-  final List<EventSubscription> subscriptions;
+  final EventSubscription subscription;
+}
+
+class _HandlerTier {
+  _HandlerTier(this.route, this.candidates);
+
+  ///The exact [EventAddress] or the [EventPattern] that owns the tier.
+  final Object route;
+  final List<_HandlerCandidate> candidates;
 }
 
 ///A fire or request must address one concrete topic: wildcards are not

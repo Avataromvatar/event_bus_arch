@@ -37,7 +37,8 @@ enum DeliveryMode {
 ///by a later 4.0.0 task; [EventSubscription] is the type that will carry both.
 class EventSubscription<T> {
   EventSubscription._({
-    required this.topic,
+    required this.selector,
+    Topic? topic,
     required this.onEvent,
     required this.handler,
     required this.handlerConcurrency,
@@ -53,7 +54,8 @@ class EventSubscription<T> {
     int? bufferCapacity,
     BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
   })  : _bufferCapacity = bufferCapacity,
-        _bufferOverflow = bufferOverflow {
+        _bufferOverflow = bufferOverflow,
+        _topicOverride = topic {
     if (bufferCapacity != null && bufferCapacity < 0) {
       throw ArgumentError.value(
           bufferCapacity, 'bufferCapacity', 'must be null or >= 0');
@@ -73,8 +75,13 @@ class EventSubscription<T> {
     if (trackMetrics) _queueWait = _LatencyHistogram();
   }
 
-  ///The topic this subscription is attached to.
-  final Topic topic;
+  ///The typed selector this subscription is attached to.
+  final EventSelector<T> selector;
+
+  final Topic? _topicOverride;
+
+  ///A compatibility view of the subscription address as the old `Topic`.
+  Topic get topic => _topicOverride ?? Topic.parse(selector.toString());
 
   ///The listener callback. Null means this subscription is not a listener.
   final EventCallback<T>? onEvent;
@@ -190,14 +197,16 @@ class EventSubscription<T> {
   LatencySnapshot? get queueWaitLatency => _queueWait?.snapshot();
 
   ///Whether [data] is of the handler's type.
-  bool acceptsData(Object? data) => hasHandler && data is T;
+  bool acceptsData(Object? data) => hasHandler && selector.accepts(data);
 
   ///Invokes the handler with a typed DTO and the previous value snapshot.
   Future<dynamic> invokeRequest(EventDTO dto, Object? lastData) {
-    final typed = EventDTO<T>(dto.data as T,
-        topic: dto.topic,
-        arguments: dto.arguments,
-        correlationId: dto.correlationId);
+    final typed = EventDTO<T>.withKey(
+      EventKey<T>(dto.address),
+      dto.data as T,
+      arguments: dto.arguments,
+      correlationId: dto.correlationId,
+    );
     return handler!(typed, lastData as T?);
   }
 

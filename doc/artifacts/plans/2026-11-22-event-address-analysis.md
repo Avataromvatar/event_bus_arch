@@ -142,6 +142,132 @@ The only change that touches code is R1. It is compatible with the current trans
 generic `TransportEventBus` keeps the flexible `Map<String, String>` path, while the NATS/MQTT
 factories add the typed and required layer.
 
+## 6. Address-model variants proposed on 2026-11-22
+
+### V1 — the type token only when `paths` is empty
+
+Rule: `topic = paths.isEmpty ? '$T' : paths.join(separator)`.
+
+```dart
+bus.fire<Order>(order);                          // Order
+bus.fire<Order>(order, paths: ['orders']);       // orders
+bus.fire<Invoice>(invoice, paths: ['orders']);   // orders — same address
+```
+
+**What it appears to buy:** explicit paths become the whole address, so a class rename no longer
+affects events that carry paths.
+
+**Why it does not work as a local model:**
+
+1. It does not remove the type dependency: pathless events still use `$T`, so the wire name is
+   still unstable for them.
+2. It creates collisions by default. Two event types that share a path become one address and
+   one node.
+3. `Topic` has no "no type" representation: the type is the first token and
+   `TopicPattern.matches` compares `pattern.type != topic.type` (`lib/src/topic.dart:151-152`).
+   A path-only address would have to reinterpret the first path token as a type or change the
+   abstraction.
+4. The node model breaks. `_nodeFor<T>` returns a node only when `node is EventNode<T>`;
+   otherwise it creates a new typed node and **overwrites** the map entry
+   (`lib/src/event_bus.dart:499-513`, `703-713`). A second type on the same path silently
+   orphans the first node's listeners; a covariant type such as `num`/`int` can instead reach
+   the wrong `List<EventSubscription<T>>` and throw a runtime type error.
+5. `EventNodeImp.deliver` already rejects data that is not `T` (`lib/src/event_bus.dart:87-96`),
+   so a shared node cannot serve two types even if it were not overwritten.
+6. `haveListener<T>`/`haveHandler<T>` resolve by topic only. With the type out of the address
+   they would report true for a listener/handler of another type.
+7. FSM transitions are keyed by `Topic.create<E>(paths: eventPaths)`
+   (`packages/event_bus_arch_patterns/lib/src/fsm.dart:97`); Scope/Command and observability
+   metric keys (`lib/src/observability.dart:307-308`) also assume the type token.
+8. The transport mapper parses the subject's first token as the type
+   (`packages/event_bus_arch_transport/lib/src/topic_subject_mapper.dart:71-75`); a path-only
+   subject no longer round-trips to the same `Topic`.
+
+**Verdict: reject.** It combines the costs of type-based and path-based addressing without the
+guarantees of either. If the goal is stable wire names, use Alternative A below; if the goal is
+type-free addresses, use V2 or E, both of which accept the node-identity redesign.
+
+### V2 — mandatory `paths`, the type is not part of the address
+
+Rule: `topic = paths.join(separator)`; `fire`/`request`/`listen`/`subscribeEvents` require a
+non-empty path list; `T` is payload typing only.
+
+**What it buys:** a fully stable wire address (the user chooses every token), no type-name
+dependence, and an end to the static-type surprise — a `DomainEvent` and an `OrderPlaced` on the
+same channel route to the same channel, and the subscription decides what payload types it
+accepts.
+
+**What it costs:**
+
+1. **API ergonomics.** `bus.fire<Order>(order)` no longer exists; every call must name a path.
+   A default channel would reintroduce a magic token and is not a real answer.
+2. **Node identity.** One channel can carry several event types. The current node is typed and
+   keyed only by topic. The store must become `(channel, T)`, or the node must become untyped
+   with typed subscriptions. `_nodeFor`/`_sendNode` must never overwrite a node of another type.
+3. **Dispatch.** `EventNodeImp.deliver` already filters `data is T`; with per-type nodes this
+   becomes the correctness rule. `acceptsData` already filters handlers by `data is T`
+   (`lib/src/event_subscription.dart:193`). `haveListener<T>`/`haveHandler<T>` must start
+   filtering by `T` instead of relying on the address.
+4. **`currentData`.** It becomes per type, not per channel.
+5. **Patterns.** They match channels and then filter by payload type.
+6. **Transports.** The subject is the channel; the type cannot be recovered from it. Either a
+   channel is single-type by contract, or the payload carries a discriminator and the
+   deserializer resolves the type. Interest exchange and `fire` acceptance lose type precision
+   unless a type tag travels in the interest snapshot.
+7. **FSM.** Transitions keyed by channel collide for different event types on one channel; they
+   need `(channel, E)` keys or channel-level transitions with an explicit type check.
+8. **Scope/Command.** They work if nodes are per type; verify `currentData` and request dispatch.
+9. **Observability.** The default metric key becomes the channel, not the type.
+10. **Docs, tests, examples.** Almost every address example changes.
+
+**Verdict: coherent, but a different architecture — a channel-first bus.** It is viable only as a
+deliberate ADR-level redesign, not as a tweak to `Topic.create`. Rough effort: 8–12 human-days
+including transports, patterns, docs and tests. The pre-publication window is the only cheap time
+to take it.
+
+### Alternative A (recommended now) — stable wire names, local address unchanged
+
+Typed `wireTypes: Map<Type, String>` plus required coverage in the NATS/MQTT factories, as in
+§4 R1. The local `Topic` stays type+paths, node identity stays safe, node collisions cannot
+happen. It solves the production risk without touching the address model. ~1 day.
+
+### Alternative E — an explicit `EventKey<T>` object
+
+```dart
+final orderPlaced = EventKey<OrderPlaced>('orders.placed');
+
+bus.fire(orderPlaced, event);
+bus.subscribe(orderPlaced, onData: (order) => ...);
+```
+
+A key holds a user-chosen stable address and the type. Local node identity is
+`(address, T)`; the wire address is the key's address. This gives V2's wire stability without
+forcing a path argument on every call, and it keeps type safety at the key definition. Patterns
+use `EventKey.pattern<OrderPlaced>('orders.*')`. It is a new API surface and a larger change than
+A (roughly 3–5 days), but much smaller and safer than rewriting `Topic` in place. If the product
+direction is channel-first, this is the shape to choose.
+
+### Alternative G — paths as the wire address only
+
+Keep the local type+paths identity and let the transport map a topic to a paths-only subject.
+This requires per-type transport subscriptions on one subject and a channel-level deserializer;
+it is more work than A and less clean than E. Not recommended unless E is rejected for other
+reasons.
+
+### Comparison
+
+| Criterion | Current | V1 | V2 | A | E |
+|---|---|---|---|---|---|
+| Wire stability | type name | partial | good | good | good |
+| Local type safety | good | broken on path collisions | requires per-type nodes | good | good |
+| Pathless events | good | type-based | forbidden or magic default | good | good (key) |
+| Static-type surprise | present | partial | gone | present | gone |
+| Implementation risk | — | high and inconsistent | very high | low | medium-high |
+| API churn | — | large | very large | none | large |
+
+**Recommendation:** A now; E if the product wants type-free addresses; reject V1; treat V2 as a
+channel-first redesign with an ADR, not as an address tweak.
+
 ## Evidence index
 
 * `lib/src/topic.dart:33-34` — `Topic.create<T>` builds the token from `'$T'`.
@@ -159,3 +285,10 @@ factories add the typed and required layer.
   `packages/event_bus_arch_mqtt/lib/src/event_bus_arch_mqtt_base.dart:30` — `typeTags` is an
   optional constructor parameter.
 * `lib/src/event_dto.dart:55-65` — the DTO carries no event version.
+* `lib/src/event_bus.dart:87-96` — a node delivers only data that is `T`.
+* `lib/src/event_bus.dart:499-513, 703-713` — a node of another type is replaced, not shared.
+* `lib/src/event_subscription.dart:193` — handlers filter by `data is T`.
+* `lib/src/topic.dart:151-152` — pattern matching compares the type token.
+* `packages/event_bus_arch_transport/lib/src/topic_subject_mapper.dart:71-75` — the wire
+  subject's first token is parsed as the type.
+* `lib/src/observability.dart:307-308` — the default metric key is `topic.type`.

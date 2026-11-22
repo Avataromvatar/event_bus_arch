@@ -146,7 +146,7 @@ class WorkerMetrics {
 ///
 ///[broadcast] fans an event out to every ready worker; every other strategy
 ///selects exactly one. Requests are never broadcast. A request that lost its
-///worker to a crash fails and is not retried (ADR-0003, ADR-0007).
+///worker to a crash fails and is not retried.
 ///
 ///A dead worker is restarted with [SupervisionPolicy]; after
 ///[SupervisionPolicy.maxRestarts] attempts inside the window the pool emits an

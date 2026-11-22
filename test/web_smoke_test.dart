@@ -8,7 +8,7 @@ import 'legacy_compat.dart';
 ///A minimal web-target smoke test: the local bus must work in a browser.
 ///
 ///The isolate API is not available on the web; it throws `UnsupportedError`
-///at construction, which the guard test below checks (ADR-0008).
+///at construction, which the guard test below checks.
 ///The isolate APIs throw before these functions can be used; they only need
 ///the right signature.
 void _silentWorker(EventBus bus, Object? initialData) {}

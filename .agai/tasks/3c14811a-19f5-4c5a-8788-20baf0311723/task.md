@@ -563,5 +563,32 @@ data: A-1
 - core 243, patterns 20, transport 26, NATS 24 (+10 skipped), MQTT 19 (+7 skipped) — зелёные.
 - Код не коммитился.
 
+### Переработка документации
+
+Выполнено:
+
+- Корневой `README.md` сокращён до пользовательского входного документа: что это, пакеты,
+  установка, quick start, core model, ссылки. Из него убраны история версий, внутренние
+  рассуждения, счётчики тестов и миграционные разделы.
+- Новая структура `doc/`: `01-concepts`, `02-event-bus`, `03-subscriptions`,
+  `04-isolates-and-workers`, `05-observability`, `06-api-reference`, `07-platforms` +
+  `doc/README.md` с индексами и маршрутами чтения. В документах сохранены UML-style Mermaid
+  class/sequence/state/flow диаграммы, отражающие текущий API.
+- Удалены старые `doc/00`–`doc/15` (кроме новых файлов), `doc/decisions/**`,
+  `doc/artifacts/plans/**`, `ROADMAP.md`, `RELEASE.md`. Полезные инварианты ADR-0001…0009
+  перенесены в новые документы; альтернативы и история оставлены в git history.
+- Документация patterns и транспортов вынесена в README соответствующих пакетов:
+  `event_bus_arch_patterns` (FSM/Scope/Command, API, диаграмма состояний),
+  `event_bus_arch_transport` (seam, codecs, address mapping, sequence diagram),
+  `event_bus_arch_nats`, `event_bus_arch_mqtt`. В корневом README и `doc/README.md` добавлены
+  ссылки на эти пакеты.
+- `CHANGELOG.md` сокращён до секции 4.0.0.
+- Из комментариев кода убраны ссылки на удалённые ADR; `doc/artifacts/requirements` оставлен как
+  внутренний AGAI-артефакт и не включён в пользовательский индекс.
+- Проверены относительные markdown-ссылки — битых нет.
+
+Прогоны: core 243, patterns 20, transport 26, NATS 24 (+10 skipped), MQTT 19 (+7 skipped);
+`dart analyze` — 17 info, ошибок/предупреждений нет. Код не коммитился.
+
 ## Ссылки
 Вверх: нет (локальная задача). ADR: doc/decisions/0009-event-key-and-address.md

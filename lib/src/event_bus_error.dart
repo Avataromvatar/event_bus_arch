@@ -112,7 +112,7 @@ class EventBusErrorSnapshot {
 ///so several applications in one process do not share state. [filter] runs
 ///before counting; the per-second [maxErrorsPerSecond] limit protects a
 ///dashboard from a storm coming from many buses at once, while each bus keeps
-///its own per-`(kind, topic)` limit (ADR-0004).
+///its own per-`(kind, address)` limit.
 class EventBusErrorMonitor {
   EventBusErrorMonitor({
     this.filter,

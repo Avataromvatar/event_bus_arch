@@ -86,13 +86,28 @@ final bus = TransportEventBus.keys(
 );
 ```
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Caller
+    participant B as TransportEventBus
+    participant N as TransportKeyEventNode
+    participant K as EventCodec
+    participant Conn as TransportConnection
+
+    C->>B: fire(key, data)
+    B->>N: deliver(dto)
+    N->>K: encode(dto)
+    N->>Conn: publish(subject, bytes)
+    N->>N: deliver to local listeners
+```
+
 Only the node whose exact key equals the DTO key publishes; a pattern or supertype node delivers
 locally without a second publication. A node with a decoder is a `KeepAliveNode`, so the core keeps
 it after its last listener unsubscribes.
 
-The explicit eviction `bus.remove(key)` / `remove(patternKey)` bypasses that pin: the node is
-disposed and its broker subscription is cancelled. The next `listen`/`fire` for the key creates a
-new node and subscribes again.
+The explicit eviction `bus.remove(selector)` bypasses that pin: the node is
+disposed and its broker subscription is cancelled. The next `listen`/`fire` for the key creates a new node and subscribes again.
 
 ## Requests
 

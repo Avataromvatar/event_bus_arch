@@ -376,6 +376,77 @@ class WorkerPool {
     }
   }
 
+  ///Sends an event on an exact E key according to [dispatch].
+  bool fireKey<T>(EventKey<T> key, T data,
+      {Map<String, String>? arguments, String? correlationId}) {
+    _checkOpen();
+    final dto = EventDTO<T>.withKey(key, data,
+        arguments: arguments, correlationId: correlationId);
+    _counters.fired++;
+
+    if (dispatch == DispatchStrategy.broadcast) {
+      var accepted = false;
+      var delivered = false;
+      for (final slot in _slots) {
+        final bus = slot.bus;
+        if (!slot.ready || bus == null) continue;
+        delivered = true;
+        accepted = _fireKeyOn<T>(
+                slot, bus, key, data, arguments, correlationId) ||
+            accepted;
+      }
+      if (!delivered) _counters.dropped++;
+      return accepted;
+    }
+
+    final slot = _select(dto);
+    return _fireKeyOnSelected<T>(slot, key, data, arguments, correlationId);
+  }
+
+  ///Sends a request on an exact E key to the selected worker.
+  Future<dynamic> requestKey<T>(EventKey<T> key, T data,
+      {Map<String, String>? arguments,
+      Duration? timeout,
+      CancelToken? cancelToken,
+      String? correlationId}) async {
+    _checkOpen();
+    if (dispatch == DispatchStrategy.broadcast) {
+      throw UnsupportedError(
+          'DispatchStrategy.broadcast cannot route requests: a request needs '
+          'exactly one answering worker');
+    }
+    final dto = EventDTO<T>.withKey(key, data,
+        arguments: arguments, correlationId: correlationId);
+    final slot = _select(dto);
+    if (slot == null || !_available(slot)) {
+      _counters.failedRequests++;
+      throw BusyException(key.address.value,
+          'no ready worker with a free credit for dispatch strategy ${dispatch.name}');
+    }
+    final bus = slot.bus!;
+
+    _counters.requests++;
+    slot.requests++;
+    slot.inFlight++;
+    try {
+      return await bus.requestKey<T>(key, data,
+          arguments: arguments,
+          timeout: timeout,
+          cancelToken: cancelToken,
+          correlationId: correlationId);
+    } on StateError {
+      // the worker died between the readiness check and the send
+      _counters.failedRequests++;
+      throw BusyException(
+          key.address.value, 'worker ${slot.index} is not ready any more');
+    } catch (_) {
+      _counters.failedRequests++;
+      rethrow;
+    } finally {
+      slot.inFlight--;
+    }
+  }
+
   ///Stops the pool: cancels timers and error listeners, disposes every worker
   ///and closes [errors]. Intentionally closed workers are never restarted.
   ///Safe to call twice.
@@ -412,7 +483,7 @@ class WorkerPool {
   }
 
   _WorkerSlot? _keyedSlot(EventDTO dto) {
-    final key = keySelector?.call(dto) ?? dto.topic.topic;
+    final key = keySelector?.call(dto) ?? dto.address;
     final slot = _slots[_positiveHash(key) % _slots.length];
     // Never reroute a key to another worker: that would break per-key order.
     return _available(slot) ? slot : null;
@@ -480,6 +551,40 @@ class WorkerPool {
           separator: separator,
           arguments: arguments,
           correlationId: correlationId);
+      if (accepted) _counters.accepted++;
+      return accepted;
+    } on StateError {
+      // the worker died between the readiness check and the send
+      _counters.dropped++;
+      return false;
+    }
+  }
+
+  bool _fireKeyOnSelected<T>(
+      _WorkerSlot? slot,
+      EventKey<T> key,
+      T data,
+      Map<String, String>? arguments,
+      String? correlationId) {
+    if (slot == null || !_available(slot)) {
+      _counters.dropped++;
+      return false;
+    }
+    return _fireKeyOn<T>(
+        slot, slot.bus!, key, data, arguments, correlationId);
+  }
+
+  bool _fireKeyOn<T>(
+      _WorkerSlot slot,
+      EventBusIsolate bus,
+      EventKey<T> key,
+      T data,
+      Map<String, String>? arguments,
+      String? correlationId) {
+    slot.fired++;
+    try {
+      final accepted = bus.fireKey<T>(key, data,
+          arguments: arguments, correlationId: correlationId);
       if (accepted) _counters.accepted++;
       return accepted;
     } on StateError {

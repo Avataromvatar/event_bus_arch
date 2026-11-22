@@ -1013,6 +1013,20 @@ mixin EventBusMixin implements EventBus {
     return true;
   }
 
+  ///Removes one typed selector without forwarding a delete. Used by the
+  ///isolate link when a typed delete arrives from the other side.
+  bool _removeSelectorLocally(EventSelector selector) {
+    final EventNode? node;
+    if (selector is EventPatternKey) {
+      node = _patternMap[selector.pattern]?[selector.type];
+    } else {
+      final key = selector as EventKey;
+      node = _eventsMap[key.address]?[key.type];
+    }
+    if (node == null) return false;
+    return _detachNode(selector, node);
+  }
+
   /// Removes every type node at a topic without forwarding a delete.
   /// Also used by the isolate link when a delete arrives from the other side.
   bool _removeTopicLocally(Topic topic) {

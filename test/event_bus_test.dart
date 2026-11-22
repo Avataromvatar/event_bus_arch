@@ -276,10 +276,9 @@ void main() {
       expect(called, true);
     });
 
-    test('Should use defaultTopicPathSeparator for calls without one',
+    test('Should use the constructor separator for calls without one',
         () async {
-      final bus = EventBus();
-      (bus as EventBusImpl).defaultTopicPathSeparator = '/';
+      final bus = EventBus(separator: '/');
       var called = false;
 
       bus.subscribeEvents<String>(

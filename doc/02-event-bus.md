@@ -14,9 +14,10 @@ final model = EventBus(isModelBus: true);        // model: remembers currentData
 final observed = EventBus(observability: const ObservabilityConfig(enabled: true));
 ```
 
-`EventBus(...)` returns an `EventBusImpl`. `defaultTopicPathSeparator` is `.` unless changed on the
-instance. Always call `await bus.dispose()` when the bus is no longer needed; it cancels all
-subscriptions and closes every node, stream and resource.
+`EventBus(...)` returns an `EventBusImpl`. `defaultTopicPathSeparator` is `.` unless the bus was
+created with `separator:`; it is fixed for the lifetime of the bus
+(`EventBus(separator: '/')`). Always call `await bus.dispose()` when the bus is no longer needed;
+it cancels all subscriptions and closes every node, stream and resource.
 
 ## Publishing: `fire`
 

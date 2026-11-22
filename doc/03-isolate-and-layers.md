@@ -18,6 +18,7 @@ class EventBusIsolate extends EventBusImpl {
     Object? initialData,
     bool isModelBus = false,
     ObservabilityConfig observability = ObservabilityConfig.disabled,
+    String separator = '.',   // used on both sides of the bridge
   });
 
   Future<bool> get waitInit;   // onInit finished AND interests exchanged

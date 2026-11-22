@@ -264,10 +264,7 @@ class _IsolateLink {
     var port = sendPort;
     if (port == null || _closed) return false;
     port.send(_IsolateInterest(topic,
-        listener: listener,
-        handler: handler,
-        model: model,
-        present: present));
+        listener: listener, handler: handler, model: model, present: present));
     return true;
   }
 
@@ -462,9 +459,10 @@ class EventBusIsolate extends EventBusImpl {
     Object? initialData,
     bool isModelBus = false,
     ObservabilityConfig observability = ObservabilityConfig.disabled,
+    String separator = '.',
   })  : _initialData = initialData,
         _workerIsModelBus = isModelBus,
-        super(isModelBus, observability) {
+        super(isModelBus, observability: observability, separator: separator) {
     _requireIsolates('EventBusIsolate');
     unawaited(_init());
   }
@@ -557,8 +555,7 @@ class EventBusIsolate extends EventBusImpl {
     if (cancelToken?.isCancelled ?? false) {
       if (_metricsEnabled) {
         metrics.recordRequestStarted(topic);
-        metrics.recordRequestOutcome(
-            topic, RequestOutcome.canceled, 0);
+        metrics.recordRequestOutcome(topic, RequestOutcome.canceled, 0);
       }
       throw RequestCanceledException(topic.topic);
     }
@@ -576,8 +573,8 @@ class EventBusIsolate extends EventBusImpl {
     if (observing) metrics.recordRequestStarted(topic);
     void finish(RequestOutcome outcome) {
       if (observing) {
-        metrics.recordRequestOutcome(topic, outcome,
-            DateTime.now().microsecondsSinceEpoch - started);
+        metrics.recordRequestOutcome(
+            topic, outcome, DateTime.now().microsecondsSinceEpoch - started);
       }
     }
 
@@ -588,9 +585,7 @@ class EventBusIsolate extends EventBusImpl {
     try {
       final result = await _link.request(
           EventDTO<T>(data,
-              topic: topic,
-              arguments: arguments,
-              correlationId: correlationId),
+              topic: topic, arguments: arguments, correlationId: correlationId),
           timeout: timeout,
           cancelToken: cancelToken);
       finish(RequestOutcome.completed);
@@ -704,8 +699,13 @@ class EventBusIsolate extends EventBusImpl {
     final receivePort = ReceivePort();
     _receivePort = receivePort;
     try {
-      final isolate = await Isolate.spawn(_worker,
-          [receivePort.sendPort, onInit, _initialData, _workerIsModelBus]);
+      final isolate = await Isolate.spawn(_worker, [
+        receivePort.sendPort,
+        onInit,
+        _initialData,
+        _workerIsModelBus,
+        defaultTopicPathSeparator,
+      ]);
       if (generation != _generation || isDisposed) {
         // superseded by a restart or by dispose
         isolate.kill(priority: Isolate.immediate);
@@ -815,12 +815,14 @@ void _worker(dynamic data) async {
   var onInit = data[1] as FutureOr<void> Function(EventBus, Object?);
   Object? initialData = data[2];
   bool isModelBus = data[3] as bool;
+  String separator = data[4] as String;
   var innerReceivePort = ReceivePort();
   var s = innerReceivePort.asBroadcastStream();
 
   // the bus is created before the handshake: its listener subscribes to the port
   // right away, so no message from main can be lost
-  var eventBus = _EventBusForIsolate(isModelBus, s, sendPort);
+  var eventBus =
+      _EventBusForIsolate(isModelBus, s, sendPort, separator: separator);
   eventBus._startParentWatchdog();
   sendPort.send(innerReceivePort.sendPort);
 
@@ -850,7 +852,8 @@ class _EventBusForIsolate extends EventBusImpl {
   late final _IsolateLink _link = _IsolateLink(this);
   Timer? _watchdog;
 
-  _EventBusForIsolate(super._isModelBus, this._receivePort, this._sendPort) {
+  _EventBusForIsolate(super._isModelBus, this._receivePort, this._sendPort,
+      {super.separator}) {
     _link.sendPort = _sendPort;
     _receivePort.listen(_link.handleMessage);
   }
@@ -934,9 +937,7 @@ class _EventBusForIsolate extends EventBusImpl {
     }
     return _link.request(
         EventDTO<T>(data,
-            topic: topic,
-            arguments: arguments,
-            correlationId: correlationId),
+            topic: topic, arguments: arguments, correlationId: correlationId),
         timeout: timeout,
         cancelToken: cancelToken);
   }

@@ -1,4 +1,8 @@
-part of event_arch;
+import 'dart:async';
+
+import 'package:event_bus_arch/event_bus_arch.dart';
+
+import 'command.dart';
 
 ///EventBus, if is not model bus, delete node what not have handler and listeners
 ///Scope add listener for T event and use Command for call event

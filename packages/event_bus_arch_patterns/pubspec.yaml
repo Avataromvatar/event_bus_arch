@@ -1,0 +1,16 @@
+name: event_bus_arch_patterns
+description: Finite state machine, scope and command patterns for event_bus_arch.
+version: 0.1.0
+repository: https://github.com/Avataromvatar/dart_event_bus
+
+resolution: workspace
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  event_bus_arch: ^4.0.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

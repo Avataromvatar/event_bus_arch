@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:event_bus_arch/event_bus_arch.dart';
+import 'package:event_bus_arch_patterns/event_bus_arch_patterns.dart';
 import 'package:test/test.dart';
 
 enum TestState { a, b, c }
@@ -93,6 +96,33 @@ void main() {
       expect(ignoredCounts, [2]);
       expect(machine.state, TestState.c);
       await bus.dispose();
+    });
+
+    test('a throwing handler does not leave the machine stuck', () async {
+      final errors = <Object>[];
+      late TestMachine machine;
+
+      await runZonedGuarded(() async {
+        final bus = EventBus();
+        machine = TestMachine(bus);
+        // Replace the a -> b handler with one that fails.
+        machine.addFSMTransition<EventA>(TestState.a, TestState.b,
+            handler: (current, last, event, ignored) {
+          throw StateError('handler failed');
+        });
+
+        bus.fire(EventA());
+        await pumpEventQueue();
+        bus.fire(EventB());
+        await pumpEventQueue();
+        await bus.dispose();
+      }, (error, stackTrace) => errors.add(error));
+
+      // The handler threw and the state had already moved to b.
+      expect(errors, isNotEmpty);
+      // A stuck machine would ignore EventB; the fix lets b -> c run.
+      expect(machine.state, TestState.c);
+      expect(machine.log, ['TestState.b->TestState.c']);
     });
   });
 }

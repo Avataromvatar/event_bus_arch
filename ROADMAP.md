@@ -307,17 +307,18 @@ Parallelisable pairs:
 ### M6
 
 * The 4.0 form of the 3.x sample (handlers as subscriptions, a handler error, `Scope` and an
-  isolate) is `example/event_bus_migration_target_example.dart`; it runs on the VM.
+  isolate) is `packages/event_bus_arch_patterns/example/migration_target_example.dart`; it runs on
+  the VM.
 * The migration script is covered by `test/migration_script_test.dart`: it rewrites
   `bus.handlers.setHandler` to `bus.subscribeEvents` and reports removals, cross-bus calls,
   `EventBusHandlers` and rxdart. It is dry-run by default; `--write` applies the rewrite.
 * Docs 00–15 are present; every relative link resolves (checked locally).
-* `CHANGELOG.md` has the 4.0.0 entry; package changelogs cover 0.2.0/1.1.0.
-* Publish dry-runs pass for all four packages; the only warning is "checked-in files modified"
+* `CHANGELOG.md` has the 4.0.0 entry; package changelogs cover 0.1.0/0.2.0/1.1.0.
+* Publish dry-runs pass for all five packages; the only warning is "checked-in files modified"
   because the release state is not committed. **Publishing is manual by the project owner**
   (`RELEASE.md`).
-* Final regression: core 252, Chrome 6, transport 28, NATS 42 (+10 skipped), MQTT 32 (+7 skipped),
-  analyzer 17 infos, examples and benchmark smoke pass.
+* Final regression: core 235, Chrome 6, patterns 20, transport 28, NATS 42 (+10 skipped), MQTT 32
+  (+7 skipped), analyzer without errors/warnings, examples and benchmark smoke pass.
 * The commit and `v4.0.0` tag are left to the owner; no auto-commit is enabled.
 
 ## 8. Risks and mitigations
@@ -386,6 +387,7 @@ the local bus, model retention, `subscribeEvents`, observability and the isolate
 ### Packages
 
 ```bash
+(cd packages/event_bus_arch_patterns && dart test)
 (cd packages/event_bus_arch_transport && dart test)
 (cd packages/event_bus_arch_nats && dart test)
 (cd packages/event_bus_arch_mqtt && dart test)

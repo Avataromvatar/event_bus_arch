@@ -5,6 +5,17 @@ Repository: `event_bus_arch`, branch `version4`, package version 4.0.0
 Source: third-party review, verified against the code (see
 `.agai/agent-work/tasks/76bbb0e5-e2ce-435a-9955-8caae9d943d0-verification.md`)
 
+**Status update (2026-11-22, later):** the project is unpublished, so 3.x compatibility is not a
+constraint. Decisions taken:
+
+* **CHG-11a is decided and implemented:** `defaultTopicPathSeparator` is a final constructor
+  parameter (`separator:`), the mutable field is gone.
+* **REF-01 is decided and implemented:** `FSM`, `Scope` and `Command` moved to the new
+  `event_bus_arch_patterns` package; the core no longer exports them.
+
+Part I remains valid; FIX-03 was applied while the FSM file was moved. The other Part I bugs are
+unchanged, so the remaining estimate is 4.75 human-days.
+
 This document has two parts:
 
 * **Part I** is an implementation plan for the eight confirmed bugs.
@@ -581,23 +592,25 @@ This finding has three independent parts; treat them separately.
 
 ### CHG-11a — `defaultTopicPathSeparator`
 
-**Current contract.** A public mutable field on `EventBusMixin`
+**Original contract.** A public mutable field on `EventBusMixin`
 (`lib/src/event_bus.dart:281`), used as the fallback in every address method. Changing it
-after nodes exist makes calls without an explicit `separator` address different topics. This
-is documented with an example in `doc/06-api-reference.md:391-402`.
+after nodes exist made calls without an explicit `separator` address different topics. This
+was documented with an example in `doc/06-api-reference.md:391-402`.
 
 **Options:**
 
 1. Keep as-is for 4.x; document the pitfall in `doc/07-caveats.md`.
 2. Deprecate the setter in 4.x (`@Deprecated` on the setter) while keeping the field readable.
    Warnings in user code, but no break.
-3. Make it a constructor argument and `final` in 5.0.
+3. Make it a constructor argument and `final` now.
 
-**Recommendation:** 1 now, 3 in 5.0. The field is already documented; a 4.x deprecation
-warning is more noise than value. The 5.0 change needs a migration note and a constructor
-parameter (`EventBus(separator: '/')`) so the common case remains one line.
+**Decision (2026-11-22): option 3, implemented.** The project is unpublished, so the breaking
+change is free. `EventBus`, `EventBusImpl`, `EventBusIsolate` and `WorkerPool` take
+`separator:`; `defaultTopicPathSeparator` is a final field on `EventBusImpl`. `EventBusIsolate`
+forwards the separator to the worker-side bus, so interest keys and topics agree on both sides
+of the bridge. `TransportEventBus` keeps `.` because the wiring grammar requires it.
 
-**Acceptability:** keep now; breaking in 5.0.
+**Acceptability:** done; `doc/02`, `doc/06`, `README.md` and `CHANGELOG.md` updated.
 
 ### CHG-11b — `Topic.paths`
 
@@ -677,15 +690,61 @@ exhaustive switches, and changing `noHandler` to `canceled` changes metrics sema
 
 ---
 
+## REF-01 — Move FSM, Scope and Command to `event_bus_arch_patterns`
+
+**Decision (2026-11-22):** do it now. The core package should stay a routing library; FSM, Scope
+and Command are higher-level patterns and do not belong in it. Since the project is unpublished,
+the breaking move is free.
+
+**What was done:**
+
+* New workspace package `packages/event_bus_arch_patterns`, version `0.1.0`, depending only on
+  `event_bus_arch: ^4.0.0` (no cycle).
+* `fsm.dart`, `scope.dart` and `command.dart` moved from `lib/src/` to the new package, converted
+  from `part of event_arch` to normal libraries with imports of the core public API. They use no
+  core private members, so no core API had to be widened.
+* Core `lib/event_bus_arch.dart` no longer includes the three parts; the core package no longer
+  exports `FSM`, `Scope` or `Command`.
+* Tests moved: `fsm_test.dart`, `command_scope_test.dart`, and the FSM/Scope/Command naming
+  groups from `naming_test.dart`; the core keeps the bus/isolate/layers/logger naming groups.
+* Examples moved: `event_bus_fsm_example.dart` and `event_bus_migration_target_example.dart`.
+  They cannot stay in the core `example/` folder: the core would need a dev-dependency on the
+  patterns package, which would create a cycle.
+* The FSM fix (FIX-03) was applied while moving: `try/finally`, ignored-events cleanup, and the
+  unused `_FSM.bus` field removed.
+* Docs updated: `doc/04-fsm.md` and `doc/05-scope-and-command.md` point at the new package;
+  `doc/06-api-reference.md` has a patterns section; `README.md`, `doc/README.md`,
+  `doc/01`, `doc/02`, `doc/07`, `doc/14`, `doc/15`, `CHANGELOG.md` and `RELEASE.md` updated.
+* New package README, CHANGELOG and LICENSE.
+
+**Verification:**
+
+```
+dart analyze                  # no errors or warnings
+dart test                     # core: 235
+(cd packages/event_bus_arch_patterns && dart test)   # 20
+(cd packages/event_bus_arch_transport && dart test)  # 28
+(cd packages/event_bus_arch_nats && dart test)       # 42 + 10 skipped
+(cd packages/event_bus_arch_mqtt && dart test)       # 32 + 7 skipped
+```
+
+**Package naming.** `event_bus_arch_patterns` was chosen because the package contains three
+patterns, not only FSM; `event_bus_arch_fsm` would misdescribe it. Rename before the first publish
+if a different name is preferred; nothing in the core depends on the name.
+
+**Not moved:** `EventBusLogger` (it is a bus-level tracing helper and uses no pattern types) and
+`Layers` (isolate infrastructure).
+
 ## Decisions needed
 
 | ID | Decision | Recommendation | Impact if changed | Owner |
 |---|---|---|---|---|
 | CHG-02 | Should a transport `fire` deliver locally while offline? | Keep fail-fast; document the caveat; outbox is a separate feature | Breaking semantic; broker-loss signal changes | Product / architecture |
-| CHG-11a | Make the separator immutable? | Keep in 4.x, constructor-final in 5.0 | Source-breaking; migration | Architecture |
+| CHG-11a | Make the separator immutable? | **Decided 2026-11-22: constructor + final (done)** | Implemented; no further migration | Architecture |
 | CHG-11b | Defensive-copy `Topic.paths`? | Yes in 4.x, subject to a benchmark | Compatible hardening; mutation starts throwing | Dev |
-| CHG-11c | Make DTO fields final? | 5.0 | Source-breaking | Architecture |
+| CHG-11c | Make DTO fields final? | 5.0, or now if the breaking change is accepted | Source-breaking | Architecture |
 | CHG-12 | Change the cancel/dispose error type? | Keep in 4.x; `RequestCanceledException` in 5.0 | Breaking for catch blocks and metrics | Architecture / QA |
+| REF-01 | Move FSM/Scope/Command out of the core | **Decided 2026-11-22: done** | Implemented; core no longer exports them | Architecture |
 
 No contract change is required to ship the Part I bug fixes. Part I can proceed while these
 decisions are open.

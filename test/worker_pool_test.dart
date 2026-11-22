@@ -24,6 +24,12 @@ void slowIndexWorker(EventBus bus, Object? initialData) {
   });
 }
 
+///Answers requests on `int/a/b`; used by the custom-separator test.
+void pathWorker(EventBus bus, Object? initialData) {
+  bus.subscribeEvents<int>(
+      paths: ['a', 'b'], handler: (dto, lastData) async => dto.data);
+}
+
 ///Answers String requests with the per-worker index.
 void stringIdentityWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
@@ -98,6 +104,20 @@ void main() {
 
       await pool.close();
     });
+
+    test('a custom separator is used for topics and worker buses', () async {
+      final pool = WorkerPool(
+        onInit: pathWorker,
+        workers: 1,
+        separator: '/',
+        initialDataFor: (index) => index,
+      );
+      await pool.waitInit;
+
+      // The worker registered `int/a/b`; the pool must build the same topic.
+      expect(await pool.request<int>(7, paths: ['a', 'b']), 7);
+      await pool.close();
+    });
   });
 
   group('WorkerPool: strategies', () {
@@ -158,7 +178,8 @@ void main() {
       await pool.waitInit;
 
       final order = <int>[];
-      final first = pool.request<int>(1).then((value) => order.add(value as int));
+      final first =
+          pool.request<int>(1).then((value) => order.add(value as int));
       final second =
           pool.request<int>(2).then((value) => order.add(value as int));
       await Future.wait([first, second]);
@@ -273,8 +294,7 @@ void main() {
       await pool.waitInit;
 
       final failure = pool.errors
-          .firstWhere(
-              (error) => error.kind == EventBusErrorKind.supervision)
+          .firstWhere((error) => error.kind == EventBusErrorKind.supervision)
           .timeout(const Duration(seconds: 2));
       expect(pool.fire<String>('x', paths: ['die']), isTrue);
       final error = await failure;
@@ -288,7 +308,8 @@ void main() {
       await pool.close();
     });
 
-    test('a pool with no ready worker rejects work', () async {      final pool = WorkerPool(
+    test('a pool with no ready worker rejects work', () async {
+      final pool = WorkerPool(
         onInit: dieWorker,
         workers: 1,
         initialDataFor: (index) => index,
@@ -341,8 +362,7 @@ void main() {
       );
       await pool.waitInit;
       final failure = pool.errors
-          .firstWhere(
-              (error) => error.kind == EventBusErrorKind.supervision)
+          .firstWhere((error) => error.kind == EventBusErrorKind.supervision)
           .timeout(const Duration(seconds: 2));
 
       await expectLater(

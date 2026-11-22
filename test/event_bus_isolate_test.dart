@@ -22,8 +22,7 @@ void main() {
       final isolateBus = EventBusIsolate(
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
-          bus.subscribeEvents<String>(
-              handler: (dto, lastData) async {
+          bus.subscribeEvents<String>(handler: (dto, lastData) async {
             return 'Processed: ${dto.data}';
           });
         },
@@ -34,6 +33,23 @@ void main() {
       // Send an event and expect a response
       final result = await isolateBus.request<String>('test message');
       expect(result, 'Processed: test message');
+    });
+
+    test('a custom separator is used on both sides of the bridge', () async {
+      final isolateBus = EventBusIsolate(
+        separator: '/',
+        onInit: (bus, initialData) {
+          bus.subscribeEvents<int>(
+              paths: ['a', 'b'], handler: (dto, lastData) async => dto.data);
+        },
+      );
+
+      await isolateBus.waitInit;
+
+      // The worker registered `int/a/b`; the main side must address the same
+      // topic, otherwise the interest lookup misses and the request fails.
+      expect(await isolateBus.request<int>(7, paths: ['a', 'b']), 7);
+      await isolateBus.dispose();
     });
 
     test('should dispose correctly', () async {
@@ -57,8 +73,7 @@ void main() {
       final isolateBus = EventBusIsolate(
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
-          bus.subscribeEvents<int>(
-              handler: (dto, lastData) async {
+          bus.subscribeEvents<int>(handler: (dto, lastData) async {
             return dto.data * 2;
           });
         },

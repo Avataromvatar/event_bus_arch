@@ -2,6 +2,10 @@
 
 [← 04. FSM](04-fsm.md) · [Contents](README.md) · [Next: API reference →](06-api-reference.md)
 
+> `Scope` and `Command` are part of the separate `event_bus_arch_patterns` package. Add it to your
+> dependencies and import `package:event_bus_arch_patterns/event_bus_arch_patterns.dart`; the core
+> package does not export them.
+
 `Scope<T>` is a value with call history and undo; `Command<T>` is the call log. Both go through the
 bus: a call is a `request` when a handler exists, otherwise a `fire` (a model bus stores it).
 

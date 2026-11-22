@@ -1,4 +1,6 @@
-part of event_arch;
+import 'dart:collection';
+
+import 'package:event_bus_arch/event_bus_arch.dart';
 
 abstract class Command<T> {
   Future<dynamic> execute(T data, {Map<String, String>? arguments});

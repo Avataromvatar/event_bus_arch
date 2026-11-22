@@ -2,6 +2,10 @@
 
 [← 03. Isolates and Layers](03-isolate-and-layers.md) · [Contents](README.md) · [Next: Scope and Command →](05-scope-and-command.md)
 
+> `FSM` is part of the separate `event_bus_arch_patterns` package. Add it to your dependencies and
+> import `package:event_bus_arch_patterns/event_bus_arch_patterns.dart`; the core package does not
+> export it.
+
 `FSM<T>` is a mixin that turns the bus's event stream into transitions between states. The state
 machine does not require anyone to subscribe to an event: it listens to `allEventStream` and reacts
 to events **by topic**, that is, by event type and `paths`. Both `fire` and `request` produce

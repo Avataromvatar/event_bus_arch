@@ -89,8 +89,7 @@ class EventNodeImp<T> implements EventNode<T>, SubscriptionHost<T> {
     currentData = dto.data;
     var accepted = _streamControllerValue.hasListener;
     _streamControllerValue.add(dto.data);
-    for (final subscription
-        in List<EventSubscription<T>>.of(_subscriptions)) {
+    for (final subscription in List<EventSubscription<T>>.of(_subscriptions)) {
       if (subscription.offer(dto.data as T)) accepted = true;
     }
     return accepted;
@@ -118,8 +117,8 @@ class EventNodeImp<T> implements EventNode<T>, SubscriptionHost<T> {
       _subscriptions.any((subscription) => !subscription.isCanceled);
 
   @override
-  bool get hasListenerSubscriptions => _subscriptions
-      .any((subscription) => !subscription.isCanceled && subscription.hasListener);
+  bool get hasListenerSubscriptions => _subscriptions.any(
+      (subscription) => !subscription.isCanceled && subscription.hasListener);
 
   @override
   Future<void> dispose() async {
@@ -128,7 +127,8 @@ class EventNodeImp<T> implements EventNode<T>, SubscriptionHost<T> {
     if (!_streamControllerValue.isClosed) {
       await _streamControllerValue.close();
     }
-    await Future.wait(subscriptions.map((subscription) => subscription._close()));
+    await Future.wait(
+        subscriptions.map((subscription) => subscription._close()));
   }
 }
 
@@ -255,10 +255,18 @@ abstract class EventBus {
 
   /// Factory constructor for EventBus.
   /// Creates an EventBusImpl instance.
+  ///
+  ///[separator] is the fallback separator for every address parameter; it is
+  ///fixed for the lifetime of the bus (see [defaultTopicPathSeparator]).
   factory EventBus(
-      {bool isModelBus = false, ObservabilityConfig? observability}) {
+      {bool isModelBus = false,
+      ObservabilityConfig? observability,
+      String separator = '.'}) {
     return EventBusImpl(
-        isModelBus, observability ?? ObservabilityConfig.disabled);
+      isModelBus,
+      observability: observability ?? ObservabilityConfig.disabled,
+      separator: separator,
+    );
   }
 }
 
@@ -270,16 +278,21 @@ class EventBusImpl with EventBusMixin, _EventBusHandlersMixin {
   @override
   final ObservabilityConfig observabilityConfig;
 
+  ///The fallback separator for every address parameter; fixed at construction.
+  @override
+  final String defaultTopicPathSeparator;
+
   /// Creates an EventBusImpl instance.
   /// If isModelBus is true, the bus behaves as a model bus.
+  /// [separator] is the fallback for calls without an explicit separator.
   EventBusImpl(this._isModelBus,
-      [this.observabilityConfig = ObservabilityConfig.disabled]);
+      {ObservabilityConfig observability = ObservabilityConfig.disabled,
+      String separator = '.'})
+      : observabilityConfig = observability,
+        defaultTopicPathSeparator = separator;
 }
 
 mixin EventBusMixin implements EventBus {
-  @override
-  String defaultTopicPathSeparator = '.';
-
   ///Observability switches of this bus; supplied by the concrete bus.
   ObservabilityConfig get observabilityConfig;
 
@@ -334,8 +347,7 @@ mixin EventBusMixin implements EventBus {
       metrics.recordOverflow(error.topic);
     }
     final key = '${error.kind.name}|${error.topic}';
-    final window =
-        _errorWindows.putIfAbsent(key, () => <DateTime>[]);
+    final window = _errorWindows.putIfAbsent(key, () => <DateTime>[]);
     final now = error.timestamp;
     window.removeWhere(
         (time) => now.difference(time) > const Duration(seconds: 1));
@@ -513,8 +525,7 @@ mixin EventBusMixin implements EventBus {
         _subscriptionRemoved(topic, listener: true, handler: false);
         _removeNode(topic, node);
       },
-      onListen: () =>
-          _subscriptionAdded(topic, listener: true, handler: false),
+      onListen: () => _subscriptionAdded(topic, listener: true, handler: false),
     );
   }
 
@@ -561,8 +572,7 @@ mixin EventBusMixin implements EventBus {
   }) {
     _checkNotDisposed();
     if (onEvent == null && handler == null) {
-      throw ArgumentError(
-          'subscribeEvents needs onEvent, handler, or both');
+      throw ArgumentError('subscribeEvents needs onEvent, handler, or both');
     }
     final topic = Topic.create<T>(
         paths: paths, separator: separator ?? defaultTopicPathSeparator);
@@ -630,8 +640,7 @@ mixin EventBusMixin implements EventBus {
     final matched = _dispatchToListeners(dto);
     // A model bus accepted the value even when nobody is listening. A handler
     // subscription alone does not count for fire (D14).
-    final accepted =
-        matched || (isModelBus && _nodeByTopic(dto.topic) != null);
+    final accepted = matched || (isModelBus && _nodeByTopic(dto.topic) != null);
     _addAllEvent(dto, accepted);
     if (observing) {
       metrics.recordFire(dto.topic,
@@ -827,7 +836,6 @@ mixin EventBusMixin implements EventBus {
 ///A handler is a capability of [EventSubscription]; this mixin only routes a
 ///request to the resolved tier and owns the request lifecycle.
 mixin _EventBusHandlersMixin on EventBusMixin {
-
   @override
   bool haveHandler<T>({List<String>? paths, String? separator}) {
     final topic = Topic.create<T>(
@@ -847,7 +855,8 @@ mixin _EventBusHandlersMixin on EventBusMixin {
     }
     final tier = _resolveTier(topic);
     return tier != null &&
-        tier.subscriptions.any((subscription) => subscription.hasRequestCapacity);
+        tier.subscriptions
+            .any((subscription) => subscription.hasRequestCapacity);
   }
 
   ///The registered topic of the tier that would answer [topic], or null when
@@ -914,9 +923,7 @@ mixin _EventBusHandlersMixin on EventBusMixin {
       throw RequestCanceledException(topic.topic);
     }
     final dto = EventDTO<T>(data,
-        topic: topic,
-        arguments: arguments,
-        correlationId: correlationId);
+        topic: topic, arguments: arguments, correlationId: correlationId);
     return _dispatchRequest(
       dto,
       incoming: false,
@@ -986,8 +993,7 @@ mixin _EventBusHandlersMixin on EventBusMixin {
       onBusError: reportError,
     );
     entry.dto = dto;
-    entry.capturePayloads =
-        isObservable && observabilityConfig.capturePayloads;
+    entry.capturePayloads = isObservable && observabilityConfig.capturePayloads;
     if (isObservable) {
       entry.onFinished = finish;
     }
@@ -1015,10 +1021,8 @@ mixin _EventBusHandlersMixin on EventBusMixin {
       _addAllEvent(dto, matched);
       return null;
     }
-    return _dispatchRequest(dto,
-        incoming: true, cancelToken: cancelToken);
+    return _dispatchRequest(dto, incoming: true, cancelToken: cancelToken);
   }
-
 }
 
 class _HandlerTier {

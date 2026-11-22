@@ -14,8 +14,8 @@ reading paths.
 | 01 | [Architecture](01-architecture.md) | Topic, EventDTO, EventNode, EventSubscription, EventBus, delivery and dispatch |
 | 02 | [EventBus in practice](02-event-bus.md) | Sending and receiving events, handlers, addressing, recipes |
 | 03 | [Isolates and layers](03-isolate-and-layers.md) | `EventBusIsolate`, interest sync, `Layers`, supervision |
-| 04 | [FSM](04-fsm.md) | Finite state machine on top of the bus: transitions, filters, ignoredEvents |
-| 05 | [Scope and Command](05-scope-and-command.md) | State with history, the command pattern, `undo` pitfalls |
+| 04 | [FSM](04-fsm.md) | Finite state machine on top of the bus: transitions, filters, ignoredEvents (`event_bus_arch_patterns`) |
+| 05 | [Scope and Command](05-scope-and-command.md) | State with history, the command pattern, `undo` pitfalls (`event_bus_arch_patterns`) |
 | 06 | [API reference](06-api-reference.md) | Every public type and member with signatures |
 | 07 | [Pitfalls and 3.x history](07-caveats.md) | Known traps, the upgrade notes, what changed in 3.x |
 | 08 | [Transports](08-transports.md) | The transport seam, address model, packaging, platform support |
@@ -76,23 +76,26 @@ What you need to know right away:
    buffered). `fire` does not wait and never invokes a handler; a handler-only node does not make
    `fire` return `true`.
 4. **`Scope.undo()` needs a history of at least two calls** (`maxLenForUndo >= 2`, default 10).
+   `Scope`, `Command` and `FSM` live in `event_bus_arch_patterns`, not in the core package.
 5. **Wildcards are local.** `*` matches one path token, `>` one or more trailing tokens.
    `fire`/`request` calls must be concrete; a pattern handler can answer a concrete request.
 
 ## Package status
 
 * Core version `4.0.0`, SDK `>=3.6.0 <4.0.0`; rxdart is not a dependency.
+* Patterns: `event_bus_arch_patterns` 0.1.0 — `FSM`, `Scope`, `Command`.
 * Adapters: `event_bus_arch_transport` 0.2.0, `event_bus_arch_mqtt` 0.2.0,
   `event_bus_arch_nats` 1.1.0; all depend on core `^4.0.0`.
-* Tests: 252 on the VM and 6 in Chrome (`test/` plus `dart test -p chrome
-  test/web_smoke_test.dart`). Package suites: transport 28, NATS 42 (+10 skipped without a
-  broker), MQTT 32 (+7 skipped without a broker).
+* Tests: 235 in the core on the VM and 6 in Chrome (`test/` plus `dart test -p chrome
+  test/web_smoke_test.dart`). Package suites: patterns 20, transport 28, NATS 42 (+10 skipped
+  without a broker), MQTT 32 (+7 skipped without a broker).
 * Web: the core bus, subscriptions, observability and the transport seam work; isolate APIs throw
   `UnsupportedError` (see [14](14-web.md)).
-* Examples: `example/event_bus_arch_exmple.dart` (isolate), `example/event_bus_fsm_example.dart`
-  (FSM), `example/event_bus_layers_example.dart` (layers),
+* Examples: `example/event_bus_arch_exmple.dart` (isolate),
+  `example/event_bus_layers_example.dart` (layers),
   `example/event_bus_subscription_example.dart` (buffers, handler queue, cancellation, metrics),
   `example/event_bus_pool_example.dart` (WorkerPool),
-  `example/event_bus_migration_target_example.dart` (the 4.0 form of the 3.x sample),
-  `packages/event_bus_arch_nats/example/event_bus_arch_nats_example.dart`,
+  `packages/event_bus_arch_patterns/example/fsm_example.dart` (FSM),
+  `packages/event_bus_arch_patterns/example/migration_target_example.dart`
+  (the 4.0 form of the 3.x sample), `packages/event_bus_arch_nats/example/event_bus_arch_nats_example.dart`,
   `packages/event_bus_arch_mqtt/example/event_bus_arch_mqtt_example.dart`.

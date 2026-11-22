@@ -20,7 +20,8 @@ The isolate APIs are VM-only and fail cleanly.
 | `event_bus_arch_nats` shipped connection | yes (`dart_nats`, TCP) | **no** — TCP-only client |
 | `event_bus_arch_mqtt` shipped connection | yes (VM `MqttServerClient`; `ws://` works) | **no** — use a browser WebSocket connection |
 | `EventBusIsolate`, `Layers`, `WorkerPool` | yes | **no** — `UnsupportedError` |
-| `FSM`, `Scope`, `Command`, `EventBusLogger` | yes | yes |
+| `FSM`, `Scope`, `Command` (`event_bus_arch_patterns`) | yes | yes |
+| `EventBusLogger` | yes | yes |
 
 ```mermaid
 flowchart TD

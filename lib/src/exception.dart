@@ -1,7 +1,7 @@
 part of event_arch;
 
-///The exception type of the package: an invalid topic, an uninitialized
-///Scope/Command, an isolate exchange failure.
+///The exception type of the package: an invalid topic, an invalid request
+///address, or an isolate exchange failure.
 class EventBusException implements Exception {
   final dynamic message;
   EventBusException([this.message]);

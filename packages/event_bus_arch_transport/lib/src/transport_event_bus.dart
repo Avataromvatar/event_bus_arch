@@ -34,7 +34,8 @@ class TransportEventBus extends EventBusImpl {
         _deserializers = Map<String, EventDTODeserialization>.unmodifiable(
             deserializers ?? {}),
         _originId = originId,
-        super(false, observability ?? ObservabilityConfig.disabled) {
+        super(false,
+            observability: observability ?? ObservabilityConfig.disabled) {
     _subjects = subjects;
     for (final key in _serializers.keys) {
       _subjects.validatePublishKey(key);
@@ -159,8 +160,7 @@ class TransportEventBus extends EventBusImpl {
     }
     // Broker-side cancellation is not part of the 4.0.0 transport contract
     // (D15); the caller's timeout bounds the wait.
-    return _requestTransport<T>(
-        topic, data, arguments, timeout, correlationId);
+    return _requestTransport<T>(topic, data, arguments, timeout, correlationId);
   }
 
   Future<dynamic> _requestTransport<T>(

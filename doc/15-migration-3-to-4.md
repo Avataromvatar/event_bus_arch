@@ -23,7 +23,9 @@ part is handled by `tool/migrate_3_to_4.dart` (E6-02).
 | Isolate recovery | none | `EventBusIsolate.restart()`, worker watchdog, `WorkerPool`, `Layers.supervise` |
 | Observability | `allEventStream` + logger | opt-in metrics, snapshots, changes, correlation ids; `allEventStream` stays |
 | rxdart | re-exported | removed; import it yourself if needed |
-| Versions | core 3.x | core 4.0.0; transport/MQTT 0.2.0; NATS 1.1.0 |
+| Topic separator | mutable `defaultTopicPathSeparator` | `separator:` at construction; the getter is final |
+| FSM / Scope / Command | part of the core package | moved to `event_bus_arch_patterns`; import the new package |
+| Versions | core 3.x | core 4.0.0; patterns 0.1.0; transport/MQTT 0.2.0; NATS 1.1.0 |
 
 ```mermaid
 flowchart LR
@@ -176,6 +178,7 @@ independent of metrics.
 | Package | 4.0 line | Constraint |
 |---|---|---|
 | `event_bus_arch` | 4.0.0 | — |
+| `event_bus_arch_patterns` | 0.1.0 | `event_bus_arch: ^4.0.0` |
 | `event_bus_arch_transport` | 0.2.0 | `event_bus_arch: ^4.0.0` |
 | `event_bus_arch_mqtt` | 0.2.0 | `event_bus_arch: ^4.0.0`, `event_bus_arch_transport: ^0.2.0` |
 | `event_bus_arch_nats` | 1.1.0 | `event_bus_arch: ^4.0.0`, `event_bus_arch_transport: ^0.2.0` |

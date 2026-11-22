@@ -1,4 +1,7 @@
 ## 4.0.0
+-  breaking: `defaultTopicPathSeparator` is fixed at construction — pass `separator:` to `EventBus`, `EventBusImpl`, `EventBusIsolate` or `WorkerPool`; the mutable field on `EventBusMixin` is gone, and a bus cannot change its addressing after nodes exist
+-  breaking: `FSM`, `Scope` and `Command` moved to the new `event_bus_arch_patterns` package (0.1.0); the core package no longer exports them, so the bus stays a routing library
+-  fix: an exception thrown by an FSM transition handler no longer leaves the machine stuck — the transition-in-progress flag and the ignored-events list are reset in a `finally`
 -  breaking: the old handler API is removed — `EventBusHandlers`, `setHandler`, `removeHandler`, `addAllHandlerFromOtherBus` and `removeAllHandlerPresentInOtherBus` no longer exist; use `subscribeEvents(handler: ...)` and cancel the returned `EventSubscription`
 -  breaking: `fire` returns `true` only for a listener, a model store, a transport publish or a known remote listener/model interest; a handler-only subscription does not count (D14)
 -  breaking: an isolate bridge is directional — local listeners receive incoming events, `fire` goes out only and never echoes back to its own side
@@ -14,9 +17,9 @@
 -  change: `Scope` uses `bufferCapacity: 1`, `BufferOverflow.latest` and `disposeScope()` no longer takes `removeHandler:`; `FSM` uses `allEventStream`
 -  change: legacy `listen`/`subscribe` remain as a compatibility facade over the raw node stream (no bounded buffer, overflow policy, counters or error routing); they will be removed in 5.0.0 — use `subscribeEvents`
 -  remove: rxdart dependency and re-export; add it to your own dependencies if needed
--  change: package versions — core `4.0.0`; `event_bus_arch_transport` 0.2.0, `event_bus_arch_mqtt` 0.2.0, `event_bus_arch_nats` 1.1.0; a 3.x adapter is not wire-compatible with 4.0
+-  change: package versions — core `4.0.0`; `event_bus_arch_patterns` 0.1.0, `event_bus_arch_transport` 0.2.0, `event_bus_arch_mqtt` 0.2.0, `event_bus_arch_nats` 1.1.0; a 3.x adapter is not wire-compatible with 4.0
 -  docs: new `00` overview, `11` backpressure, `12` errors/observability, `13` pool/supervision, `14` Web, `15` migration; rewritten `01`–`03`, `06`–`10`; Mermaid class/sequence/state/flow diagrams throughout
--  tests: 252 core tests, 6 Chrome smoke tests; transport 28, NATS 42 (+10 skipped without a broker), MQTT 32 (+7 skipped without a broker)
+-  tests: 235 core tests, 20 pattern tests, 6 Chrome smoke tests; transport 28, NATS 42 (+10 skipped without a broker), MQTT 32 (+7 skipped without a broker)
 
 ## 3.1.0
 -  add: `EventBus.removeTopic<T>` — explicit per-topic eviction that works on a model bus and on a transport node (the broker subscription is cancelled); active listeners receive `done`, a registered handler stays

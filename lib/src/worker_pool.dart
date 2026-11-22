@@ -171,14 +171,15 @@ class WorkerPool {
     this.initialDataFor,
     this.isModelBus = false,
     this.keySelector,
+    this.separator = '.',
   }) {
     _requireIsolates('WorkerPool');
     if (workers < 1) {
       throw ArgumentError.value(workers, 'workers', 'must be >= 1');
     }
     if (maxInFlightPerWorker != null && maxInFlightPerWorker! < 1) {
-      throw ArgumentError.value(maxInFlightPerWorker, 'maxInFlightPerWorker',
-          'must be null or >= 1');
+      throw ArgumentError.value(
+          maxInFlightPerWorker, 'maxInFlightPerWorker', 'must be null or >= 1');
     }
     for (var index = 0; index < workers; index++) {
       _slots.add(_WorkerSlot(index));
@@ -217,6 +218,11 @@ class WorkerPool {
 
   ///The key used by [DispatchStrategy.keyed]; null means the topic path.
   final WorkerKeySelector? keySelector;
+
+  ///The fallback separator for calls that do not pass one. Every worker bus is
+  ///created with the same separator, so both sides of the bridge agree on the
+  ///topic strings.
+  final String separator;
 
   final List<_WorkerSlot> _slots = <_WorkerSlot>[];
   final StreamController<EventBusError> _errors =
@@ -294,7 +300,7 @@ class WorkerPool {
       String? correlationId}) {
     _checkOpen();
     final topic =
-        Topic.create<T>(paths: paths, separator: separator ?? '.');
+        Topic.create<T>(paths: paths, separator: separator ?? this.separator);
     final dto = EventDTO<T>(data,
         topic: topic, arguments: arguments, correlationId: correlationId);
     _counters.fired++;
@@ -306,8 +312,8 @@ class WorkerPool {
         final bus = slot.bus;
         if (!slot.ready || bus == null) continue;
         delivered = true;
-        accepted = _fireOn<T>(slot, bus, data, paths, separator, arguments,
-                correlationId) ||
+        accepted = _fireOn<T>(
+                slot, bus, data, paths, separator, arguments, correlationId) ||
             accepted;
       }
       if (!delivered) _counters.dropped++;
@@ -335,7 +341,7 @@ class WorkerPool {
           'exactly one answering worker');
     }
     final topic =
-        Topic.create<T>(paths: paths, separator: separator ?? '.');
+        Topic.create<T>(paths: paths, separator: separator ?? this.separator);
     final dto = EventDTO<T>(data,
         topic: topic, arguments: arguments, correlationId: correlationId);
     final slot = _select(dto);
@@ -444,8 +450,12 @@ class WorkerPool {
 
   int _positiveHash(Object? key) => (key ?? '').hashCode & 0x7fffffff;
 
-  bool _fireOnSelected<T>(_WorkerSlot? slot, T data, List<String>? paths,
-      String? separator, Map<String, String>? arguments,
+  bool _fireOnSelected<T>(
+      _WorkerSlot? slot,
+      T data,
+      List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments,
       String? correlationId) {
     if (slot == null || !_available(slot)) {
       _counters.dropped++;
@@ -455,8 +465,13 @@ class WorkerPool {
         slot, slot.bus!, data, paths, separator, arguments, correlationId);
   }
 
-  bool _fireOn<T>(_WorkerSlot slot, EventBusIsolate bus, T data,
-      List<String>? paths, String? separator, Map<String, String>? arguments,
+  bool _fireOn<T>(
+      _WorkerSlot slot,
+      EventBusIsolate bus,
+      T data,
+      List<String>? paths,
+      String? separator,
+      Map<String, String>? arguments,
       String? correlationId) {
     slot.fired++;
     try {
@@ -511,9 +526,11 @@ class WorkerPool {
       onInit: onInit,
       initialData: data,
       isModelBus: isModelBus,
+      separator: separator,
     );
     slot.bus = bus;
-    slot.errorSub = bus.errors.listen((error) => _onWorkerError(slot, bus, error));
+    slot.errorSub =
+        bus.errors.listen((error) => _onWorkerError(slot, bus, error));
     final ready = await bus.waitInit;
     if (!ready) {
       throw EventBusException('worker ${slot.index} did not become ready');
@@ -521,7 +538,8 @@ class WorkerPool {
     slot.ready = true;
   }
 
-  void _onWorkerError(_WorkerSlot slot, EventBusIsolate bus, EventBusError error) {
+  void _onWorkerError(
+      _WorkerSlot slot, EventBusIsolate bus, EventBusError error) {
     if (!identical(slot.bus, bus)) return;
     if (!_closing && !_errors.isClosed) {
       _errors.add(error);
@@ -604,8 +622,7 @@ class WorkerPool {
         'worker ${slot.index} exhausted ${supervision.maxRestarts} restart(s) '
         'in ${supervision.window}');
     _updateState();
-    _reportSupervision(failure, null,
-        context: {'worker': '${slot.index}'});
+    _reportSupervision(failure, null, context: {'worker': '${slot.index}'});
     _failWaiters(failure);
     unawaited(_disposeWorkers());
   }

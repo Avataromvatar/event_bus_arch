@@ -8,6 +8,7 @@ done by the project owner**, not by an agent or a hook.
 | Package | Version | Depends on |
 |---|---|---|
 | `event_bus_arch` | 4.0.0 | — |
+| `event_bus_arch_patterns` | 0.1.0 | `event_bus_arch: ^4.0.0` |
 | `event_bus_arch_transport` | 0.2.0 | `event_bus_arch: ^4.0.0` |
 | `event_bus_arch_mqtt` | 0.2.0 | `event_bus_arch: ^4.0.0`, `event_bus_arch_transport: ^0.2.0` |
 | `event_bus_arch_nats` | 1.1.0 | `event_bus_arch: ^4.0.0`, `event_bus_arch_transport: ^0.2.0` |
@@ -24,11 +25,12 @@ done by the project owner**, not by an agent or a hook.
 ```bash
 dart pub get
 dart analyze                       # no errors; the known info set only
-dart test                          # core: 252
+dart test                          # core: 235
 dart test -p chrome test/web_smoke_test.dart   # 6
 dart compile js tool/web_compile_check.dart -o build/web_check.js
 rm -rf build
 
+(cd packages/event_bus_arch_patterns && dart test)    # 20
 (cd packages/event_bus_arch_transport && dart test)   # 28
 (cd packages/event_bus_arch_nats && dart test)        # 42 + 10 skipped without a broker
 (cd packages/event_bus_arch_mqtt && dart test)        # 32 + 7 skipped without a broker
@@ -54,9 +56,10 @@ $env:MQTT_URL = 'mqtt://127.0.0.1:1883'
 ```bash
 dart run example/event_bus_subscription_example.dart
 dart run example/event_bus_pool_example.dart
-dart run example/event_bus_migration_target_example.dart
 dart run example/event_bus_layers_example.dart
 dart run example/event_bus_arch_exmple.dart
+(cd packages/event_bus_arch_patterns && dart run example/fsm_example.dart)
+(cd packages/event_bus_arch_patterns && dart run example/migration_target_example.dart)
 ```
 
 ## 3. Package dry-runs (no publish)
@@ -66,6 +69,7 @@ that after reviewing the output.
 
 ```bash
 dart pub publish --dry-run
+(cd packages/event_bus_arch_patterns && dart pub publish --dry-run)
 (cd packages/event_bus_arch_transport && dart pub publish --dry-run)
 (cd packages/event_bus_arch_mqtt && dart pub publish --dry-run)
 (cd packages/event_bus_arch_nats && dart pub publish --dry-run)
@@ -80,9 +84,10 @@ dart pub publish --dry-run
 Order matters because the adapters depend on the core and the transport layer:
 
 1. `event_bus_arch` 4.0.0
-2. `event_bus_arch_transport` 0.2.0
-3. `event_bus_arch_mqtt` 0.2.0
-4. `event_bus_arch_nats` 1.1.0
+2. `event_bus_arch_patterns` 0.1.0
+3. `event_bus_arch_transport` 0.2.0
+4. `event_bus_arch_mqtt` 0.2.0
+5. `event_bus_arch_nats` 1.1.0
 
 ## 5. Tag and close
 

@@ -1,4 +1,6 @@
-part of event_arch;
+import 'dart:async';
+
+import 'package:event_bus_arch/event_bus_arch.dart';
 
 typedef FSMHandler<T, E> = Future<Object?> Function(
     T currentState, T lastState, E event, List<EventDTO> ignoredEvents);
@@ -6,7 +8,6 @@ typedef FSMHandler<T, E> = Future<Object?> Function(
 typedef FSMFilter<T, E> = bool Function(T currentState, T lastState, E event);
 
 class _FSM<T> {
-  EventBus bus = EventBus(isModelBus: false);
   final Map<Topic, Map<T, _FSMNode>> _map = {};
 }
 
@@ -47,7 +48,6 @@ mixin class FSM<T> {
     // a repeated initFSM must not leave a second live subscription
     _fsmSubscription?.cancel();
     _fsmSubscription = null;
-    _fsm.bus = bus;
     _state = currentState;
     _lastState = lastState ?? currentState;
     bool changeStateStart = false;
@@ -62,9 +62,15 @@ mixin class FSM<T> {
           if (node != null && node.check(_state, _lastState, e.$1.data)) {
             changeStateStart = true;
             changeState(node.toState);
-            await node.call(_state, _lastState, e.$1.data, _ignoredDTO);
-            _ignoredDTO.clear();
-            changeStateStart = false;
+            try {
+              await node.call(_state, _lastState, e.$1.data, _ignoredDTO);
+            } finally {
+              // A handler that throws must not leave the machine stuck: the
+              // transition is committed, ignored events are consumed, and the
+              // next event can drive the next transition.
+              _ignoredDTO.clear();
+              changeStateStart = false;
+            }
           }
         }
       } else {

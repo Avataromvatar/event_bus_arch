@@ -26,7 +26,8 @@ parts in the order an event travels through them.
 | Isolate boundaries | `EventBusIsolate`, `Layer`, `Layers`, `LayersSupervisor` | Directional bridges and supervised chains |
 | Workers | `WorkerPool` | N isolates with a dispatch strategy and restart supervision |
 | Transports | `TransportEventBus` | The same bus over a broker connection |
-| On top of the bus | `FSM`, `Scope`, `Command`, `EventBusLogger` | State machine, state with history, logging |
+| On top of the bus | `EventBusLogger` | Event tracing |
+| Patterns (separate package) | `FSM`, `Scope`, `Command` | State machine, state with history (`event_bus_arch_patterns`) |
 
 ## The two ways to publish
 
@@ -225,7 +226,7 @@ See [11](11-backpressure.md) for the full buffer/queue model.
 abstract class EventBus {
   bool get isModelBus;
   bool get isObservable;
-  String get defaultTopicPathSeparator;         // '.' unless changed
+  String get defaultTopicPathSeparator;         // '.'; fixed at construction
   EventBusMetrics get metrics;
   bool get isDisposed;
   Future<void> dispose();
@@ -366,8 +367,8 @@ flowchart TD
 | `Layers` / `LayersSupervisor` | A chain of worker layers; whole-chain restart | [03](03-isolate-and-layers.md), [13](13-pool-and-supervision.md) |
 | `WorkerPool` | N isolates, five dispatch strategies, request credits, supervision | [13](13-pool-and-supervision.md) |
 | `TransportEventBus` | The same bus over a broker connection | [08](08-transports.md) |
-| `FSM` | A state machine driven by events | [04](04-fsm.md) |
-| `Scope`/`Command` | A value with call history and undo | [05](05-scope-and-command.md) |
+| `FSM` | A state machine driven by events (`event_bus_arch_patterns`) | [04](04-fsm.md) |
+| `Scope`/`Command` | A value with call history and undo (`event_bus_arch_patterns`) | [05](05-scope-and-command.md) |
 
 ## What's next
 

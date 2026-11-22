@@ -1,6 +1,7 @@
 // ignore_for_file: avoid_print
 
 import 'package:event_bus_arch/event_bus_arch.dart';
+import 'package:event_bus_arch_patterns/event_bus_arch_patterns.dart';
 
 ///The 4.0 form of the 3.x sample used by the migration guide:
 ///handlers as subscriptions, handler errors, Scope/Command and an isolate.

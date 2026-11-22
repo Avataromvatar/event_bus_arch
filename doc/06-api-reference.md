@@ -2,10 +2,11 @@
 
 [← 05. Scope and Command](05-scope-and-command.md) · [Contents](README.md) · [Next: Pitfalls →](07-caveats.md)
 
-The entire public API lives in a single library — `package:event_bus_arch/event_bus_arch.dart`
-(library name `event_arch`, assembled from `part` files). The package does not re-export `rxdart`;
-add it to your own dependencies if you need its operators. The isolation APIs are VM-only; see
-`EventBusCapabilities` below.
+The core public API lives in `package:event_bus_arch/event_bus_arch.dart` (library name
+`event_arch`, assembled from `part` files). The pattern types — `FSM`, `Scope`, `Command` — live
+in `package:event_bus_arch_patterns/event_bus_arch_patterns.dart` and are described at the end of
+this page. The package does not re-export `rxdart`; add it to your own dependencies if you need
+its operators. The isolation APIs are VM-only; see `EventBusCapabilities` below.
 
 ## Contents
 
@@ -19,8 +20,7 @@ add it to your own dependencies if you need its operators. The isolation APIs ar
 * [EventBusIsolate](#eventbusisolate)
 * [Layer](#layer) / [Layers](#layers) / [LayersSupervisor](#layerssupervisor)
 * [WorkerPool](#workerpool) / [SupervisionPolicy](#supervisionpolicy)
-* [FSM](#fsm)
-* [Scope](#scope) / [Command](#command)
+* [Patterns package](#patterns-fsm-scope-command) — [FSM](#fsm), [Scope](#scope) / [Command](#command)
 * [EventBusLogger](#eventbuslogger)
 * [EventBusCapabilities](#eventbuskapabilities)
 * [Errors](#errors)
@@ -37,10 +37,6 @@ typedef WorkerInit = FutureOr<void> Function(EventBus bus, Object? initialData);
 typedef WorkerKeySelector = Object? Function(EventDTO dto);
 typedef MetricKeyBuilder = String Function(Topic topic);
 typedef EventBusErrorFilter = bool Function(EventBusError error);
-
-typedef FSMHandler<T, E> =
-    Future<Object?> Function(T currentState, T lastState, E event, List<EventDTO> ignoredEvents);
-typedef FSMFilter<T, E> = bool Function(T currentState, T lastState, E event);
 
 typedef fnInitLayer = FutureOr<void> Function(Layer layer, Object? initialData);
 typedef LoggerHandler = void Function(EventDTO dto, bool hasDelivered);
@@ -327,7 +323,8 @@ cancellation wins.
 The abstract bus interface. The factory always returns `EventBusImpl`.
 
 ```dart
-factory EventBus({bool isModelBus = false, ObservabilityConfig? observability});
+factory EventBus({bool isModelBus = false, ObservabilityConfig? observability,
+                  String separator = '.'});
 
 bool get isModelBus;
 bool get isObservable;                         // observabilityConfig.enabled
@@ -388,19 +385,18 @@ transport node with a `KeepAliveNode` pin (the broker subscription is cancelled)
 whether a node was removed. Active listeners receive `done`; handler subscriptions are cancelled
 with the node. A model bus recreates the node on the next `fire`, `request` or `listen`.
 
-Every method that takes an address resolves `separator ?? defaultTopicPathSeparator`, so changing
-the field on an `EventBusImpl` changes the fallback for all of them at once:
+Every method that takes an address resolves `separator ?? defaultTopicPathSeparator`. The fallback
+is fixed when the bus is created:
 
 ```dart
-final bus = EventBusImpl(false);
-bus.defaultTopicPathSeparator = '/';
+final bus = EventBus(separator: '/');
 bus.subscribeEvents<int>(paths: ['a', 'b'], handler: ...);   // int/a/b
 bus.fire<int>(1, paths: ['a', 'b']);                         // int/a/b — delivered
 ```
 
-`defaultTopicPathSeparator` is a **field** on `EventBusMixin`, not a setter on the interface, so a
-variable of type `EventBus` has to be cast (`(bus as EventBusImpl).defaultTopicPathSeparator = '/'`).
-`requestQueueCapacity` is a field on `EventBusMixin` in the same way.
+`defaultTopicPathSeparator` is a **final field** on `EventBusImpl`; it has no setter, so a bus
+cannot change its addressing after nodes exist. `requestQueueCapacity` remains a mutable field on
+`EventBusMixin`.
 
 After `dispose` the `fire`/`request`/`listen`/`subscribe`/`subscribeEvents`/`removeTopic` methods
 throw `StateError`.
@@ -410,21 +406,23 @@ throw `StateError`.
 ```dart
 class EventBusImpl with EventBusMixin, /* internal dispatch mixin */ {
   EventBusImpl(bool isModelBus,
-      [ObservabilityConfig observability = ObservabilityConfig.disabled]);
+      {ObservabilityConfig observability = ObservabilityConfig.disabled,
+      String separator = '.'});
   bool get isModelBus;
   ObservabilityConfig get observabilityConfig;
+  String get defaultTopicPathSeparator;       // final, set by `separator`
 }
 ```
 
-All behavior comes from the mixins; the class's own code only stores the flag. The dispatch mixin
-is private: request resolution, tier selection, round-robin and the request lifecycle.
+All behavior comes from the mixins; the class's own code only stores the model flag, the
+observability config and the final separator. The dispatch mixin is private: request resolution,
+tier selection, round-robin and the request lifecycle.
 
 ## EventBusMixin
 
 `mixin EventBusMixin implements EventBus` — delivery, node lifecycle and the bus flags.
 
 ```dart
-String defaultTopicPathSeparator = '.';         // the address fallback, writable
 int requestQueueCapacity = 64;                  // default for handler subscriptions
 ObservabilityConfig get observabilityConfig;
 bool get isObservable;
@@ -563,6 +561,7 @@ class EventBusIsolate extends EventBusImpl {
     Object? initialData,
     bool isModelBus = false,   // model bus on both the main side and in the worker
     ObservabilityConfig observability = ObservabilityConfig.disabled,
+    String separator = '.',    // used on both sides of the bridge
   });
 
   final FutureOr<void> Function(EventBus isolateBu, Object? initialData) onInit;
@@ -677,6 +676,7 @@ class WorkerPool {
     Object? Function(int index)? initialDataFor,
     bool isModelBus = false,
     WorkerKeySelector? keySelector,
+    String separator = '.',     // fallback for calls and every worker bus
   });
 
   Future<void> get waitInit;
@@ -717,6 +717,26 @@ class SupervisionPolicy {
 in-flight, fired, requests, restarts). `broadcast` requests throw `UnsupportedError`; `keyed`
 never reroutes a key. A dead worker restarts with backoff; pending requests fail and are not
 retried. VM-only; see [13](13-pool-and-supervision.md).
+
+## Patterns: FSM, Scope, Command
+
+These three types are **not** part of `event_bus_arch`; they live in
+`event_bus_arch_patterns`, so the core stays a routing library:
+
+```yaml
+dependencies:
+  event_bus_arch_patterns: ^0.1.0
+```
+
+```dart
+import 'package:event_bus_arch_patterns/event_bus_arch_patterns.dart';
+```
+
+```dart
+typedef FSMHandler<T, E> =
+    Future<Object?> Function(T currentState, T lastState, E event, List<EventDTO> ignoredEvents);
+typedef FSMFilter<T, E> = bool Function(T currentState, T lastState, E event);
+```
 
 ## FSM
 
@@ -852,12 +872,15 @@ is unavailable — that is a usage error, not a domain error.
 
 ## What is not exported
 
-* Internal types: `_FSM`, `_FSMNode`, `_EventBusForIsolate`, `_IsolateLink`, `_IsolateRequest`,
+* Internal core types: `_EventBusForIsolate`, `_IsolateLink`, `_IsolateRequest`,
   `_IsolateResponse`, `_IsolateInterest`, `_IsolateCancel`, `_IsolateFailure`, `_LayerInitDto`,
   `_MetricEntry`, `_RequestEntry`, `_RequestOutcome` and the other protocol/service messages.
+  The patterns package has its own internal `_FSM`/`_FSMNode`; they are not exported there either.
 * The 3.x handler API is gone: `EventBusHandlers`, `setHandler`, `removeHandler`,
   `addAllHandlerFromOtherBus`, `removeAllHandlerPresentInOtherBus` do not exist. Use
   `subscribeEvents(handler:)`.
+* Pattern types are a separate package: `FSM`, `Scope`, `Command` live in
+  `packages/event_bus_arch_patterns`, not in the core library.
 * Transport packages are separate: `packages/event_bus_arch_transport`, `packages/event_bus_arch_nats`,
   `packages/event_bus_arch_mqtt`.
 

@@ -1,0 +1,72 @@
+import 'package:event_bus_arch/event_bus_arch.dart';
+import 'package:event_bus_arch_patterns/event_bus_arch_patterns.dart';
+import 'package:test/test.dart';
+
+///The names of public parameters are part of the API. This file calls the
+///members with named arguments on purpose: renaming one breaks the build here
+///instead of surprising a caller later.
+
+enum NameState { a, b }
+
+class NameEvent {}
+
+void main() {
+  group('Parameter names: Command and Scope', () {
+    test('Command takes paths and maxLen, execute takes arguments', () async {
+      final bus = EventBus(isModelBus: true);
+      final command = Command<int>(bus, paths: ['counter'], maxLen: 3);
+
+      await command.execute(1, arguments: {'a': '1'});
+
+      expect(command.paths, ['counter']);
+      expect(command.queueLength, 1);
+      await bus.dispose();
+    });
+
+    test(
+        'initScope takes initialData, initialDataNeedExecute, paths, maxLenForUndo and onUpdate',
+        () async {
+      final bus = EventBus(isModelBus: true);
+      final scope = Scope<int>();
+
+      await scope.initScope(bus,
+          initialData: 7,
+          initialDataNeedExecute: false,
+          paths: ['counter'],
+          maxLenForUndo: 4,
+          onUpdate: (_) {});
+
+      expect(scope.lastData, 7);
+      scope.disposeScope();
+      await bus.dispose();
+    });
+  });
+
+  group('Parameter names: FSM', () {
+    test('addFSMTransition takes eventPaths, handler and filter', () async {
+      final bus = EventBus();
+      final machine = _NameMachine(bus);
+
+      // the transition is registered for NameEvent.go: another path is another topic
+      bus.fire<NameEvent>(NameEvent(), paths: ['other']);
+      await pumpEventQueue();
+      expect(machine.state, NameState.a);
+
+      bus.fire<NameEvent>(NameEvent(), paths: ['go']);
+      await pumpEventQueue();
+
+      expect(machine.state, NameState.b);
+      await bus.dispose();
+    });
+  });
+}
+
+class _NameMachine with FSM<NameState> {
+  _NameMachine(EventBus bus) {
+    initFSM(bus, NameState.a, lastState: null);
+    addFSMTransition<NameEvent>(NameState.a, NameState.b,
+        eventPaths: ['go'],
+        filter: (current, last, event) => true,
+        handler: (current, last, event, ignored) async => null);
+  }
+}

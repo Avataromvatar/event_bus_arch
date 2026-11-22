@@ -4,8 +4,10 @@
 each other through events addressed by a **topic** — a type plus a path — so they stay decoupled
 and can be moved between isolates without changing their logic.
 
-On top of the bus the package ships a finite state machine, an isolate bridge, multi-isolate
-"layers", and a scope/command wrapper for stateful values.
+The core package ships an isolate bridge, multi-isolate "layers", a worker pool and
+observability. Higher-level patterns — the finite state machine, `Scope` and `Command` — live in
+the separate [`event_bus_arch_patterns`](packages/event_bus_arch_patterns) package, so the bus
+itself stays a routing library.
 
 * Detailed documentation: **[doc/](doc/README.md)**
 * Full API reference: [doc/06-api-reference.md](doc/06-api-reference.md)
@@ -29,8 +31,8 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
   request credits and restart supervision; `Layers.supervise` restarts a whole worker chain
 - Observability — opt-in per-topic/subscription metrics, snapshots and a changes stream,
   correlation ids across isolates and transports, and an error monitor
-- `FSM` — finite state machine driven by bus events
-- `Scope` / `Command` — stateful value with call history
+- `event_bus_arch_patterns` — `FSM` driven by bus events, and `Scope` / `Command` for a stateful
+  value with call history
 - `EventBusLogger` — trace every event that crosses the bus
 - Type-safe handlers, no code generation
 
@@ -38,7 +40,8 @@ On top of the bus the package ships a finite state machine, an isolate bridge, m
 
 ```yaml
 dependencies:
-  event_bus_arch: ^3.0.2
+  event_bus_arch: ^4.0.0
+  event_bus_arch_patterns: ^0.1.0   # only if you use FSM, Scope or Command
 ```
 
 ```bash
@@ -47,6 +50,16 @@ dart pub get      # or: flutter pub get
 
 Dart SDK `>=3.6.0 <4.0.0`. The package no longer re-exports `rxdart`; add it to your own
 dependencies if you need `BehaviorSubject`, `debounceTime` and the rest.
+
+## Packages
+
+| Package | What it contains |
+|---|---|
+| `event_bus_arch` | `EventBus`, nodes, subscriptions, `EventBusIsolate`, `Layers`, `WorkerPool`, observability, logger |
+| `event_bus_arch_patterns` | `FSM`, `Scope`, `Command` |
+| `event_bus_arch_transport` | The broker-agnostic transport seam, mapper, bus and node |
+| `event_bus_arch_nats` | The NATS adapter |
+| `event_bus_arch_mqtt` | The MQTT 5 adapter |
 
 ## Quick start
 
@@ -140,7 +153,7 @@ A path token must not contain the separator (`.` by default): `paths: ['a.b']` a
 or change the fallback for a whole bus:
 
 ```dart
-final bus = EventBusImpl(false)..defaultTopicPathSeparator = '/';
+final bus = EventBus(separator: '/');
 ```
 
 ### Wildcards
@@ -344,6 +357,12 @@ print(snapshot.topics.first.fired);       // 1
 
 ### Finite state machine
 
+`FSM` is part of `event_bus_arch_patterns`:
+
+```dart
+import 'package:event_bus_arch_patterns/event_bus_arch_patterns.dart';
+```
+
 ```dart
 enum State { idle, loading, ready }
 
@@ -367,6 +386,8 @@ Events arriving while a transition handler is running are collected into the `ig
 argument and are not replayed afterwards. `FSM.dispose()` unsubscribes the machine from the bus.
 
 ### Scope and Command
+
+`Scope` and `Command` are part of `event_bus_arch_patterns` (the same import as above).
 
 ```dart
 final scope = Scope<int>();

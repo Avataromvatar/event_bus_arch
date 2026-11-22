@@ -150,7 +150,8 @@ The one method the bus used (`doOnCancel`) is replaced by native subscription ma
 
 ## 15. Scope is a latest-value consumer
 
-`Scope.initScope` subscribes with `bufferCapacity: 1`, `BufferOverflow.latest`. If `onUpdate` is
+`Scope` lives in `event_bus_arch_patterns`. `Scope.initScope` subscribes with
+`bufferCapacity: 1`, `BufferOverflow.latest`. If `onUpdate` is
 slow, intermediate values are dropped by design. `undo()` needs at least two calls in the history
 (`maxLenForUndo >= 2`). `disposeScope()` cancels only the scope's own subscription; there is no
 `removeHandler:` parameter in 4.0.

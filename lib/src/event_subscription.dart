@@ -38,8 +38,8 @@ enum DeliveryMode {
 ///error routing. The node only fans events out to [offer]; it never inspects or
 ///drops them itself.
 ///
-///A subscription with [onEvent] is a listener. The handler capability is added
-///by a later 4.0.0 task; [EventSubscription] is the type that will carry both.
+///A subscription with [onEvent] is a listener; adding [handler] makes it a
+///request responder as well. [EventSubscription] carries both capabilities.
 class EventSubscription<T> {
   EventSubscription._({
     required this.selector,

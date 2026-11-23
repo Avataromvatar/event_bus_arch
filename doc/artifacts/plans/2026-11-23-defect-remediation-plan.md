@@ -381,7 +381,7 @@ temporary false-positive routing.
 - Public docs reflect: deprecated exact `have*`, `probeFire`/`probeRequest`, default buffer 1024,
   `latest` semantics, `CancelToken` cancellation, transport local-first fire, keyed node cleanup,
   and request fallback behavior.
-- `CHANGELOG.md` has one 4.0.0 entry describing the behavior changes.
+- `CHANGELOG.md` has a 4.1.0 entry describing the behavior changes.
 - No commit is made until requested.
 
 ## 6. Out of scope

@@ -155,8 +155,8 @@ class WorkerMetrics {
 ///
 ///Backpressure is a per-worker request credit ([maxInFlightPerWorker]): a
 ///saturated worker is skipped by the selector. When no worker has a free
-///credit, `fire` returns false and `request` throws [BusyException]. 4.0.0 has
-///no pool-level dispatch queue: callers fail fast instead of waiting.
+///credit, `fire` returns false and `request` throws [BusyException]. The pool
+///has no dispatch queue: callers fail fast instead of waiting.
 ///
 ///A pool is not an [EventBus]: `broadcast` has no request semantics, and model
 ///state is per worker, not aggregated.

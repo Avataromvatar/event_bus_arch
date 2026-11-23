@@ -11,9 +11,15 @@
    `EventSelector`, `EventKey`, `EventPatternKey` already cross isolate boundaries in
    `_IsolateDeleteSelector`; sending the selector avoids closure/AOT uncertainty and gives
    `accepts(data)` plus pattern matching without extra protocol fields.
-2. **`haveListener`/`haveHandler` are exact-type queries.** Add data-aware
-   `haveListenerFor(selector, data)` and `haveHandlerFor(selector, data)` for supertype checks.
-   A no-data query cannot test subtype compatibility in Dart.
+2. **Probe with data; `have*` is deprecated.** `probeFire(key, data)` and
+   `probeRequest(key, data)` take the data that would be sent and return local/remote statistics
+   without side effects. `haveListener`, `haveHandler` and `haveAvailableHandler` remain
+   temporarily as exact-type, no-data queries but are marked `@Deprecated`; they are removed in
+   5.0. A no-data query cannot test subtype compatibility in Dart.
+   - `probeFire`: `localListeners`, `hasRawListener`, `modelStores`, `transportPublishes`,
+     `remoteListenerInterest`.
+   - `probeRequest`: `localHandlers`, `localAvailableHandlers`, `localListeners`,
+     `hasRawListener`, `remoteHandlerInterest`.
 3. **Requests try the local bus first and fall back on `NoHandlerException`.** Do not route on
    `haveHandler`; a local handler with an unrelated type must not block a broker/worker request,
    and a supertype local handler must still win.
@@ -58,8 +64,8 @@
 
 | ID | Problem | Fix | Main files | Priority |
 |---|---|---|---|---|
-| TYPE-01 | `haveHandler`/`haveAvailableHandler` return true for a different type on the same address | Exact typed tier for `have*`; add `haveHandlerFor(selector, data)` for data-aware checks | `event_bus.dart` | P0 |
-| TYPE-02 | `haveListener` misses a supertype pattern listener | Keep `haveListener` exact; add `haveListenerFor(selector, data)` using `EventNode.accepts(data)` | `event_bus.dart`, `event_node` | P0 |
+| TYPE-01 | `haveHandler`/`haveAvailableHandler` return true for a different type on the same address | Exact typed tier for `have*`; add `probeRequest(key, data)` for data-aware counts and capacity; deprecate `have*` | `event_bus.dart` | P0 |
+| TYPE-02 | `haveListener` misses a supertype pattern listener | Keep `haveListener` exact; add `probeFire(key, data)` using `EventNode.accepts(data)`; deprecate `haveListener` | `event_bus.dart`, `event_node` | P0 |
 | TYPE-03 | Isolate interest is keyed by address only; a worker listening to `Invoice` acknowledges `fire<Order>` | Carry `EventSelector` in `_IsolateInterest`; store selectors in `_RemoteInterest`; check `accepts(data)`; include model interest | `event_bus_isolate.dart`, `event_bus.dart` | P0 |
 | TYPE-04 | A local handler of a foreign type makes `haveHandler` true; request stays local and fails instead of going to broker/worker | Try local request first; fall back only on `NoHandlerException`; apply to transport, isolate main/worker and `Command` | `transport_event_bus.dart`, `event_bus_isolate.dart`, `command.dart` | P0 |
 | TYPE-05 | Inbound request routing uses address only; a foreign-type handler can be selected and then fail internally, producing a timeout | `handlerAddressFor(address, data)` filters candidates by `acceptsData(data)`; only a matching handler node answers | `event_bus.dart`, `transport_event_bus.dart` | P0 |
@@ -68,7 +74,7 @@
 
 ## 2. Detailed work packages
 
-### WP-1 — Typed local queries (`TYPE-01`, `TYPE-02`, `TYPE-05`)
+### WP-1 — Probes and deprecated `have*` (`TYPE-01`, `TYPE-02`, `TYPE-05`)
 
 **Core changes**
 
@@ -78,33 +84,60 @@
   - exact selector: candidates from `_eventsMap[address][selector.type]`;
   - pattern selector: candidates from `_patternMap[pattern][selector.type]`;
   - no fallback to another type.
-- `haveHandler` and `haveAvailableHandler` use `_resolveTypedTier`.
-- `haveListener(selector)` uses the exact typed node and, for a concrete key, matching pattern
-  buckets with the same `key.type`.
+- `haveHandler` and `haveAvailableHandler` use `_resolveTypedTier`; `haveListener` uses the exact
+  typed node and, for a concrete key, matching pattern buckets with the same `key.type`.
 - Add:
   ```dart
-  bool haveListenerFor<T>(EventSelector<T> selector, T data);
-  bool haveHandlerFor<T>(EventSelector<T> selector, T data);
+  FireProbe probeFire<T>(EventKey<T> key, T data);
+  RequestProbe probeRequest<T>(EventKey<T> key, T data);
   ```
-  They iterate candidate nodes and check `node.accepts(data)` plus listener/handler capacity.
+  - Both are pure snapshots: no node creation, no listener/handler invocation, no
+    `allEventStream`, no metric counters.
+  - `probeFire` counts managed listener subscriptions that accept `data`, plus
+    `hasRawListener`, `modelStores`, `transportPublishes`, `remoteListenerInterest`.
+  - `probeRequest` resolves the exact → most-specific-pattern tier, filters candidates by
+    `acceptsData(data)`, and reports `localHandlers`, `localAvailableHandlers`, `localListeners`,
+    `hasRawListener`, `remoteHandlerInterest`.
+  - `fire` and `request` keep their current semantics; probes are pre-flight snapshots, not
+    delivery guarantees.
+- Deprecate `haveListener`, `haveHandler`, `haveAvailableHandler`:
+  ```dart
+  @Deprecated('Use probeFire/probeRequest; have* checks only exact registered types')
+  ```
+  - Do not add the annotation until the probes exist and internal call sites are migrated
+    (`Command`, transport request, isolate request).
+  - Keep the methods working with exact-type semantics through 4.x; remove them in 5.0.
 - `handlerAddressFor(String address, Object? data)` filters candidates by
   `subscription.acceptsData(data)`; no accepting candidate returns `null`.
 
 **Tests**
 
+- `test/probe_test.dart`
+  - Pattern `EventPatternKey<DomainEvent>('orders.*')` listener + `Order` data:
+    `probeFire(orderKey, Order(...)).localListeners == 1`, `accepted == true`.
+  - `Invoice` handler on `orders` does not count for `Order` data.
+  - Model bus: `modelStores == true` even with no listener.
+  - Raw `listen(...).listen(...)`: `hasRawListener == true`; managed count is separate.
+  - Probe does not create a node, does not change `metrics.snapshot().fired`, does not write to
+    `allEventStream`.
+  - Two exact types on one address remain separate nodes (regression guard for `(address, Type)`).
+- `test/probe_request_test.dart`
+  - Exact `Order` handler: `probeRequest(orderKey, Order(...)).localHandlers == 1` and
+    `localAvailableHandlers == 1`.
+  - Only `Invoice` handler: `probeRequest(orderKey, Order(...)).localHandlers == 0`.
+  - Busy handler: `localHandlers == 1`, `localAvailableHandlers == 0`, `isBusy == true`.
+  - Pattern `DomainEvent` handler accepts `Order` and is reported when no exact handler exists.
+  - Exact tier wins over pattern; pattern is not counted for availability when exact is busy.
 - `test/type_queries_test.dart`
-  - `haveHandler<Invoice>(orders)` is false when only an `Order` handler exists.
-  - `haveAvailableHandler<Invoice>(orders)` is false in the same setup.
-  - `haveHandlerFor(invoiceKey, Invoice(...))` false; `haveHandlerFor(orderKey, Order(...))` true.
-  - Pattern `EventPatternKey<DomainEvent>('orders.*')` listener:
-    `haveListener(orderKey)` false (exact semantics),
-    `haveListenerFor(orderKey, Order(...))` true.
-  - Raw `listen` listener on a supertype pattern: `haveListenerFor` true.
-  - Two exact types on one address remain separate nodes (regression guard for the retained
-    `(address, Type)` model).
+  - With `// ignore: deprecated_member_use`, `haveHandler<Invoice>(orders)` and
+    `haveAvailableHandler<Invoice>(orders)` are false when only an `Order` handler exists.
+  - `haveListener(orderKey)` remains exact-type false for a supertype pattern; `probeFire` is the
+    accurate data-aware check.
 - `packages/event_bus_arch_transport/test/type_routing_test.dart`
   - Inbound request with `Invoice` does not select an `Order` handler; no response/wrong answer.
   - Inbound request with a handler of the matching type answers once.
+  - `probeFire` reports `transportPublishes` when a codec exists; no broker subscriber count is
+    implied.
 
 ### WP-2 — Type-aware isolate interest (`TYPE-03`)
 
@@ -308,8 +341,8 @@ class _IsolateInterest {
 | DEF-10 | `event_subscription_overflow_test.dart`: queued cancel exception |
 | DEF-11 | `transport_reliability_test.dart`: node cleanup |
 | DEF-12 | `transport_reliability_test.dart`: invalid replyTo |
-| TYPE-01 | `type_queries_test.dart`: exact `haveHandler` |
-| TYPE-02 | `type_queries_test.dart`: `haveListenerFor` |
+| TYPE-01 | `probe_request_test.dart`: exact/wrong-type handler counts; `type_queries_test.dart`: deprecated `have*` exact semantics |
+| TYPE-02 | `probe_test.dart`: supertype pattern and raw listener; `type_queries_test.dart`: deprecated `haveListener` exact semantics |
 | TYPE-03 | `isolate_type_interest_test.dart`: Invoice/Order/domain pattern/model |
 | TYPE-04 | `isolate_type_interest_test.dart`, `type_routing_test.dart`, `command_scope_test.dart` |
 | TYPE-05 | `type_routing_test.dart`: inbound wrong-type handler |
@@ -322,8 +355,8 @@ cannot fail deterministically (isolate spawn race), use a controlled worker that
 
 ## 4. Execution order
 
-1. **WP-1** typed queries (`EventNode.accepts`, exact `have*`, `haveListenerFor`,
-   `haveHandlerFor`, `handlerAddressFor(address,data)`).
+1. **WP-1** probes (`EventNode.accepts`, `probeFire`/`probeRequest`, exact `have*` plus
+   `@Deprecated`, `handlerAddressFor(address, data)`).
 2. **WP-2** selector-based isolate interest and interest snapshot.
 3. **WP-3** request routing in transport, isolates and `Command`.
 4. **WP-4** worker/isolate reliability.
@@ -345,7 +378,7 @@ temporary false-positive routing.
 - Core, patterns, transport, NATS and MQTT suites are green; broker-backed tests remain skipped
   without `NATS_URL`/`MQTT_URL`.
 - `dart compile js -O2` obfuscation check still resolves an `EventKey` codec and publishes once.
-- Public docs reflect: exact `have*`, `haveListenerFor`/`haveHandlerFor`, default buffer 1024,
+- Public docs reflect: deprecated exact `have*`, `probeFire`/`probeRequest`, default buffer 1024,
   `latest` semantics, `CancelToken` cancellation, transport local-first fire, keyed node cleanup,
   and request fallback behavior.
 - `CHANGELOG.md` has one 4.0.0 entry describing the behavior changes.

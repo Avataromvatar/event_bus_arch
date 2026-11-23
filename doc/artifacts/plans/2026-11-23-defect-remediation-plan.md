@@ -3,7 +3,7 @@
 - Date: 2026-11-23
 - Scope: core `event_bus_arch`, `event_bus_arch_transport`
 - Source: third-party review (12 existing defects) and the type-filter review (5 new defects)
-- Status: planned
+- Status: implemented (2026-11-23)
 
 ## Decisions
 
@@ -392,3 +392,18 @@ temporary false-positive routing.
   completes or times out).
 - Durable transport semantics, queue groups or JetStream.
 - Removing the test-only `legacy_compat.dart` facade.
+
+## 7. Implementation status
+
+All work packages are implemented. Verification:
+
+- `dart analyze`: no errors or warnings in core, patterns, transport, NATS and MQTT.
+- Tests: core 280, patterns 21, transport 36, NATS 24 (+10 skipped without `NATS_URL`),
+  MQTT 19 (+7 skipped without `MQTT_URL`).
+- `dart compile js -O2` obfuscation check: `type=minified:bS`, `accepted=true publishes=1`.
+- Docs updated: probes and deprecated `have*`, buffer 1024/`latest`, `RequestCanceledException`
+  for queued cancellation, `initTimeout`, bounded error windows, transport local-first fire,
+  keyed node cleanup, `replyTo` validation and request cancellation.
+- Deviations: the `KeepAliveNode` interface remains as a core extension point, but no built-in
+  node implements it; transport cleanup is opt-in via the `shouldRemoveSendNode` hook, which keeps
+  the `shouldCreateNodeOnSend` contract for custom buses.

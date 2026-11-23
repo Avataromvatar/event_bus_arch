@@ -62,7 +62,7 @@ anyOrder.matches(placed.address); // true
 ```
 
 `EventSelector<T>` is the sealed base of `EventKey<T>` and `EventPatternKey<T>`. Methods that can
-accept a pattern (`listen`, `subscribe`, `currentData`, `haveListener`, ...) take an
+accept a pattern (`listen`, `subscribe`, `currentData`, `probeFire`, `probeRequest`, ...) take an
 `EventSelector<T>`; `fire` and `request` take an `EventKey<T>`.
 
 ### The type is local

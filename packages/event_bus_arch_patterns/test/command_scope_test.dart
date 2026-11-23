@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_patterns/event_bus_arch_patterns.dart';
 import 'package:test/test.dart';
@@ -71,6 +72,20 @@ void main() {
 
       expect(command.lastCall?.$1, 1);
       expect(command.lastCall?.$2, {'multiplier': '10'});
+      await bus.dispose();
+    });
+
+    test('a handler of another type does not take the request path', () async {
+      final bus = EventBus(isModelBus: true);
+      final key = EventKey<int>('counter');
+      final foreign = bus.subscribe(EventKey<String>('counter'),
+          handler: (dto, last) async => 'foreign');
+      final command = Command<int>(bus, key, maxLen: 5);
+
+      expect(await command.execute(7), isNull);
+      expect(bus.currentData(key), 7);
+
+      await foreign.cancel();
       await bus.dispose();
     });
 
@@ -154,8 +169,8 @@ void main() {
       final scope = Scope<int>();
       final keyA = EventKey<int>('a');
       final keyB = EventKey<int>('b');
-      final handler = bus.subscribe<int>(keyA,
-          handler: (dto, lastData) async {});
+      final handler =
+          bus.subscribe<int>(keyA, handler: (dto, lastData) async {});
       await scope.initScope(bus, keyA, maxLenForUndo: 10);
 
       await scope.initScope(bus, keyB, maxLenForUndo: 10);
@@ -174,8 +189,8 @@ void main() {
       final bus = EventBus(isModelBus: true);
       final scope = Scope<int>();
       final key = EventKey<int>('a');
-      final handler = bus.subscribe<int>(key,
-          handler: (dto, lastData) async {});
+      final handler =
+          bus.subscribe<int>(key, handler: (dto, lastData) async {});
       await scope.initScope(bus, key, maxLenForUndo: 10);
 
       scope.disposeScope();

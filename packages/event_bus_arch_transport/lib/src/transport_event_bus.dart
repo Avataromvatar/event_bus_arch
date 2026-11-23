@@ -88,6 +88,13 @@ class TransportEventBus extends EventBusImpl {
       _codecs.resolve(key.address)?.canEncode == true;
 
   @override
+  bool probePublishesKey<T>(EventKey<T> key) =>
+      _codecs.resolve(key.address)?.canEncode == true;
+
+  @override
+  bool shouldRemoveSendNode(EventNode node) => node is TransportKeyEventNode;
+
+  @override
   EventNode<T> createNodeForKey<T>({
     required EventKey<T> key,
     T? currentData,
@@ -140,7 +147,7 @@ class TransportEventBus extends EventBusImpl {
     if (cancelToken?.isCancelled ?? false) {
       throw RequestCanceledException(key.address.value);
     }
-    if (haveHandler<T>(key)) {
+    if (probeRequest(key, data).localHandlers > 0) {
       return super.request<T>(key, data,
           arguments: arguments,
           timeout: timeout,
@@ -158,7 +165,7 @@ class TransportEventBus extends EventBusImpl {
       );
     }
     return _requestKeyTransport<T>(
-        key, codec, data, arguments, timeout, correlationId);
+        key, codec, data, arguments, timeout, cancelToken, correlationId);
   }
 
   Future<dynamic> _requestKeyTransport<T>(
@@ -167,6 +174,7 @@ class TransportEventBus extends EventBusImpl {
     T data,
     Map<String, String>? arguments,
     Duration? timeout,
+    CancelToken? cancelToken,
     String? correlationId,
   ) async {
     final observing = isObservable && observabilityConfig.metrics;
@@ -180,7 +188,7 @@ class TransportEventBus extends EventBusImpl {
       if (override != null) {
         _addresses.validatePublishSubject(override);
       }
-      final reply = await _connection.request(
+      final requestFuture = _connection.request(
         subject,
         bytes,
         arguments: arguments,
@@ -188,6 +196,34 @@ class TransportEventBus extends EventBusImpl {
         originId: _originId,
         timeout: timeout,
       );
+      late final TransportMessage reply;
+      if (cancelToken == null) {
+        reply = await requestFuture;
+      } else if (cancelToken.isCancelled) {
+        throw RequestCanceledException(key.address.value);
+      } else {
+        final gate = Completer<TransportMessage>();
+        void onCancelled() {
+          if (!gate.isCompleted) {
+            gate.completeError(RequestCanceledException(key.address.value));
+          }
+        }
+
+        cancelToken.addListener(onCancelled);
+        unawaited(requestFuture.then(
+          (value) {
+            if (!gate.isCompleted) gate.complete(value);
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (!gate.isCompleted) gate.completeError(error, stackTrace);
+          },
+        ));
+        try {
+          reply = await gate.future;
+        } finally {
+          cancelToken.removeListener(onCancelled);
+        }
+      }
       final response = codec.decode!(
         reply.data,
         key.address,
@@ -204,7 +240,9 @@ class TransportEventBus extends EventBusImpl {
             key.address.value,
             error is TimeoutException
                 ? RequestOutcome.timeout
-                : RequestOutcome.errored,
+                : error is RequestCanceledException
+                    ? RequestOutcome.canceled
+                    : RequestOutcome.errored,
             DateTime.now().microsecondsSinceEpoch - started);
       }
       rethrow;
@@ -227,7 +265,7 @@ class TransportEventBus extends EventBusImpl {
     final nodeAddress = selector is EventPatternKey
         ? selector.pattern.value
         : (selector as EventKey).address.value;
-    if (handlerAddressFor(dto.address) != nodeAddress) return null;
+    if (handlerAddressFor(dto.address, dto.data) != nodeAddress) return null;
 
     final result = await handleIncomingRequest(dto);
     final encode = codec.encode;

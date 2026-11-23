@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
 

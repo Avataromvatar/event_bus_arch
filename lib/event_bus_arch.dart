@@ -17,6 +17,8 @@ part 'src/exception.dart';
 part 'src/event_bus_isolate.dart';
 part 'src/event_bus.dart';
 part 'src/event_subscription.dart';
+part 'src/event_probe.dart';
+part 'src/error_window_store.dart';
 part 'src/event_bus_error.dart';
 part 'src/worker_pool.dart';
 part 'src/observability.dart';

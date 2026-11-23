@@ -53,8 +53,7 @@ void main() {
       await bus.dispose();
     });
 
-    test('removes a pinned transport node and cancels its subscription',
-        () async {
+    test('removes a transport node and cancels its subscription', () async {
       // The node is created by listen and subscribes to the broker.
       final sub = bus.subscribeLegacy<int>(paths: ['state'], onData: (_) {});
       expect(connection.subscribedSubjects, contains('int.state'));
@@ -65,9 +64,11 @@ void main() {
       expect(connection.subscribedSubjects, isNot(contains('int.state')));
       expect(bus.haveListenerLegacy<int>(paths: ['state']), isFalse);
 
-      // A model-like send recreates the node and its subscription.
+      // A send with no local subscriber creates a node only for publication:
+      // the node is detached again after delivery.
       expect(bus.fireLegacy<int>(2, paths: ['state']), isTrue);
-      expect(connection.subscribedSubjects, contains('int.state'));
+      await Future<void>.delayed(Duration.zero);
+      expect(connection.subscribedSubjects, isNot(contains('int.state')));
 
       await sub.cancel();
     });

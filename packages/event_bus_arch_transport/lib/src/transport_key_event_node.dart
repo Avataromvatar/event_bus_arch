@@ -19,11 +19,7 @@ import 'transport_exception.dart';
 ///pattern node delivers locally and never publishes, which prevents duplicate
 ///broker messages.
 class TransportKeyEventNode<T>
-    implements
-        EventNode<T>,
-        KeepAliveNode,
-        IncomingEventNode,
-        SubscriptionHost<T> {
+    implements EventNode<T>, IncomingEventNode, SubscriptionHost<T> {
   TransportKeyEventNode({
     required this.connection,
     required this.addresses,
@@ -82,7 +78,7 @@ class TransportKeyEventNode<T>
   bool get isDisposed => _local.isDisposed;
 
   @override
-  bool get keepAlive => true;
+  bool accepts(Object? data) => data is T;
 
   @override
   StreamController<T> get streamControllerValue => _local.streamControllerValue;
@@ -106,13 +102,15 @@ class TransportKeyEventNode<T>
 
   @override
   bool deliver(EventDTO dto) {
+    // Local first: a broker failure must not roll back local delivery or the
+    // current value. The transport exception still propagates afterwards.
+    final local = _local.deliver(dto);
     final selector = this.selector;
     final codec = _exactCodec;
     final canPublish = selector is EventKey<T> &&
         codec?.encode != null &&
         dto.key == selector;
     final published = canPublish ? _publish(dto, codec!.encode!) : false;
-    final local = _local.deliver(dto);
     return published || local;
   }
 
@@ -197,6 +195,12 @@ class TransportKeyEventNode<T>
             EventDTO dto, TransportMessage message, EventCodec codec)
         onRequest,
   ) async {
+    try {
+      addresses.validatePublishSubject(replyTo);
+    } catch (error, stackTrace) {
+      onError?.call(error, stackTrace);
+      return;
+    }
     try {
       final bytes = await onRequest(dto, message, codec);
       if (bytes == null) return;

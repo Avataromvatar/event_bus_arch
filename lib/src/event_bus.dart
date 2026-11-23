@@ -29,6 +29,9 @@ abstract class EventNode<T> {
   bool get isDisposed;
   StreamController<T> get streamControllerValue;
 
+  ///Whether this node accepts [data] as its payload type.
+  bool accepts(Object? data) => data is T;
+
   ///Delivers an event to the value stream. Only listeners are notified.
   ///
   ///Returns true when at least one listener accepted the event.
@@ -79,6 +82,9 @@ class EventNodeImp<T> implements EventNode<T>, SubscriptionHost<T> {
   final List<EventSubscription<T>> _subscriptions = <EventSubscription<T>>[];
 
   EventNodeImp({this.currentData});
+
+  @override
+  bool accepts(Object? data) => data is T;
 
   ///Stores the value and notifies listeners. Request handlers are invoked by
   ///the bus, not here, so the value is scheduled before a handler can complete
@@ -191,7 +197,7 @@ abstract class EventBus {
     T? initialData,
     int handlerConcurrency = 1,
     int? requestQueueCapacity,
-    int? bufferCapacity,
+    int? bufferCapacity = defaultSubscriptionBufferCapacity,
     BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
     DeliveryMode deliveryMode = DeliveryMode.async,
     void Function(Object error, StackTrace? stackTrace)? onError,
@@ -202,13 +208,25 @@ abstract class EventBus {
   /// The value stored for a selector: an exact key or a pattern key.
   T? currentData<T>(EventSelector<T> selector);
 
+  /// A side-effect-free snapshot of what [fire] would reach.
+  FireProbe probeFire<T>(EventKey<T> key, T data);
+
+  /// A side-effect-free snapshot of what [request] would reach.
+  RequestProbe probeRequest<T>(EventKey<T> key, T data);
+
   /// Whether a selector has a listener.
+  @Deprecated(
+      'Use probeFire/probeRequest; have* checks only exact registered types')
   bool haveListener<T>(EventSelector<T> selector);
 
   /// Whether a selector has a handler, including paused handlers.
+  @Deprecated(
+      'Use probeFire/probeRequest; have* checks only exact registered types')
   bool haveHandler<T>(EventSelector<T> selector);
 
   /// Whether a handler for the selector could accept a request now.
+  @Deprecated(
+      'Use probeFire/probeRequest; have* checks only exact registered types')
   bool haveAvailableHandler<T>(EventSelector<T> selector);
 
   /// Removes one type node for an exact or pattern selector.
@@ -271,8 +289,15 @@ mixin EventBusMixin implements EventBus {
   final StreamController<EventBusError> _errorsController =
       StreamController<EventBusError>.broadcast();
   final List<EventBusError> _recentErrors = <EventBusError>[];
-  final Map<String, List<DateTime>> _errorWindows = <String, List<DateTime>>{};
+  final _ErrorWindowStore _errorWindows = _ErrorWindowStore(
+    maxKeys: 256,
+    window: const Duration(seconds: 1),
+    limit: 10,
+  );
   int _suppressedErrors = 0;
+
+  ///The number of tracked `(kind, address)` error windows, for diagnostics.
+  int get errorWindowCount => _errorWindows.keyCount;
 
   @override
   Stream<(EventDTO, bool)> get allEventStream => _allEventStream.stream;
@@ -297,16 +322,11 @@ mixin EventBusMixin implements EventBus {
     if (_metricsEnabled && error.kind == EventBusErrorKind.bufferOverflow) {
       metrics.recordOverflow(error.topic);
     }
-    final key = '${error.kind.name}|${error.topic}';
-    final window = _errorWindows.putIfAbsent(key, () => <DateTime>[]);
-    final now = error.timestamp;
-    window.removeWhere(
-        (time) => now.difference(time) > const Duration(seconds: 1));
-    if (window.length >= 10) {
+    final key = '${error.kind.name}|${error.address}';
+    if (!_errorWindows.record(key, error.timestamp)) {
       _suppressedErrors++;
       return;
     }
-    window.add(now);
     _recentErrors.add(error);
     if (_recentErrors.length > 100) {
       _recentErrors.removeAt(0);
@@ -376,62 +396,64 @@ mixin EventBusMixin implements EventBus {
   ///Round-robin cursor of the handler dispatcher, per route.
   final Map<Object, int> _handlerCursors = {};
 
-  ///Active listener and handler subscriptions per address, used by isolate
-  ///bridges to publish interest transitions.
-  final Map<String, int> _listenerCounts = {};
-  final Map<String, int> _handlerCounts = {};
+  ///Active listener and handler subscriptions per selector, used by isolate
+  ///bridges to publish typed interest transitions.
+  final Map<EventSelector, int> _listenerCounts = {};
+  final Map<EventSelector, int> _handlerCounts = {};
 
-  ///Addresses a model bus has a node for; a remote model bus accepts fire even
+  ///Selectors a model bus has a node for; a remote model bus accepts fire even
   ///without a listener because it stores the value.
-  final Set<String> _modelTopics = {};
+  final Set<EventSelector> _modelTopics = {};
 
   ///Hooks for isolate bridges; no-op for local and transport buses.
-  void _onListenerInterestChanged(String address, bool present) {}
-  void _onHandlerInterestChanged(String address, bool present) {}
-  void _onModelInterestChanged(String address, bool present) {}
-  void _onTopicInterestRemoved(String address) {}
+  void _onListenerInterestChanged(EventSelector selector, bool present) {}
+  void _onHandlerInterestChanged(EventSelector selector, bool present) {}
+  void _onModelInterestChanged(EventSelector selector, bool present) {}
+  void _onTopicInterestRemoved(EventSelector selector) {}
 
-  void _markModelTopic(String address, bool present) {
+  void _markModelTopic(EventSelector selector, bool present) {
     if (!isModelBus) return;
     if (present) {
-      if (_modelTopics.add(address)) _onModelInterestChanged(address, true);
-    } else if (_modelTopics.remove(address)) {
-      _onModelInterestChanged(address, false);
+      if (_modelTopics.add(selector)) {
+        _onModelInterestChanged(selector, true);
+      }
+    } else if (_modelTopics.remove(selector)) {
+      _onModelInterestChanged(selector, false);
     }
   }
 
-  void _subscriptionAdded(String address,
+  void _subscriptionAdded(EventSelector selector,
       {required bool listener, required bool handler}) {
     if (listener) {
-      final count = (_listenerCounts[address] ?? 0) + 1;
-      _listenerCounts[address] = count;
-      if (count == 1) _onListenerInterestChanged(address, true);
+      final count = (_listenerCounts[selector] ?? 0) + 1;
+      _listenerCounts[selector] = count;
+      if (count == 1) _onListenerInterestChanged(selector, true);
     }
     if (handler) {
-      final count = (_handlerCounts[address] ?? 0) + 1;
-      _handlerCounts[address] = count;
-      if (count == 1) _onHandlerInterestChanged(address, true);
+      final count = (_handlerCounts[selector] ?? 0) + 1;
+      _handlerCounts[selector] = count;
+      if (count == 1) _onHandlerInterestChanged(selector, true);
     }
   }
 
-  void _subscriptionRemoved(String address,
+  void _subscriptionRemoved(EventSelector selector,
       {required bool listener, required bool handler}) {
     if (listener) {
-      final count = _listenerCounts[address] ?? 0;
+      final count = _listenerCounts[selector] ?? 0;
       if (count == 1) {
-        _listenerCounts.remove(address);
-        _onListenerInterestChanged(address, false);
+        _listenerCounts.remove(selector);
+        _onListenerInterestChanged(selector, false);
       } else if (count > 1) {
-        _listenerCounts[address] = count - 1;
+        _listenerCounts[selector] = count - 1;
       }
     }
     if (handler) {
-      final count = _handlerCounts[address] ?? 0;
+      final count = _handlerCounts[selector] ?? 0;
       if (count == 1) {
-        _handlerCounts.remove(address);
-        _onHandlerInterestChanged(address, false);
+        _handlerCounts.remove(selector);
+        _onHandlerInterestChanged(selector, false);
       } else if (count > 1) {
-        _handlerCounts[address] = count - 1;
+        _handlerCounts[selector] = count - 1;
       }
     }
   }
@@ -451,12 +473,6 @@ mixin EventBusMixin implements EventBus {
     }
   }
 
-  /// The address string of a selector.
-  String _addressForSelector(EventSelector selector) =>
-      selector is EventPatternKey
-          ? selector.pattern.value
-          : (selector as EventKey).address.value;
-
   Map<Type, EventNode> _exactBucket(EventAddress address) =>
       _eventsMap.putIfAbsent(address, () => <Type, EventNode>{});
 
@@ -475,6 +491,70 @@ mixin EventBusMixin implements EventBus {
     return node is EventNode<T> ? node.currentData : null;
   }
 
+  ///Hook for transports: whether a codec can encode [key].
+  bool probePublishesKey<T>(EventKey<T> key) => false;
+
+  ///Whether a node created only to publish an event should be detached when
+  ///it has no local listeners or handlers after [fire].
+  ///
+  ///A transport returns true: its node owns a broker subscription that would
+  ///otherwise stay open for a dynamic address.
+  bool shouldRemoveSendNode(EventNode node) => false;
+
+  ///Hook for isolate bridges: number of typed remote listener/model entries.
+  int probeRemoteListenerInterest<T>(EventKey<T> key, T data) => 0;
+
+  ///Hook for isolate bridges: whether the other side has a typed handler.
+  bool probeRemoteHandlerInterest<T>(EventKey<T> key, T data) => false;
+
+  ///Hook for the directional isolate bridge: it never stores its own fire.
+  bool get probeStoresLocally => isModelBus;
+
+  (int, bool) _probeListenerTargets(Object? data, EventAddress address) {
+    var listeners = 0;
+    var raw = false;
+
+    void inspect(EventNode node) {
+      if (!node.accepts(data)) return;
+      if (node.streamControllerValue.hasListener) raw = true;
+      if (node is! SubscriptionHost) return;
+      final host = node as SubscriptionHost;
+      for (final subscription in host.subscriptions) {
+        if (!subscription.isCanceled &&
+            subscription.hasListener &&
+            subscription.selector.accepts(data)) {
+          listeners++;
+        }
+      }
+    }
+
+    final exact = _eventsMap[address];
+    if (exact != null) {
+      for (final node in exact.values) {
+        inspect(node);
+      }
+    }
+    for (final entry in _matchingPatternEntries(address)) {
+      for (final node in entry.value.values) {
+        inspect(node);
+      }
+    }
+    return (listeners, raw);
+  }
+
+  @override
+  FireProbe probeFire<T>(EventKey<T> key, T data) {
+    _checkNotDisposed();
+    final (listeners, raw) = _probeListenerTargets(data, key.address);
+    return FireProbe(
+      localListeners: listeners,
+      hasRawListener: raw,
+      modelStores: probeStoresLocally,
+      transportPublishes: probePublishesKey(key),
+      remoteListenerInterest: probeRemoteListenerInterest(key, data),
+    );
+  }
+
   /// Returns the typed node of a selector, creating it when needed.
   EventNode<T> _nodeFor<T>(EventSelector<T> selector) {
     if (selector is EventPatternKey<T>) {
@@ -483,7 +563,7 @@ mixin EventBusMixin implements EventBus {
       if (existing is EventNode<T>) return existing;
       final created = createPatternNodeForKey<T>(key: selector);
       bucket[selector.type] = created;
-      _markModelTopic(selector.pattern.value, true);
+      _markModelTopic(selector, true);
       return created;
     }
     final key = selector as EventKey<T>;
@@ -492,7 +572,7 @@ mixin EventBusMixin implements EventBus {
     if (existing is EventNode<T>) return existing;
     final created = createNodeForKey<T>(key: key);
     bucket[key.type] = created;
-    _markModelTopic(key.address.value, true);
+    _markModelTopic(key, true);
     return created;
   }
 
@@ -504,14 +584,14 @@ mixin EventBusMixin implements EventBus {
   ///delegates pause/resume, so no extra microtask hop is introduced.
   Stream<T> _valueStream<T>(EventSelector<T> selector) {
     final node = _nodeFor<T>(selector);
-    final address = _addressForSelector(selector);
     return _NodeStream<T>(
       node.streamControllerValue.stream,
       () {
-        _subscriptionRemoved(address, listener: true, handler: false);
+        _subscriptionRemoved(selector, listener: true, handler: false);
         _removeNode(selector, node);
       },
-      onListen: () => _subscriptionAdded(address, listener: true, handler: false),
+      onListen: () =>
+          _subscriptionAdded(selector, listener: true, handler: false),
     );
   }
 
@@ -529,7 +609,7 @@ mixin EventBusMixin implements EventBus {
     T? initialData,
     int handlerConcurrency = 1,
     int? requestQueueCapacity,
-    int? bufferCapacity,
+    int? bufferCapacity = defaultSubscriptionBufferCapacity,
     BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
     DeliveryMode deliveryMode = DeliveryMode.async,
     void Function(Object error, StackTrace? stackTrace)? onError,
@@ -560,7 +640,7 @@ mixin EventBusMixin implements EventBus {
     T? initialData,
     int handlerConcurrency = 1,
     int? requestQueueCapacity,
-    int? bufferCapacity,
+    int? bufferCapacity = defaultSubscriptionBufferCapacity,
     BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
     DeliveryMode deliveryMode = DeliveryMode.async,
     void Function(Object error, StackTrace? stackTrace)? onError,
@@ -576,7 +656,6 @@ mixin EventBusMixin implements EventBus {
           'node ${node.runtimeType} does not implement SubscriptionHost');
     }
     final host = node as SubscriptionHost<T>;
-    final address = _addressForSelector(selector);
     late final EventSubscription<T> subscription;
     subscription = EventSubscription<T>._(
       selector: selector,
@@ -593,7 +672,7 @@ mixin EventBusMixin implements EventBus {
       onError: onError,
       onDone: onDone,
       onCancel: () {
-        _subscriptionRemoved(address,
+        _subscriptionRemoved(selector,
             listener: onEvent != null, handler: handler != null);
         host.removeSubscription(subscription);
         _removeNode(selector, node);
@@ -601,7 +680,7 @@ mixin EventBusMixin implements EventBus {
       onBusError: reportError,
     );
     host.addSubscription(subscription);
-    _subscriptionAdded(address,
+    _subscriptionAdded(selector,
         listener: onEvent != null, handler: handler != null);
     if (initialData != null) {
       node.currentData = initialData;
@@ -618,19 +697,28 @@ mixin EventBusMixin implements EventBus {
     final dto = EventDTO<T>.withKey(key, data,
         arguments: arguments, correlationId: correlationId);
     // A model or transport bus may create the exact node for this key.
-    _sendNode<T>(key);
-    final matched = _dispatchToListeners(dto);
-    // A model bus accepted the value even when nobody is listening. A handler
-    // subscription alone does not count for fire (D14).
-    final accepted = matched ||
-        (isModelBus && _eventsMap[key.address]?[key.type] != null);
-    _addAllEvent(dto, accepted);
-    if (observing) {
-      metrics.recordFire(key.address.value,
-          accepted: accepted,
-          elapsedMicros: DateTime.now().microsecondsSinceEpoch - started);
+    final hadNode = _eventsMap[key.address]?[key.type] != null;
+    final sendNode = _sendNode<T>(key);
+    try {
+      final matched = _dispatchToListeners(dto);
+      // A model bus accepted the value even when nobody is listening. A
+      // handler subscription alone does not count for fire (D14).
+      final accepted = matched ||
+          (isModelBus && _eventsMap[key.address]?[key.type] != null);
+      _addAllEvent(dto, accepted);
+      if (observing) {
+        metrics.recordFire(key.address.value,
+            accepted: accepted,
+            elapsedMicros: DateTime.now().microsecondsSinceEpoch - started);
+      }
+      return accepted;
+    } finally {
+      // A transport node created only to publish this event has no local
+      // listeners or handlers; do not leave its broker subscription behind.
+      if (!hadNode && sendNode != null && shouldRemoveSendNode(sendNode)) {
+        _removeNode(key, sendNode);
+      }
     }
-    return accepted;
   }
 
   ///Delivers to every typed node at the address and to every matching pattern
@@ -690,7 +778,7 @@ mixin EventBusMixin implements EventBus {
     if (shouldCreateNodeOnSendKey(key)) {
       final created = createNodeForKey<T>(key: key);
       _exactBucket(key.address)[key.type] = created;
-      _markModelTopic(key.address.value, true);
+      _markModelTopic(key, true);
       return created;
     }
     return null;
@@ -735,10 +823,28 @@ mixin EventBusMixin implements EventBus {
       _handlerCursors.remove(node);
       unawaited(node.dispose());
     }
-    final hadInterest = (_listenerCounts.remove(address.value) ?? 0) > 0 ||
-        (_handlerCounts.remove(address.value) ?? 0) > 0;
-    if (hadInterest) _onTopicInterestRemoved(address.value);
-    _markModelTopic(address.value, false);
+
+    bool atAddress(EventSelector selector) =>
+        selector is EventKey && selector.address == address;
+    final removedListeners =
+        _listenerCounts.keys.where(atAddress).toSet();
+    final removedHandlers = _handlerCounts.keys.where(atAddress).toSet();
+    final removedModels = _modelTopics.where(atAddress).toSet();
+    _listenerCounts.removeWhere((selector, _) => atAddress(selector));
+    _handlerCounts.removeWhere((selector, _) => atAddress(selector));
+    _modelTopics.removeWhere(atAddress);
+
+    final removed = <EventSelector>{
+      ...removedListeners,
+      ...removedHandlers,
+      ...removedModels,
+    };
+    for (final selector in removed) {
+      _onTopicInterestRemoved(selector);
+    }
+    for (final selector in removedModels) {
+      _onModelInterestChanged(selector, false);
+    }
     return true;
   }
 
@@ -778,11 +884,10 @@ mixin EventBusMixin implements EventBus {
       }
     }
     if (removed) {
-      final address = _addressForSelector(selector);
-      final hadInterest = (_listenerCounts.remove(address) ?? 0) > 0 ||
-          (_handlerCounts.remove(address) ?? 0) > 0;
-      if (hadInterest) _onTopicInterestRemoved(address);
-      _markModelTopic(address, false);
+      final hadInterest = (_listenerCounts.remove(selector) ?? 0) > 0 ||
+          (_handlerCounts.remove(selector) ?? 0) > 0;
+      if (hadInterest) _onTopicInterestRemoved(selector);
+      _markModelTopic(selector, false);
       _handlerCursors.remove(node);
       unawaited(node.dispose());
     }
@@ -837,27 +942,46 @@ mixin EventBusMixin implements EventBus {
 mixin _EventBusHandlersMixin on EventBusMixin {
   @override
   bool haveHandler<T>(EventSelector<T> selector) =>
-      _resolveTier(selector) != null;
+      _resolveTypedTier(selector) != null;
 
   @override
   bool haveAvailableHandler<T>(EventSelector<T> selector) {
-    final tier = _resolveTier(selector);
+    final tier = _resolveTypedTier(selector);
     return tier != null &&
         tier.candidates
             .any((candidate) => candidate.subscription.hasRequestCapacity);
   }
 
-  ///The registered address of the tier that would answer [address], or null
-  ///when no handler exists.
+  @override
+  RequestProbe probeRequest<T>(EventKey<T> key, T data) {
+    _checkNotDisposed();
+    final tier = _resolveTierWithData(EventKey<Object?>(key.address.value), data);
+    final handlers = tier?.candidates.length ?? 0;
+    final available = tier?.candidates
+            .where((candidate) => candidate.subscription.hasRequestCapacity)
+            .length ??
+        0;
+    final (listeners, raw) = _probeListenerTargets(data, key.address);
+    return RequestProbe(
+      localHandlers: handlers,
+      localAvailableHandlers: available,
+      localListeners: listeners,
+      hasRawListener: raw,
+      remoteHandlerInterest: probeRemoteHandlerInterest(key, data),
+    );
+  }
+
+  ///The registered address of the tier that would answer [address] for
+  ///[data], or null when no accepting handler exists.
   ///
   ///Intended for transports: overlapping exact/pattern subscriptions must
   ///produce exactly one answer.
-  String? handlerAddressFor(String address) {
+  String? handlerAddressFor(String address, Object? data) {
     final isPattern = address.contains('*') || address.contains('>');
     final selector = isPattern
         ? EventPatternKey<Object?>(address)
         : EventKey<Object?>(address);
-    final tier = _resolveTier(selector);
+    final tier = _resolveTierWithData(selector, data);
     if (tier == null) return null;
     final route = tier.route;
     return route is EventPattern ? route.value : (route as EventAddress).value;
@@ -881,29 +1005,70 @@ mixin _EventBusHandlersMixin on EventBusMixin {
     return candidates;
   }
 
-  _HandlerTier? _resolveTier(EventSelector selector) {
+  List<_HandlerCandidate> _candidatesOnNode(EventNode? node) {
+    if (node == null) return const <_HandlerCandidate>[];
+    return [
+      for (final subscription in _handlersOn(node))
+        _HandlerCandidate(node, subscription),
+    ];
+  }
+
+  ///The tier registered exactly for [selector]'s address/pattern and type.
+  _HandlerTier? _resolveTypedTier(EventSelector selector) {
+    if (selector is EventPatternKey) {
+      final node = _patternMap[selector.pattern]?[selector.type];
+      final candidates = _candidatesOnNode(node);
+      return candidates.isEmpty
+          ? null
+          : _HandlerTier(selector.pattern, candidates);
+    }
+    final key = selector as EventKey;
+    final node = _eventsMap[key.address]?[key.type];
+    final exact = _candidatesOnNode(node);
+    if (exact.isNotEmpty) {
+      return _HandlerTier(key.address, exact);
+    }
+    for (final entry in _matchingPatternEntries(key.address)) {
+      final candidates = _candidatesOnNode(entry.value[key.type]);
+      if (candidates.isNotEmpty) {
+        return _HandlerTier(entry.key, candidates);
+      }
+    }
+    return null;
+  }
+
+  ///The exact tier, or the most specific pattern tier, with at least one
+  ///handler that accepts [data]. A foreign-type exact handler does not block a
+  ///matching pattern handler.
+  _HandlerTier? _resolveTierWithData(EventSelector selector, Object? data) {
+    bool accepts(_HandlerCandidate candidate) =>
+        candidate.subscription.acceptsData(data);
+
     if (selector is EventPatternKey) {
       final bucket = _patternMap[selector.pattern];
       final candidates =
           bucket == null ? const <_HandlerCandidate>[] : _candidatesOn(bucket);
-      return candidates.isEmpty
+      final accepting = candidates.where(accepts).toList(growable: false);
+      return accepting.isEmpty
           ? null
-          : _HandlerTier(selector.pattern, candidates);
+          : _HandlerTier(selector.pattern, accepting);
     }
 
     final key = selector as EventKey;
     final exact = _eventsMap[key.address];
     if (exact != null) {
-      final candidates = _candidatesOn(exact);
-      if (candidates.isNotEmpty) {
-        return _HandlerTier(key.address, candidates);
+      final accepting =
+          _candidatesOn(exact).where(accepts).toList(growable: false);
+      if (accepting.isNotEmpty) {
+        return _HandlerTier(key.address, accepting);
       }
     }
 
     for (final entry in _matchingPatternEntries(key.address)) {
-      final candidates = _candidatesOn(entry.value);
-      if (candidates.isNotEmpty) {
-        return _HandlerTier(entry.key, candidates);
+      final accepting =
+          _candidatesOn(entry.value).where(accepts).toList(growable: false);
+      if (accepting.isNotEmpty) {
+        return _HandlerTier(entry.key, accepting);
       }
     }
     return null;
@@ -959,23 +1124,14 @@ mixin _EventBusHandlersMixin on EventBusMixin {
       }
     }
 
-    final tier = _resolveTier(EventKey<Object?>(dto.address));
+    final tier = _resolveTierWithData(EventKey<Object?>(dto.address), dto.data);
     if (tier == null) {
       _addAllEvent(dto, false);
       finish(RequestOutcome.errored);
       throw NoHandlerException(dto.address);
     }
 
-    final accepting = tier.candidates
-        .where((candidate) => candidate.subscription.acceptsData(dto.data))
-        .toList(growable: false);
-    if (accepting.isEmpty) {
-      _addAllEvent(dto, false);
-      finish(RequestOutcome.errored);
-      throw NoHandlerException(dto.address);
-    }
-
-    final candidates = accepting
+    final candidates = tier.candidates
         .where((candidate) => candidate.subscription.hasRequestCapacity)
         .toList(growable: false);
     if (candidates.isEmpty) {

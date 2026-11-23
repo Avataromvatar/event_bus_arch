@@ -163,8 +163,9 @@ abstract class Command<T> {
 }
 ```
 
-`execute` appends to a bounded history (`maxLen`, at least 1) and calls the bus. `undo` with fewer
-than two entries returns `null`.
+`execute` appends to a bounded history (`maxLen`, at least 1) and calls the bus. It sends a
+request only when a local handler accepts the value type; otherwise it fires the value (a model
+bus stores it) and returns `null`. `undo` with fewer than two entries returns `null`.
 
 ## Examples and tests
 

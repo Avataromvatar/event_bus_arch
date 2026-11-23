@@ -24,6 +24,7 @@ class EventBusIsolate extends EventBus {
     Object? initialData,
     bool isModelBus = false,
     ObservabilityConfig observability = ObservabilityConfig.disabled,
+    Duration? initTimeout = const Duration(seconds: 30),
   });
 
   Future<bool> get waitInit;   // onInit finished and interests exchanged
@@ -37,6 +38,10 @@ class EventBusIsolate extends EventBus {
 `onInit` runs inside the worker and must be top-level/static. It may be async: `waitInit`
 completes after it finishes and after both sides exchange listener/handler/model interests, so
 events sent right after `await waitInit` see the subscriptions made in `onInit`.
+
+The worker is spawned paused and the exit listener is registered before it is resumed, so a worker
+that dies during `onInit` fails `waitInit` rather than hanging it. `initTimeout` (30 seconds by
+default, `null` disables it) fails `waitInit` when `onInit` never finishes.
 
 ```mermaid
 sequenceDiagram
@@ -58,10 +63,10 @@ sequenceDiagram
 - `fire` goes to the worker only; it is never delivered to the local side. This prevents a
   forwarding listener from re-entering itself.
 - For local pub/sub use an ordinary `EventBus`; in `Layers` that is `layer.current`.
-- `fire` returns `true` only when the other side has a known listener or model interest. A
-  handler-only node does not count.
-- `request` checks the local handler first; it crosses only when the worker has a known handler.
-  With neither it throws `NoHandlerException` immediately.
+- `fire` returns `true` only when the other side has listener or model interest that accepts the
+  data type; a listener of an unrelated type does not count.
+- `request` checks the local handlers that accept the data first; it crosses only when the worker
+  has a matching handler. With neither it throws `NoHandlerException` immediately.
 - `timeout` and `CancelToken` work across the bridge: a queued request can be removed, and a late
   answer is discarded.
 
@@ -212,12 +217,14 @@ await pool.close();
 | `broadcast` | `fire` to every ready worker; requests throw `UnsupportedError` |
 | `roundRobin` | rotate over ready workers |
 | `keyed` | route by address (`keySelector` can override); never reroute a key |
-| `leastBusy` | worker with the lowest in-flight count |
+| `leastBusy` | worker with the lowest in-flight count; equal counts rotate |
 | `single` | one active worker with a standby |
 
 - `maxInFlightPerWorker` bounds in-flight requests per worker. Without a free credit, `fire`
   returns `false` and `request` throws `BusyException`.
 - A dead worker restarts with exponential backoff. Pending requests fail and are not retried.
+- A `StateError` thrown by a handler reaches the caller unchanged; only a dead or disposed worker
+  is reported as `BusyException`.
 - Restart exhaustion emits `EventBusErrorKind.supervision` and fails the pool.
 - `waitInit` completes when all workers are ready; `waitReady` waits for a restart to finish.
 

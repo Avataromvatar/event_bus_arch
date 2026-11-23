@@ -401,7 +401,7 @@ void main() {
       await bus.dispose();
     });
 
-    test('cancelling a handler subscription fails its queued requests',
+    test('cancelling a handler subscription cancels its queued requests',
         () async {
       final bus = EventBus();
       final gate = Completer<void>();
@@ -417,7 +417,7 @@ void main() {
       final first = bus.requestLegacy<int>(1, paths: ['x']);
       final second = bus.requestLegacy<int>(2, paths: ['x']);
       final secondCheck =
-          expectLater(second, throwsA(isA<NoHandlerException>()));
+          expectLater(second, throwsA(isA<RequestCanceledException>()));
       await pump();
 
       await sub.cancel();

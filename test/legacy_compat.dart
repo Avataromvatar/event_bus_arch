@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use
 // Test-only compatibility facade for the 3.x paths/separator API.
 //
 // The production library no longer exposes these methods. Existing behaviour

@@ -59,7 +59,8 @@
       "Bash(grep -n \"fnInitLayer\\\\|\\\\.\\\\$[123]\\\\|List<LayerSpec>\" lib/src/layers.dart)",
       "Bash(grep -rnE \"^\\\\s*\\\\\\([A-Za-z_][A-Za-z0-9_]*, \\(null|[A-Za-z0-9_.]+\\), \\(true|false\\)\\\\\\),?$\" test example packages doc README.md --include=\"*.dart\" --include=\"*.md\")",
       "Bash(wc -l doc/decisions/*.md doc/*.md README.md packages/*/README.md)",
-      "Bash(grep -n \"haveListenerFor\\\\|haveHandlerFor\\\\|exact \\\\`have\\\\*\\\\`\\\\|have\\\\*\" doc/artifacts/plans/2026-11-23-defect-remediation-plan.md)"
+      "Bash(grep -n \"haveListenerFor\\\\|haveHandlerFor\\\\|exact \\\\`have\\\\*\\\\`\\\\|have\\\\*\" doc/artifacts/plans/2026-11-23-defect-remediation-plan.md)",
+      "Bash(grep -E \"Some tests failed|All tests passed|Failing tests|^  test\\\\\\\\\\\\\\\\|\\\\[E\\\\]\")"
     ]
   }
 }

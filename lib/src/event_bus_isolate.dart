@@ -68,22 +68,21 @@ class _IsolateDeleteAddress {
   const _IsolateDeleteAddress(this.address);
 }
 
-///A change of listener or handler interest for one route.
+///A change of listener or handler interest for one typed selector.
 ///
 ///It is fire-and-forget: the receiver updates its remote-interest registry and
 ///does not reply. [present] false withdraws only the flags carried by this
-///message. [route] is the address or pattern string; a route with `*`/`>` is a
-///pattern.
+///message.
 class _IsolateInterest {
-  final String route;
+  final EventSelector selector;
   final bool listener;
   final bool handler;
 
-  ///A model bus stores the route value even without a listener.
+  ///A model bus stores the address value even without a listener.
   final bool model;
   final bool present;
 
-  const _IsolateInterest(this.route,
+  const _IsolateInterest(this.selector,
       {required this.listener,
       required this.handler,
       this.model = false,
@@ -136,23 +135,23 @@ class _PendingRequest {
   _PendingRequest(this.completer, this.topic);
 }
 
-///Interest of the other side, split by kind and exact/pattern topic.
+///Interest of the other side, split by kind and typed selector.
 class _RemoteInterest {
-  final Map<String, bool> _listeners = {};
-  final Map<String, bool> _handlers = {};
-  final Map<String, bool> _models = {};
+  final Set<EventSelector> _listeners = {};
+  final Set<EventSelector> _handlers = {};
+  final Set<EventSelector> _models = {};
 
-  void apply(String route,
+  void apply(EventSelector selector,
       {required bool listener,
       required bool handler,
       bool model = false,
       required bool present}) {
-    void applyOne(Map<String, bool> map, bool flag) {
+    void applyOne(Set<EventSelector> set, bool flag) {
       if (!flag) return;
       if (present) {
-        map[route] = true;
+        set.add(selector);
       } else {
-        map.remove(route);
+        set.remove(selector);
       }
     }
 
@@ -161,27 +160,40 @@ class _RemoteInterest {
     applyOne(_models, model);
   }
 
-  bool hasListener(String route) =>
-      _matches(_listeners, route) || _matches(_models, route);
-  bool hasHandler(String route) => _matches(_handlers, route);
+  bool hasListener(String address, Object? data) =>
+      _any(_listeners, address, data) || _any(_models, address, data);
 
-  bool _matches(Map<String, bool> routes, String address) {
-    for (final route in routes.keys) {
-      if (route == address) return true;
-      if (_isPatternRoute(route) && _patternMatches(route, address)) {
+  bool hasHandler(String address, Object? data) =>
+      _any(_handlers, address, data);
+
+  int listenerCount(String address, Object? data) =>
+      _count(_listeners, address, data) + _count(_models, address, data);
+
+  static bool _any(Set<EventSelector> selectors, String address, Object? data) {
+    for (final selector in selectors) {
+      if (_matchesSelector(selector, address) && selector.accepts(data)) {
         return true;
       }
     }
     return false;
   }
 
-  static bool _isPatternRoute(String route) =>
-      route.contains(EventAddress.singleWildcard) ||
-      route.contains(EventAddress.tailWildcard);
+  static int _count(
+      Set<EventSelector> selectors, String address, Object? data) {
+    var count = 0;
+    for (final selector in selectors) {
+      if (_matchesSelector(selector, address) && selector.accepts(data)) {
+        count++;
+      }
+    }
+    return count;
+  }
 
-  static bool _patternMatches(String pattern, String address) {
+  static bool _matchesSelector(EventSelector selector, String address) {
     try {
-      return EventPattern(pattern).matches(EventAddress(address));
+      final parsed = EventAddress(address);
+      if (selector is EventPatternKey) return selector.matches(parsed);
+      return (selector as EventKey).address == parsed;
     } on EventBusException {
       return false;
     }
@@ -252,14 +264,22 @@ class _IsolateLink {
       });
     }
     final token = cancelToken;
+    void onCancelled() {
+      cancel(RequestCanceledException(dto.address));
+    }
+
     if (token != null) {
-      token.whenCancelled.then((_) {
-        cancel(RequestCanceledException(dto.address));
-      });
+      if (token.isCancelled) {
+        onCancelled();
+      } else {
+        token.addListener(onCancelled);
+      }
     }
 
     port.send(_IsolateRequest(id, dto));
-    return completer.future;
+    return completer.future.whenComplete(() {
+      token?.removeListener(onCancelled);
+    });
   }
 
   _PendingRequest? _takePending(int id) {
@@ -270,14 +290,14 @@ class _IsolateLink {
   }
 
   ///Publishes a listener/handler interest transition to the other side.
-  bool interest(String route,
+  bool interest(EventSelector selector,
       {required bool listener,
       required bool handler,
       bool model = false,
       required bool present}) {
     var port = sendPort;
     if (port == null || _closed) return false;
-    port.send(_IsolateInterest(route,
+    port.send(_IsolateInterest(selector,
         listener: listener, handler: handler, model: model, present: present));
     return true;
   }
@@ -350,7 +370,7 @@ class _IsolateLink {
     } else if (message is _IsolateFire) {
       _host._dispatchIncoming(message.dto, request: false);
     } else if (message is _IsolateInterest) {
-      remoteInterest.apply(message.route,
+      remoteInterest.apply(message.selector,
           listener: message.listener,
           handler: message.handler,
           model: message.model,
@@ -453,6 +473,11 @@ class EventBusIsolate extends EventBusImpl {
   final Object? _initialData;
   final bool _workerIsModelBus;
 
+  ///How long [waitInit] waits for the worker. Null disables the timeout.
+  final Duration? initTimeout;
+
+  Timer? _initTimer;
+
   ///Every callback of the receive port captures the generation it was created
   ///for; a callback of an older worker after a restart is ignored.
   int _generation = 0;
@@ -478,6 +503,7 @@ class EventBusIsolate extends EventBusImpl {
     Object? initialData,
     bool isModelBus = false,
     ObservabilityConfig observability = ObservabilityConfig.disabled,
+    this.initTimeout = const Duration(seconds: 30),
   })  : _initialData = initialData,
         _workerIsModelBus = isModelBus,
         super(isModelBus, observability: observability) {
@@ -513,6 +539,8 @@ class EventBusIsolate extends EventBusImpl {
     _link = _IsolateLink(this);
     _ready = false;
     _workerGone = false;
+    _initTimer?.cancel();
+    _initTimer = null;
     _completerInit = Completer();
     oldIsolate?.kill(priority: Isolate.immediate);
     unawaited(_init());
@@ -531,9 +559,10 @@ class EventBusIsolate extends EventBusImpl {
     }
     final observing = _metricsEnabled;
     final started = observing ? DateTime.now().microsecondsSinceEpoch : 0;
-    final accepted = _link.remoteInterest.hasListener(key.address.value) &&
-        _link.fire(EventDTO<T>.withKey(key, data,
-            arguments: arguments, correlationId: correlationId));
+    final accepted =
+        _link.remoteInterest.hasListener(key.address.value, data) &&
+            _link.fire(EventDTO<T>.withKey(key, data,
+                arguments: arguments, correlationId: correlationId));
     if (observing) {
       metrics.recordFire(key.address.value,
           accepted: accepted,
@@ -541,6 +570,18 @@ class EventBusIsolate extends EventBusImpl {
     }
     return accepted;
   }
+
+  ///An isolate bridge is directional: its own fire is never stored locally.
+  @override
+  bool get probeStoresLocally => false;
+
+  @override
+  int probeRemoteListenerInterest<T>(EventKey<T> key, T data) =>
+      _ready ? _link.remoteInterest.listenerCount(key.address.value, data) : 0;
+
+  @override
+  bool probeRemoteHandlerInterest<T>(EventKey<T> key, T data) =>
+      _ready && _link.remoteInterest.hasHandler(key.address.value, data);
 
   @override
   Future<dynamic> request<T>(EventKey<T> key, T data,
@@ -563,7 +604,7 @@ class EventBusIsolate extends EventBusImpl {
       }
       throw RequestCanceledException(key.address.value);
     }
-    if (haveHandler<T>(key)) {
+    if (probeRequest(key, data).localHandlers > 0) {
       return super.request<T>(key, data,
           arguments: arguments,
           timeout: timeout,
@@ -580,7 +621,7 @@ class EventBusIsolate extends EventBusImpl {
       }
     }
 
-    if (!_link.remoteInterest.hasHandler(key.address.value)) {
+    if (!_link.remoteInterest.hasHandler(key.address.value, data)) {
       finish(RequestOutcome.noHandler);
       throw NoHandlerException(key.address.value);
     }
@@ -603,36 +644,36 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   @override
-  void _onListenerInterestChanged(String address, bool present) {
-    _link.interest(address, listener: true, handler: false, present: present);
+  void _onListenerInterestChanged(EventSelector selector, bool present) {
+    _link.interest(selector, listener: true, handler: false, present: present);
   }
 
   @override
-  void _onHandlerInterestChanged(String address, bool present) {
-    _link.interest(address, listener: false, handler: true, present: present);
+  void _onHandlerInterestChanged(EventSelector selector, bool present) {
+    _link.interest(selector, listener: false, handler: true, present: present);
   }
 
   @override
-  void _onModelInterestChanged(String address, bool present) {
-    _link.interest(address,
+  void _onModelInterestChanged(EventSelector selector, bool present) {
+    _link.interest(selector,
         listener: false, handler: false, model: true, present: present);
   }
 
   @override
-  void _onTopicInterestRemoved(String address) {
-    _link.interest(address,
+  void _onTopicInterestRemoved(EventSelector selector) {
+    _link.interest(selector,
         listener: true, handler: true, model: true, present: false);
   }
 
   void _sendInterestSnapshot() {
-    for (final address in _listenerCounts.keys) {
-      _link.interest(address, listener: true, handler: false, present: true);
+    for (final selector in _listenerCounts.keys) {
+      _link.interest(selector, listener: true, handler: false, present: true);
     }
-    for (final address in _handlerCounts.keys) {
-      _link.interest(address, listener: false, handler: true, present: true);
+    for (final selector in _handlerCounts.keys) {
+      _link.interest(selector, listener: false, handler: true, present: true);
     }
-    for (final address in _modelTopics) {
-      _link.interest(address,
+    for (final selector in _modelTopics) {
+      _link.interest(selector,
           listener: false, handler: false, model: true, present: true);
     }
   }
@@ -687,12 +728,16 @@ class EventBusIsolate extends EventBusImpl {
   }
 
   void _completeInitResult(bool value) {
+    _initTimer?.cancel();
+    _initTimer = null;
     if (!_completerInit.isCompleted) {
       _completerInit.complete(value);
     }
   }
 
   void _completeInitError(Object error, [StackTrace? stackTrace]) {
+    _initTimer?.cancel();
+    _initTimer = null;
     if (!_completerInit.isCompleted) {
       _completerInit.completeError(error, stackTrace);
     }
@@ -703,13 +748,24 @@ class EventBusIsolate extends EventBusImpl {
     final generation = ++_generation;
     final receivePort = ReceivePort();
     _receivePort = receivePort;
+    _initTimer?.cancel();
+    if (initTimeout != null) {
+      _initTimer = Timer(initTimeout!, () {
+        if (generation != _generation || _completerInit.isCompleted) return;
+        _completeInitError(EventBusException(
+            'worker initialization timed out after $initTimeout'));
+      });
+    }
     try {
-      final isolate = await Isolate.spawn(_worker, [
-        receivePort.sendPort,
-        onInit,
-        _initialData,
-        _workerIsModelBus,
-      ]);
+      final isolate = await Isolate.spawn(
+          _worker,
+          [
+            receivePort.sendPort,
+            onInit,
+            _initialData,
+            _workerIsModelBus,
+          ],
+          paused: true);
       if (generation != _generation || isDisposed) {
         // superseded by a restart or by dispose
         isolate.kill(priority: Isolate.immediate);
@@ -720,6 +776,7 @@ class EventBusIsolate extends EventBusImpl {
       // only when we close it ourselves, so the death is reported explicitly.
       isolate.addOnExitListener(receivePort.sendPort,
           response: _isolateExitMessage);
+      isolate.resume(isolate.pauseCapability!);
     } catch (error, stackTrace) {
       if (generation != _generation) return;
       receivePort.close();
@@ -854,8 +911,7 @@ class _EventBusForIsolate extends EventBusImpl {
   late final _IsolateLink _link = _IsolateLink(this);
   Timer? _watchdog;
 
-  _EventBusForIsolate(
-      super._isModelBus, this._receivePort, this._sendPort) {
+  _EventBusForIsolate(super._isModelBus, this._receivePort, this._sendPort) {
     _link.sendPort = _sendPort;
     _receivePort.listen(_link.handleMessage);
   }
@@ -893,10 +949,22 @@ class _EventBusForIsolate extends EventBusImpl {
     if (isDisposed) {
       throw StateError('EventBus is disposed');
     }
-    return _link.remoteInterest.hasListener(key.address.value) &&
+    return _link.remoteInterest.hasListener(key.address.value, data) &&
         _link.fire(EventDTO<T>.withKey(key, data,
             arguments: arguments, correlationId: correlationId));
   }
+
+  @override
+  bool get probeStoresLocally => false;
+
+  @override
+  int probeRemoteListenerInterest<T>(EventKey<T> key, T data) => !isDisposed
+      ? _link.remoteInterest.listenerCount(key.address.value, data)
+      : 0;
+
+  @override
+  bool probeRemoteHandlerInterest<T>(EventKey<T> key, T data) =>
+      !isDisposed && _link.remoteInterest.hasHandler(key.address.value, data);
 
   @override
   Future<dynamic> request<T>(EventKey<T> key, T data,
@@ -910,14 +978,14 @@ class _EventBusForIsolate extends EventBusImpl {
     if (cancelToken?.isCancelled ?? false) {
       throw RequestCanceledException(key.address.value);
     }
-    if (haveHandler<T>(key)) {
+    if (probeRequest(key, data).localHandlers > 0) {
       return super.request<T>(key, data,
           arguments: arguments,
           timeout: timeout,
           cancelToken: cancelToken,
           correlationId: correlationId);
     }
-    if (!_link.remoteInterest.hasHandler(key.address.value)) {
+    if (!_link.remoteInterest.hasHandler(key.address.value, data)) {
       throw NoHandlerException(key.address.value);
     }
     return _link.request(
@@ -928,36 +996,36 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   @override
-  void _onListenerInterestChanged(String address, bool present) {
-    _link.interest(address, listener: true, handler: false, present: present);
+  void _onListenerInterestChanged(EventSelector selector, bool present) {
+    _link.interest(selector, listener: true, handler: false, present: present);
   }
 
   @override
-  void _onHandlerInterestChanged(String address, bool present) {
-    _link.interest(address, listener: false, handler: true, present: present);
+  void _onHandlerInterestChanged(EventSelector selector, bool present) {
+    _link.interest(selector, listener: false, handler: true, present: present);
   }
 
   @override
-  void _onModelInterestChanged(String address, bool present) {
-    _link.interest(address,
+  void _onModelInterestChanged(EventSelector selector, bool present) {
+    _link.interest(selector,
         listener: false, handler: false, model: true, present: present);
   }
 
   @override
-  void _onTopicInterestRemoved(String address) {
-    _link.interest(address,
+  void _onTopicInterestRemoved(EventSelector selector) {
+    _link.interest(selector,
         listener: true, handler: true, model: true, present: false);
   }
 
   void _sendInterestSnapshot() {
-    for (final address in _listenerCounts.keys) {
-      _link.interest(address, listener: true, handler: false, present: true);
+    for (final selector in _listenerCounts.keys) {
+      _link.interest(selector, listener: true, handler: false, present: true);
     }
-    for (final address in _handlerCounts.keys) {
-      _link.interest(address, listener: false, handler: true, present: true);
+    for (final selector in _handlerCounts.keys) {
+      _link.interest(selector, listener: false, handler: true, present: true);
     }
-    for (final address in _modelTopics) {
-      _link.interest(address,
+    for (final selector in _modelTopics) {
+      _link.interest(selector,
           listener: false, handler: false, model: true, present: true);
     }
   }

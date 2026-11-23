@@ -132,6 +132,7 @@ abstract class EventNode<T> {
   bool get isDisposed;
   StreamController<T> get streamControllerValue;
 
+  bool accepts(Object? data);       // data is T for the built-in nodes
   bool deliver(EventDTO dto);
   EventNode<T> copy();
   Future<void> dispose();
@@ -140,7 +141,7 @@ abstract class EventNode<T> {
 }
 
 abstract class KeepAliveNode {
-  bool get keepAlive; // a transport owns a subscription
+  bool get keepAlive; // core extension point; no built-in node pins itself
 }
 
 abstract class IncomingEventNode {
@@ -230,7 +231,7 @@ abstract class EventBus {
     T? initialData,
     int handlerConcurrency = 1,
     int? requestQueueCapacity,
-    int? bufferCapacity,
+    int? bufferCapacity = 1024, // null = explicitly unbounded
     BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
     DeliveryMode deliveryMode = DeliveryMode.async,
     void Function(Object error, StackTrace? stackTrace)? onError,
@@ -243,8 +244,14 @@ abstract class EventBus {
   bool remove<T>(EventSelector<T> selector);
   bool removeAddress(EventAddress address);
 
+  FireProbe probeFire<T>(EventKey<T> key, T data);
+  RequestProbe probeRequest<T>(EventKey<T> key, T data);
+
+  @Deprecated('Use probeFire/probeRequest; have* checks only exact types')
   bool haveListener<T>(EventSelector<T> selector);
+  @Deprecated('Use probeFire/probeRequest; have* checks only exact types')
   bool haveHandler<T>(EventSelector<T> selector);
+  @Deprecated('Use probeFire/probeRequest; have* checks only exact types')
   bool haveAvailableHandler<T>(EventSelector<T> selector);
 
   Future<void> dispose();
@@ -254,6 +261,31 @@ abstract class EventBus {
 `EventBusImpl` is the built-in implementation returned by the factory; its internal mixins and
 transport hooks are not application API. After `dispose`, public methods throw `StateError`.
 
+`probeFire` and `probeRequest` are side-effect-free. They count nodes that accept the supplied
+data, including supertype pattern nodes, and expose local/remote/transport interest. `have*` is
+deprecated because a query without data can only match the exact registered type.
+
+```dart
+class FireProbe {
+  int get localListeners;
+  bool get hasRawListener;
+  bool get modelStores;
+  bool get transportPublishes;
+  int get remoteListenerInterest;
+  bool get accepted;
+}
+
+class RequestProbe {
+  int get localHandlers;
+  int get localAvailableHandlers;
+  int get localListeners;
+  bool get hasRawListener;
+  bool get remoteHandlerInterest;
+  bool get hasHandler;
+  bool get isBusy;
+}
+```
+
 ## Errors and request cancellation
 
 ```dart
@@ -261,6 +293,9 @@ class CancelToken {
   bool get isCancelled;
   Future<void> get whenCancelled;
   Object? get reason;
+  int get listenerCount;
+  void addListener(void Function() listener);
+  void removeListener(void Function() listener);
   void cancel([Object? reason]);
 }
 
@@ -373,6 +408,7 @@ class EventBusIsolate extends EventBusImpl {
     Object? initialData,
     bool isModelBus = false,
     ObservabilityConfig observability = ObservabilityConfig.disabled,
+    Duration? initTimeout = const Duration(seconds: 30),
   });
 
   Future<bool> get waitInit;
@@ -384,7 +420,8 @@ class EventBusIsolate extends EventBusImpl {
 ```
 
 Inherits `fire`, `request`, `listen`, `subscribe`, `currentData`, `remove`, `removeAddress`,
-`have*`, `allEventStream`, `errors` and `metrics`. `fire` is outbound only.
+`probeFire`, `probeRequest`, `have*`, `allEventStream`, `errors` and `metrics`. `fire` is outbound
+only. `waitInit` fails when the worker dies before ready or when `initTimeout` elapses.
 
 ## Layers
 

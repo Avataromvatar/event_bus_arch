@@ -44,6 +44,8 @@ listener without `onError` does not turn a bus failure into an unhandled zone er
 
 - Errors are rate-limited per `(kind, address)`: 10 per second by default. `suppressedErrors`
   counts the dropped ones.
+- The rate-limit store keeps at most 256 active `(kind, address)` windows; the least recently
+  used key is evicted, and timestamps older than one second are pruned.
 - `recentErrors` keeps the last 100 envelopes.
 - `EventBusError.event` is `null` unless `ObservabilityConfig(capturePayloads: true)`.
 

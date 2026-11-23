@@ -97,25 +97,32 @@ sequenceDiagram
 
     C->>B: fire(key, data)
     B->>N: deliver(dto)
+    N->>N: deliver to local listeners
     N->>K: encode(dto)
     N->>Conn: publish(subject, bytes)
-    N->>N: deliver to local listeners
 ```
 
 Only the node whose exact key equals the DTO key publishes; a pattern or supertype node delivers
-locally without a second publication. A node with a decoder is a `KeepAliveNode`, so the core keeps
-it after its last listener unsubscribes.
+locally without a second publication. Local delivery happens first: if the broker is unavailable,
+the local listeners and `currentData` are already updated and the transport exception propagates
+afterwards.
 
-The explicit eviction `bus.remove(selector)` bypasses that pin: the node is
-disposed and its broker subscription is cancelled. The next `listen`/`fire` for the key creates a new node and subscribes again.
+A keyed node is not pinned. When its last listener/handler is cancelled it is disposed and its
+broker subscription is cancelled; a node created by a `fire` with no local subscribers is detached
+after that delivery. The next `listen`/`fire` for the key creates a new node and subscribes again.
+`bus.remove(selector)` remains the explicit eviction.
 
 ## Requests
 
-`TransportEventBus.request(key, data)` keeps local semantics when a local handler exists. Otherwise
-it publishes the request with a reply subject and waits for the first response. A node that receives
-a message with `replyTo` invokes the local handler through the core `handleIncomingRequest` and
-publishes the encoded result back to that reply subject. The response always goes to the reply
-subject; a subject returned by the encoder is ignored for responses.
+`TransportEventBus.request(key, data)` keeps local semantics when a local handler accepts the data
+type. Otherwise it publishes the request with a reply subject and waits for the first response.
+`timeout` and `CancelToken` cancel the caller: the future fails with `RequestCanceledException`
+while the underlying broker request keeps running until its own timeout, and a late response is
+ignored. A node that receives a message with `replyTo` validates that subject with the address
+mapper, invokes the local handler through the core `handleIncomingRequest` and publishes the
+encoded result back. An invalid reply subject is reported as an error and nothing is published.
+The response always goes to the reply subject; a subject returned by the encoder is ignored for
+responses.
 
 ## Tests
 

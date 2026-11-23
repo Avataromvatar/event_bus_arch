@@ -69,7 +69,8 @@ void main() {
     expect(utf8.decode(published.data), '21');
     expect(published.arguments, {'tenant': 'acme'});
     expect(published.originId, bus.originId);
-    expect(bus.currentDataLegacy<int>(paths: ['sensor']), 21);
+    // A fire-only node is detached after publication, so it keeps no value.
+    expect(bus.currentDataLegacy<int>(paths: ['sensor']), isNull);
   });
 
   test('fire throws when the connection is down', () async {
@@ -211,8 +212,8 @@ void main() {
     expect(connection.subscribedSubjects, ['int.sensor.temp']);
 
     await subscription.cancel();
-    // The node is pinned by the transport, so the subscription stays.
-    expect(connection.subscribedSubjects, ['int.sensor.temp']);
+    // The last listener detaches the node and cancels its broker subscription.
+    expect(connection.subscribedSubjects, isEmpty);
 
     await bus.dispose();
     expect(connection.subscribedSubjects, isEmpty);

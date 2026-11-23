@@ -1,11 +1,16 @@
 part of event_arch;
 
+///The default capacity of a managed listener buffer.
+///
+///Pass `null` explicitly for an unbounded buffer.
+const int defaultSubscriptionBufferCapacity = 1024;
+
 ///The callback of a listener subscription.
 typedef EventCallback<T> = FutureOr<void> Function(T event);
 
 ///What a listener subscription does when its buffer is full.
 enum BufferOverflow {
-  ///Keep the newest [EventSubscription.bufferCapacity] events.
+  ///Keep the newest event; an overflow discards the whole stale backlog.
   latest,
 
   ///Drop the oldest buffered event.
@@ -50,7 +55,7 @@ class EventSubscription<T> {
     this.trackMetrics = false,
     this.onError,
     this.onDone,
-    int? bufferCapacity,
+    int? bufferCapacity = defaultSubscriptionBufferCapacity,
     BufferOverflow bufferOverflow = BufferOverflow.dropOldest,
   })  : _bufferCapacity = bufferCapacity,
         _bufferOverflow = bufferOverflow {
@@ -257,7 +262,7 @@ class EventSubscription<T> {
     final queued = List<_RequestEntry>.of(_requestQueue);
     _requestQueue.clear();
     for (final entry in queued) {
-      entry.fail(NoHandlerException(address));
+      entry.fail(RequestCanceledException(address));
     }
   }
 
@@ -398,6 +403,11 @@ class EventSubscription<T> {
           _reportOverflow(capacity);
           return true;
         case BufferOverflow.latest:
+          // `latest` keeps only the newest event: the stale backlog is not a
+          // sliding window, so it is dropped as a whole.
+          _dropped += _buffer.length;
+          _buffer.clear();
+          _reportOverflow(capacity);
         case BufferOverflow.dropOldest:
           _buffer.removeFirst();
           _dropped++;
@@ -501,6 +511,7 @@ class EventSubscription<T> {
 ///A cooperative cancellation signal for [EventBus.request].
 class CancelToken {
   final Completer<void> _cancelled = Completer<void>();
+  final Set<void Function()> _listeners = <void Function()>{};
   Object? _reason;
 
   ///True once [cancel] was called.
@@ -512,11 +523,39 @@ class CancelToken {
   ///The reason passed to [cancel], when any.
   Object? get reason => _reason;
 
+  ///The number of registered cancellation listeners, for diagnostics/tests.
+  int get listenerCount => _listeners.length;
+
+  ///Registers [listener] for [cancel].
+  ///
+  ///When the token is already cancelled, the listener is called immediately.
+  void addListener(void Function() listener) {
+    if (_cancelled.isCompleted) {
+      listener();
+    } else {
+      _listeners.add(listener);
+    }
+  }
+
+  ///Removes a listener previously passed to [addListener].
+  void removeListener(void Function() listener) {
+    _listeners.remove(listener);
+  }
+
   ///Cancels the requests that listen to this token. Repeated calls are safe.
   void cancel([Object? reason]) {
     if (_cancelled.isCompleted) return;
     _reason = reason;
+    final listeners = List<void Function()>.of(_listeners);
+    _listeners.clear();
     _cancelled.complete();
+    for (final listener in listeners) {
+      try {
+        listener();
+      } catch (_) {
+        // A cancellation listener must not prevent the others from running.
+      }
+    }
   }
 }
 
@@ -540,6 +579,9 @@ class _RequestEntry {
 
   ///When the request was put into the queue; only set when metrics are on.
   int? _queuedAtMicros;
+
+  CancelToken? _token;
+  void Function()? _tokenListener;
 
   ///The request event, available only when observability is enabled. Used for
   ///payload capture and the correlation id in error envelopes.
@@ -589,11 +631,23 @@ class _RequestEntry {
       if (token.isCancelled) {
         cancel(RequestCanceledException(topic));
       } else {
-        token.whenCancelled.then((_) {
+        void onCancelled() {
           cancel(RequestCanceledException(topic));
-        });
+        }
+
+        _token = token;
+        _tokenListener = onCancelled;
+        token.addListener(onCancelled);
       }
     }
+  }
+
+  void _detachToken() {
+    final token = _token;
+    final listener = _tokenListener;
+    _token = null;
+    _tokenListener = null;
+    if (token != null && listener != null) token.removeListener(listener);
   }
 
   ///Completes the caller's future with [error] and removes the entry from its
@@ -604,6 +658,7 @@ class _RequestEntry {
     _finished = true;
     _timer?.cancel();
     _timer = null;
+    _detachToken();
     owner?._removeQueuedRequest(this);
     if (!completer.isCompleted) completer.completeError(error);
     onBusError?.call(_errorEnvelope(
@@ -628,14 +683,22 @@ class _RequestEntry {
     _finished = true;
     _timer?.cancel();
     _timer = null;
+    _detachToken();
     owner?._removeQueuedRequest(this);
     if (!completer.isCompleted) completer.completeError(error);
-    onBusError?.call(_errorEnvelope(EventBusErrorKind.other, error));
-    _reportOutcome(error is BusyException
-        ? RequestOutcome.busy
-        : error is NoHandlerException
-            ? RequestOutcome.noHandler
-            : RequestOutcome.errored);
+    onBusError?.call(_errorEnvelope(
+      error is RequestCanceledException
+          ? EventBusErrorKind.requestCanceled
+          : EventBusErrorKind.other,
+      error,
+    ));
+    _reportOutcome(error is RequestCanceledException
+        ? RequestOutcome.canceled
+        : error is BusyException
+            ? RequestOutcome.busy
+            : error is NoHandlerException
+                ? RequestOutcome.noHandler
+                : RequestOutcome.errored);
   }
 
   ///Runs the handler. The future never throws: an error goes to the caller's
@@ -654,6 +717,7 @@ class _RequestEntry {
       _finished = true;
       _timer?.cancel();
       _timer = null;
+      _detachToken();
     }
   }
 }

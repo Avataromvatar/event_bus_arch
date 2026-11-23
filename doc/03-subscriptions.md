@@ -45,11 +45,14 @@ await sub.cancel();
 
 | Option | Default | Meaning |
 |---|---|---|
-| `bufferCapacity` | `null` (unbounded) | Events waiting while `onEvent` is busy or the subscription is paused |
+| `bufferCapacity` | `1024` | Events waiting while `onEvent` is busy or the subscription is paused; pass `null` for an explicit unbounded buffer |
 | `bufferOverflow` | `dropOldest` | What to drop when full: `latest`, `dropOldest`, `dropNewest`, `reject` |
 | `deliveryMode` | `async` | `async` schedules the callback in a microtask; `sync` invokes it inline in `fire` |
 | `onError`, `cancelOnError` | — | A throwing listener is reported as `EventBusErrorKind.listener`; `cancelOnError` cancels the subscription after the first error |
 
+- `latest` is not a sliding window: when the buffer is full it discards the whole stale backlog,
+  counts those events as dropped and keeps only the newest one. `dropOldest` keeps a sliding
+  window by removing one old event per incoming event.
 - A `reject` overflow counts the event as dropped and does not accept it.
 - `pause()` stops listener delivery; buffered events stay until `resume()`.
 - `resize` changes capacity and/or policy at runtime; shrinking drops according to the policy.
@@ -108,6 +111,8 @@ final result = await bus.request(
 
 - **Queued request + timeout/cancel** — removed from the queue and never runs.
 - **Running handler + timeout/cancel** — keeps running; its result is discarded.
+- **Queued request + subscription cancel/dispose** — fails with `RequestCanceledException`; it is
+  not `NoHandlerException` and must not be retried as a busy request.
 - The first of response, timeout and cancellation wins.
 - `RequestTimeoutException.address` and `RequestCanceledException.address` identify the request.
 
@@ -146,7 +151,7 @@ then invokes the handler.
 
 ## 6. Closing
 
-`cancel()` clears the buffers, fails queued requests with `NoHandlerException`, closes the
+`cancel()` clears the buffers, fails queued requests with `RequestCanceledException`, closes the
 `.stream` view and removes the subscription from its node. If it was the last subscription on a
 common bus, the node is removed. `onDone` is called when the node is disposed (`remove`,
 `removeAddress`, `dispose`), not on an ordinary `cancel`.

@@ -181,14 +181,27 @@ The handler's `lastData` argument is the previous `currentData` of the handler's
 
 ## 8. Availability checks
 
+`probeFire(key, data)` and `probeRequest(key, data)` answer routing questions for the data that
+would actually be sent, without publishing or invoking anything:
+
 ```dart
-bus.haveListener(selector);
-bus.haveHandler(selector);          // includes paused handlers
-bus.haveAvailableHandler(selector); // could accept a request now
+final fire = bus.probeFire(orderKey, order);
+fire.localListeners;       // managed subscriptions that accept this Order
+fire.hasRawListener;       // a listen(selector) stream has a subscriber
+fire.modelStores;          // this is a model bus
+fire.transportPublishes;   // a codec can publish the address
+fire.remoteListenerInterest;
+fire.accepted;             // any local, model, transport or remote reason
+
+final request = bus.probeRequest(orderKey, order);
+request.localHandlers;
+request.localAvailableHandlers; // free handler capacity right now
+request.isBusy;
 ```
 
-Each accepts an exact or pattern selector. A concrete listener check also counts a matching
-pattern listener.
+Both probes count supertype pattern nodes: a `DomainEvent` listener accepts an `Order`. The
+deprecated `haveListener`, `haveHandler` and `haveAvailableHandler` cannot see the data, so they
+check only the exact registered type; they will be removed in 5.0.
 
 ## 9. Removal
 
@@ -198,9 +211,10 @@ bus.removeAddress(address); // every type node at an exact address
 await bus.dispose();        // the whole bus
 ```
 
-`remove` bypasses the model-bus rule and the transport `KeepAliveNode` pin. Active listeners
-receive `done`; handler subscriptions are cancelled with the node. A model bus recreates the node
-on the next `fire`, `request` or `listen`.
+`remove` bypasses the model-bus rule. Active listeners receive `done`; handler subscriptions are
+cancelled with the node. A model bus recreates the node on the next `fire`, `request` or `listen`.
+A transport node is not pinned: it is disposed, and its broker subscription cancelled, when its
+last local listener/handler goes away or after a `fire` that created it only for publication.
 
 ## 10. Common bus and model bus
 

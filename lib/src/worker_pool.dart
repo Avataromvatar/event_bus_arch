@@ -226,6 +226,7 @@ class WorkerPool {
   final _PoolCounters _counters = _PoolCounters();
 
   int _roundRobin = 0;
+  int _leastBusyCursor = 0;
   int _active = 0;
   bool _closing = false;
   bool _failed = false;
@@ -344,10 +345,14 @@ class WorkerPool {
           cancelToken: cancelToken,
           correlationId: correlationId);
     } on StateError {
-      // the worker died between the readiness check and the send
       _counters.failedRequests++;
-      throw BusyException(
-          key.address.value, 'worker ${slot.index} is not ready any more');
+      // Only a dead/closed worker is a pool routing failure; a StateError
+      // thrown by the handler itself must reach the caller unchanged.
+      if (!slot.ready || bus.isDisposed) {
+        throw BusyException(
+            key.address.value, 'worker ${slot.index} is not ready any more');
+      }
+      rethrow;
     } catch (_) {
       _counters.failedRequests++;
       rethrow;
@@ -400,11 +405,18 @@ class WorkerPool {
 
   _WorkerSlot? _leastBusySlot() {
     _WorkerSlot? best;
-    for (final slot in _slots) {
+    var bestIndex = -1;
+    for (var offset = 0; offset < _slots.length; offset++) {
+      final index = (_leastBusyCursor + offset) % _slots.length;
+      final slot = _slots[index];
       if (!_available(slot)) continue;
       if (best == null || slot.inFlight < best.inFlight) {
         best = slot;
+        bestIndex = index;
       }
+    }
+    if (bestIndex >= 0) {
+      _leastBusyCursor = (bestIndex + 1) % _slots.length;
     }
     return best;
   }

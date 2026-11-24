@@ -1,6 +1,6 @@
 name: event_bus_arch
-description: This package is a part of Event-driven architecture providing sending, listening, processing and receiving the events. This package additional contain  Finite State Machine and Layers in Isolate what help create Event driven application.   
-version: 4.1.0
+description: "Typed addressed event bus for Dart and Flutter: events, requests, subscriptions, isolates, worker pools, layers and observability."
+version: 4.1.1
 repository: https://github.com/Avataromvatar/dart_event_bus
 # publish_to: none
 environment:
@@ -12,12 +12,6 @@ workspace:
   - packages/event_bus_arch_mqtt
   - packages/event_bus_arch_patterns
 
-dependencies:
-  # equatable: ^2.0.0
-  # uuid: ^3.0.6
-  intl: ^0.20.2
-  async: ^2.13.0
-  
 dev_dependencies:
   lints: ^6.0.0
   test: ^1.28.0

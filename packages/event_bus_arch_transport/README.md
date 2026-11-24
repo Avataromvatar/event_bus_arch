@@ -124,6 +124,10 @@ encoded result back. An invalid reply subject is reported as an error and nothin
 The response always goes to the reply subject; a subject returned by the encoder is ignored for
 responses.
 
+`probeRequest(key, data).transportRequests` is true when the key has a codec with both an encoder
+and a decoder. It reports capability, not a live connection or a broker subscriber;
+`canRequest` is the combined routing question (`hasHandler || transportRequests`).
+
 ## Tests
 
 ```text

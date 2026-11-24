@@ -300,6 +300,47 @@ void main() {
       await orders.cancel();
     });
 
+    test('probeRequest reports broker request capability', () async {
+      await start();
+      final probe = bus.probeRequest(orderKey, Order('A-1'));
+
+      expect(probe.localHandlers, 0);
+      expect(probe.hasHandler, isFalse);
+      expect(probe.transportRequests, isTrue);
+      expect(probe.canRequest, isTrue);
+
+      // Capability is independent of the current connection state.
+      connection.setStatus(TransportStatus.disconnected);
+      expect(
+          bus.probeRequest(orderKey, Order('A-1')).transportRequests, isTrue);
+    });
+
+    test('a codec without a decoder is not request-capable', () async {
+      await start(
+        codecs: EventCodecRegistry(exact: {
+          EventAddress('orders.placed'): EventCodec(
+            encode: (dto) => (null, _bytes((dto.data as Order).id)),
+          ),
+        }),
+      );
+
+      final probe = bus.probeRequest(orderKey, Order('A-1'));
+      expect(probe.transportRequests, isFalse);
+      expect(probe.canRequest, isFalse);
+    });
+
+    test('a local handler coexists with transport capability', () async {
+      await start();
+      final sub = bus.subscribe(orderKey, handler: (dto, last) async => 1);
+
+      final probe = bus.probeRequest(orderKey, Order('A-1'));
+      expect(probe.localHandlers, 1);
+      expect(probe.transportRequests, isTrue);
+      expect(probe.canRequest, isTrue);
+
+      await sub.cancel();
+    });
+
     test('a local supertype handler wins over the broker', () async {
       await start(codecs: EventCodecRegistry());
       final local = bus.subscribe(domainPattern,

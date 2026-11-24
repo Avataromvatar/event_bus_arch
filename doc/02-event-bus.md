@@ -197,9 +197,14 @@ final request = bus.probeRequest(orderKey, order);
 request.localHandlers;
 request.localAvailableHandlers; // free handler capacity right now
 request.isBusy;
+request.transportRequests;      // a transport codec can route a request
+request.hasHandler;             // a local or remote handler is known
+request.canRequest;             // hasHandler || transportRequests
 ```
 
-Both probes count supertype pattern nodes: a `DomainEvent` listener accepts an `Order`. The
+Both probes count supertype pattern nodes: a `DomainEvent` listener accepts an `Order`. A
+transport flag reports codec capability, not a live connection or a broker subscriber: a request
+needs both an encoder and a decoder. The
 deprecated `haveListener`, `haveHandler` and `haveAvailableHandler` cannot see the data, so they
 check only the exact registered type; they will be removed in 5.0.
 

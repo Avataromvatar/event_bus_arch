@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-24
-- Current in: 4.1.0
+- Current in: 4.1.1
 
 ## Context
 
@@ -38,7 +38,7 @@ the shared transport package, not to each adapter.
    are required; the request is published with a reply subject and the first response is decoded.
    `CancelToken` cancels the caller-side future with `RequestCanceledException`; the underlying
    broker request continues until its own timeout and a late response is ignored. There is no
-   broker-side cancel message in 4.1.0.
+   broker-side cancel message in 4.1.1.
 6. An incoming request resolves exactly one answering registration through
    `handlerAddressFor(address, data)`, invokes the core `handleIncomingRequest`, encodes the result
    and publishes it to the incoming `replyTo`. Overlapping exact/pattern nodes cannot both answer.
@@ -62,8 +62,9 @@ the shared transport package, not to each adapter.
   contract and a future feature may add a cancel protocol.
 - The exact-key-only publish rule prevents duplicate delivery when an exact node and a pattern or
   supertype node both match.
-- A codec that supports only one direction can fire but cannot request; `probeRequest` must expose
-  this capability rather than treating every codec as request-capable.
+- A codec that supports only one direction can fire but cannot request; `probeRequest` exposes the
+  capability as `transportRequests` (`canRequest` combines it with handler interest) rather than
+  treating every codec as request-capable.
 
 ## Alternatives considered
 

@@ -41,7 +41,10 @@ events sent right after `await waitInit` see the subscriptions made in `onInit`.
 
 The worker is spawned paused and the exit listener is registered before it is resumed, so a worker
 that dies during `onInit` fails `waitInit` rather than hanging it. `initTimeout` (30 seconds by
-default, `null` disables it) fails `waitInit` when `onInit` never finishes.
+default, `null` disables it) fails `waitInit` when `onInit` never finishes. A timeout aborts the
+initialization generation: pending link work is failed, the receive port is closed, the isolate is
+killed, and a late ready message from the old worker is ignored. `restart()` can then start a fresh
+worker.
 
 ```mermaid
 sequenceDiagram

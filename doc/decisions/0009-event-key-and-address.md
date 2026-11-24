@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-24
-- Current in: 4.1.0
+- Current in: 4.1.1
 
 ## Context
 

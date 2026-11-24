@@ -32,7 +32,7 @@ Install only what your application uses.
 
 ```yaml
 dependencies:
-  event_bus_arch: ^4.1.0
+  event_bus_arch: ^4.1.1
 
   # optional
   event_bus_arch_patterns: ^0.1.0

@@ -11,7 +11,7 @@ environment:
 # Add regular dependencies here.
 dependencies:
   # path: ^1.9.0
-  event_bus_arch: ^4.1.0
+  event_bus_arch: ^4.1.1
   event_bus_arch_transport: ^0.2.0
   dart_nats: ^1.6.1
 

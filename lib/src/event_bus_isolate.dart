@@ -743,6 +743,27 @@ class EventBusIsolate extends EventBusImpl {
     }
   }
 
+  ///Invalidates the current initialization generation and releases its worker.
+  ///
+  ///This must run before `waitInit` is completed with an error: a late
+  ///ready/exit message from the aborted worker must not be able to make the
+  ///bridge usable after the caller has already observed the failure.
+  void _abortInitGeneration(Object reason) {
+    _initTimer?.cancel();
+    _initTimer = null;
+    _generation++;
+    _workerGone = true;
+    _ready = false;
+    _link.failAllPending(reason);
+    _link.sendPort = null;
+    final port = _receivePort;
+    _receivePort = null;
+    port?.close();
+    final isolate = _isolate;
+    _isolate = null;
+    isolate?.kill(priority: Isolate.immediate);
+  }
+
   Future<void> _init() async {
     if (isDisposed) return;
     final generation = ++_generation;
@@ -752,8 +773,15 @@ class EventBusIsolate extends EventBusImpl {
     if (initTimeout != null) {
       _initTimer = Timer(initTimeout!, () {
         if (generation != _generation || _completerInit.isCompleted) return;
-        _completeInitError(EventBusException(
-            'worker initialization timed out after $initTimeout'));
+        final error = EventBusException(
+            'worker initialization timed out after $initTimeout');
+        _abortInitGeneration(error);
+        reportError(EventBusError(
+          kind: EventBusErrorKind.isolateInit,
+          source: EventBusErrorSource.isolate,
+          error: error,
+        ));
+        _completeInitError(error);
       });
     }
     try {
@@ -802,26 +830,16 @@ class EventBusIsolate extends EventBusImpl {
           _ready = true;
           _completeInitResult(true);
         } else if (message is _IsolateInitError) {
-          _ready = false;
+          final error =
+              EventBusException('worker onInit failed: ${message.error}');
+          _abortInitGeneration(error);
           reportError(EventBusError(
             kind: EventBusErrorKind.isolateInit,
             source: EventBusErrorSource.isolate,
             error: message.error,
             stackTrace: message.stackTrace,
           ));
-          _completeInitError(
-              EventBusException('worker onInit failed: ${message.error}'),
-              message.stackTrace);
-          // Kill the idle worker but keep this bus usable for a restart. The
-          // owner (pool, Layers supervisor, or the user) decides whether to
-          // retry; a plain user should dispose the bus.
-          _workerGone = true;
-          final port = _receivePort;
-          _receivePort = null;
-          port?.close();
-          final isolate = _isolate;
-          _isolate = null;
-          isolate?.kill(priority: Isolate.immediate);
+          _completeInitError(error, message.stackTrace);
         } else if (message == _isolateExitMessage) {
           _onWorkerGone();
           if (identical(_receivePort, receivePort)) {

@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-24
-- Current in: 4.1.0
+- Current in: 4.1.1
 
 ## Context
 
@@ -13,7 +13,7 @@ request leaves a completer, a queue entry or a broker subscription behind.
 ## Decision
 
 1. `EventBus.request<T>(EventKey<T> key, T data, {arguments, timeout, cancelToken,
-   correlationId})` returns `Future<dynamic>` in 4.1.0. A typed response API is a separate design
+   correlationId})` returns `Future<dynamic>` in 4.1.1. A typed response API is a separate design
    decision; it is not implied by this lifecycle record.
 2. `CancelToken` has `isCancelled`, `whenCancelled`, `reason`, `addListener`, `removeListener`,
    `listenerCount` and `cancel([reason])`. Listeners are removed on completion, timeout,
@@ -41,7 +41,7 @@ request leaves a completer, a queue entry or a broker subscription behind.
    `_IsolateCancel` to the worker. A late response for an unknown id is ignored.
 9. Transport: the caller-side future races the broker request with a `CancelToken`. Cancellation
    fails the caller with `RequestCanceledException`; the underlying broker request continues until
-   its own timeout and a late reply is ignored. There is no broker-side cancel message in 4.1.0.
+   its own timeout and a late reply is ignored. There is no broker-side cancel message in 4.1.1.
 10. No transparent retry. A request that fails because a worker died or a broker is unavailable is
     failed, not replayed. An idempotency-key retry is a later feature.
 

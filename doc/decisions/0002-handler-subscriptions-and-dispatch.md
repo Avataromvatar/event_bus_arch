@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-24
-- Current in: 4.1.0
+- Current in: 4.1.1
 
 ## Context
 
@@ -39,9 +39,10 @@ an `Invoice` handler must not answer an `Order` request merely because both use 
    producing two responses.
 5. `probeFire(key, data)` and `probeRequest(key, data)` are side-effect-free, data-aware snapshots.
    They count listeners/handlers that accept the data and report local, isolate and transport
-   interest. `haveListener`, `haveHandler` and `haveAvailableHandler` are deprecated because a
-   no-data query cannot test subtype compatibility; they check the exact registered type and are
-   removed in 5.0.
+   interest. `probeRequest.transportRequests` is true only when a transport codec has both an
+   encoder and a decoder; `canRequest` combines it with local/remote handler interest.
+   `haveListener`, `haveHandler` and `haveAvailableHandler` are deprecated because a no-data query
+   cannot test subtype compatibility; they check the exact registered type and are removed in 5.0.
 6. A request tries a local accepting handler first. Transport, isolate and `Command` use
    `probeRequest(...).localHandlers > 0` rather than an address-only check, so a local handler of
    another type does not block a broker/worker request. A local supertype pattern handler still

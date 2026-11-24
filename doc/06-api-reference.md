@@ -281,8 +281,10 @@ class RequestProbe {
   int get localListeners;
   bool get hasRawListener;
   bool get remoteHandlerInterest;
-  bool get hasHandler;
-  bool get isBusy;
+  bool get transportRequests; // a codec has both encode and decode
+  bool get hasHandler;        // localHandlers > 0 || remoteHandlerInterest
+  bool get canRequest;        // hasHandler || transportRequests
+  bool get isBusy;            // local handlers exist but none has capacity
 }
 ```
 
@@ -421,7 +423,8 @@ class EventBusIsolate extends EventBusImpl {
 
 Inherits `fire`, `request`, `listen`, `subscribe`, `currentData`, `remove`, `removeAddress`,
 `probeFire`, `probeRequest`, `have*`, `allEventStream`, `errors` and `metrics`. `fire` is outbound
-only. `waitInit` fails when the worker dies before ready or when `initTimeout` elapses.
+only. `waitInit` fails when the worker dies before ready or when `initTimeout` elapses; a timeout
+also releases the worker and its port, and late messages from that generation are ignored.
 
 ## Layers
 

@@ -1,6 +1,6 @@
 # Architecture decision records
 
-These records describe the architecture of the current `4.1.0` codebase. The numbering follows the
+These records describe the architecture of the current `4.1.1` codebase. The numbering follows the
 pre-4.1 ADR set so references such as `ADR-0008` (Web capability) and `ADR-0009` (address model)
 remain valid. The records were rewritten on 2026-11-24 to reflect the current code rather than the
 historical 4.0 planning baseline.

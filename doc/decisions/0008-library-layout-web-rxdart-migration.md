@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-24
-- Current in: 4.1.0
+- Current in: 4.1.1
 
 ## Context
 
@@ -21,7 +21,7 @@ library merely for one helper.
    - `event_bus_arch_transport`: connection seam, keyed codecs, address mapping, transport bus/node;
    - `event_bus_arch_nats` and `event_bus_arch_mqtt`: broker adapters.
 2. The core does not export pattern or transport types. A consumer adds only the packages it uses.
-   Package versions are independent; the workspace packages currently target core `^4.1.0`.
+   Package versions are independent; the workspace packages currently target core `^4.1.1`.
 3. `rxdart` is neither a dependency nor a re-export. Its one used helper is replaced by core stream
    machinery; consumers that need rxdart add it to their own dependencies.
 4. The core supports the Web target; isolate-backed APIs are VM-only. `EventBusCapabilities`

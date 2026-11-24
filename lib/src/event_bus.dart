@@ -494,6 +494,9 @@ mixin EventBusMixin implements EventBus {
   ///Hook for transports: whether a codec can encode [key].
   bool probePublishesKey<T>(EventKey<T> key) => false;
 
+  ///Hook for transports: whether [key] can be routed as a request.
+  bool probeRequestsKey<T>(EventKey<T> key) => false;
+
   ///Whether a node created only to publish an event should be detached when
   ///it has no local listeners or handlers after [fire].
   ///
@@ -968,6 +971,7 @@ mixin _EventBusHandlersMixin on EventBusMixin {
       localListeners: listeners,
       hasRawListener: raw,
       remoteHandlerInterest: probeRemoteHandlerInterest(key, data),
+      transportRequests: probeRequestsKey(key),
     );
   }
 

@@ -2,9 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-11-24
-- Current in: 4.1.0
-- Implementation note: the `initTimeout` abort cleanup is tracked as REL-01 in the
-  [post-4.1 plan](../artifacts/plans/2026-11-24-post-4.1-hardening-and-migration-plan.md)
+- Current in: 4.1.1
+- Implementation note: the `initTimeout` abort cleanup was implemented in 4.1.1 (REL-01 in the
+  [post-4.1 plan](../artifacts/plans/2026-11-24-post-4.1-hardening-and-migration-plan.md))
 
 ## Context
 
@@ -53,8 +53,8 @@ usable after the caller has already observed an initialization error.
   means “no known interest at the moment”.
 - Typed interest makes the “wrong remote type acknowledged a fire” failure impossible; the cost is
   carrying selectors and matching patterns on both sides.
-- The timeout abort is an invariant even where the current implementation only completes the
-  future; REL-01 closes the gap and adds the regression test.
+- The timeout abort is implemented and covered by the regression tests: a late ready cannot revive
+  the bridge, and `restart()` starts a fresh generation.
 
 ## Alternatives considered
 

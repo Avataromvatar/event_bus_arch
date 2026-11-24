@@ -25,6 +25,11 @@ and a quick example.
 | [06-api-reference.md](06-api-reference.md) | Public types and signatures |
 | [07-platforms.md](07-platforms.md) | VM and Web support |
 
+## Developer documentation
+
+- [Architecture decision records](decisions/README.md) — the accepted 4.1 architecture decisions
+  (address model, subscriptions, dispatch, isolates, transports, observability and platform scope).
+
 ## Separate packages
 
 The core does not document patterns or broker adapters in depth; each has its own package README:

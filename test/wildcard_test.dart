@@ -1,25 +1,26 @@
+// ignore_for_file: deprecated_member_use
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 void main() {
   group('EventBus: wildcard listeners', () {
     test('a pattern listener receives matching concrete events', () async {
       final bus = EventBus();
       final received = <int>[];
-      final sub = bus.listenLegacy<int>(paths: ['sensor', '*']).listen(received.add);
+      final sub =
+          bus.listen(EventPatternKey<int>('int.sensor.*')).listen(received.add);
 
-      expect(bus.fireLegacy<int>(1, paths: ['sensor', 'temp']), isTrue);
-      expect(bus.fireLegacy<int>(2, paths: ['sensor', 'humidity']), isTrue);
-      expect(bus.fireLegacy<int>(3, paths: ['sensor']), isFalse);
-      expect(bus.fireLegacy<int>(4, paths: ['other', 'temp']), isFalse);
+      expect(bus.fire(EventKey<int>('int.sensor.temp'), 1), isTrue);
+      expect(bus.fire(EventKey<int>('int.sensor.humidity'), 2), isTrue);
+      expect(bus.fire(EventKey<int>('int.sensor'), 3), isFalse);
+      expect(bus.fire(EventKey<int>('int.other.temp'), 4), isFalse);
       await Future<void>.delayed(Duration.zero);
 
       expect(received, [1, 2]);
-      expect(bus.currentDataLegacy<int>(paths: ['sensor', '*']), 2);
-      expect(bus.currentDataLegacy<int>(paths: ['sensor', 'temp']), isNull);
-      expect(bus.haveListenerLegacy<int>(paths: ['sensor', 'temp']), isTrue);
-      expect(bus.haveListenerLegacy<int>(paths: ['sensor', '*']), isTrue);
+      expect(bus.currentData(EventPatternKey<int>('int.sensor.*')), 2);
+      expect(bus.currentData(EventKey<int>('int.sensor.temp')), isNull);
+      expect(bus.haveListener(EventKey<int>('int.sensor.temp')), isTrue);
+      expect(bus.haveListener(EventPatternKey<int>('int.sensor.*')), isTrue);
 
       await sub.cancel();
       await bus.dispose();
@@ -28,7 +29,7 @@ void main() {
     test('fire rejects wildcard paths', () async {
       final bus = EventBus();
 
-      expect(() => bus.fireLegacy<int>(1, paths: ['sensor', '*']),
+      expect(() => bus.fire(EventKey<int>('int.sensor.*'), 1),
           throwsA(isA<EventBusException>()));
       await bus.dispose();
     });
@@ -39,56 +40,55 @@ void main() {
       final bus = EventBus();
       String? seenTopic;
       int? seenLast;
-      bus.subscribeEventsLegacy<int>(
-          paths: ['sensor', '*'],
+      bus.subscribe(EventPatternKey<int>('int.sensor.*'),
           handler: (dto, lastData) async {
-            seenTopic = dto.address;
-            seenLast = lastData;
-            return dto.data * 2;
-          });
+        seenTopic = dto.address;
+        seenLast = lastData;
+        return dto.data * 2;
+      });
 
       // The pattern node's previous value is updated by fire events.
-      bus.fireLegacy<int>(5, paths: ['sensor', 'temp']);
+      bus.fire(EventKey<int>('int.sensor.temp'), 5);
       await Future<void>.delayed(Duration.zero);
 
-      expect(await bus.requestLegacy<int>(7, paths: ['sensor', 'temp']), 14);
+      expect(await bus.request(EventKey<int>('int.sensor.temp'), 7), 14);
       expect(seenTopic, 'int.sensor.temp');
       expect(seenLast, 5);
-      expect(bus.haveHandlerLegacy<int>(paths: ['sensor', 'temp']), isTrue);
+      expect(bus.haveHandler(EventKey<int>('int.sensor.temp')), isTrue);
       await bus.dispose();
     });
 
     test('an exact handler wins over a pattern handler', () async {
       final bus = EventBus();
-      bus.subscribeEventsLegacy<int>(
-          paths: ['sensor', '*'], handler: (dto, lastData) async => 'pattern');
-      bus.subscribeEventsLegacy<int>(
-          paths: ['sensor', 'temp'], handler: (dto, lastData) async => 'exact');
+      bus.subscribe(EventPatternKey<int>('int.sensor.*'),
+          handler: (dto, lastData) async => 'pattern');
+      bus.subscribe(EventKey<int>('int.sensor.temp'),
+          handler: (dto, lastData) async => 'exact');
 
-      expect(await bus.requestLegacy<int>(1, paths: ['sensor', 'temp']), 'exact');
+      expect(await bus.request(EventKey<int>('int.sensor.temp'), 1), 'exact');
       await bus.dispose();
     });
 
     test('the most specific pattern handler wins', () async {
       final bus = EventBus();
-      bus.subscribeEventsLegacy<int>(
-          paths: ['*', '*'], handler: (dto, lastData) async => 'short');
-      bus.subscribeEventsLegacy<int>(
-          paths: ['sensor', '*'], handler: (dto, lastData) async => 'long');
+      bus.subscribe(EventPatternKey<int>('int.*.*'),
+          handler: (dto, lastData) async => 'short');
+      bus.subscribe(EventPatternKey<int>('int.sensor.*'),
+          handler: (dto, lastData) async => 'long');
 
-      expect(await bus.requestLegacy<int>(1, paths: ['sensor', 'temp']), 'long');
+      expect(await bus.request(EventKey<int>('int.sensor.temp'), 1), 'long');
       await bus.dispose();
     });
 
     test('cancelling a pattern responder removes it', () async {
       final bus = EventBus();
-      final handler = bus.subscribeEventsLegacy<int>(
-          paths: ['sensor', '*'], handler: (dto, lastData) async => 1);
+      final handler = bus.subscribe(EventPatternKey<int>('int.sensor.*'),
+          handler: (dto, lastData) async => 1);
       await handler.cancel();
 
-      expect(bus.haveHandlerLegacy<int>(paths: ['sensor', '*']), isFalse);
+      expect(bus.haveHandler(EventPatternKey<int>('int.sensor.*')), isFalse);
       await expectLater(
-        bus.requestLegacy<int>(1, paths: ['sensor', 'temp']),
+        bus.request(EventKey<int>('int.sensor.temp'), 1),
         throwsA(isA<NoHandlerException>()),
       );
       await bus.dispose();

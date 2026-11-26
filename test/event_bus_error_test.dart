@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 Future<void> pump() => Future<void>.delayed(Duration.zero);
 
@@ -12,12 +11,10 @@ void main() {
       final bus = EventBus();
       final errors = <EventBusError>[];
       final errorsSub = bus.errors.listen(errors.add);
-      final listener = bus.subscribeEventsLegacy<int>(
-        paths: ['x'],
-        onEvent: (_) => throw StateError('boom'),
-      );
+      final listener = bus.subscribe(EventKey<int>('int.x'),
+          onEvent: (_) => throw StateError('boom'));
 
-      bus.fireLegacy<int>(1, paths: ['x']);
+      bus.fire(EventKey<int>('int.x'), 1);
       await pump();
       await pump();
 
@@ -36,15 +33,13 @@ void main() {
       final bus = EventBus();
       final errors = <EventBusError>[];
       final errorsSub = bus.errors.listen(errors.add);
-      final listener = bus.subscribeEventsLegacy<int>(
-        paths: ['x'],
-        bufferCapacity: 0,
-        bufferOverflow: BufferOverflow.reject,
-        onEvent: (_) {},
-      );
+      final listener = bus.subscribe(EventKey<int>('int.x'),
+          bufferCapacity: 0,
+          bufferOverflow: BufferOverflow.reject,
+          onEvent: (_) {});
 
       listener.pause();
-      bus.fireLegacy<int>(1, paths: ['x']);
+      bus.fire(EventKey<int>('int.x'), 1);
       await pump();
 
       expect(errors, hasLength(1));
@@ -60,19 +55,16 @@ void main() {
       final errors = <EventBusError>[];
       final errorsSub = bus.errors.listen(errors.add);
       final gate = Completer<void>();
-      final handler = bus.subscribeEventsLegacy<int>(
-        paths: ['x'],
-        requestQueueCapacity: 0,
-        handler: (dto, lastData) async {
-          await gate.future;
-          return dto.data;
-        },
-      );
+      final handler = bus.subscribe(EventKey<int>('int.x'),
+          requestQueueCapacity: 0, handler: (dto, lastData) async {
+        await gate.future;
+        return dto.data;
+      });
 
-      final first = bus.requestLegacy<int>(1, paths: ['x']);
+      final first = bus.request(EventKey<int>('int.x'), 1);
       await pump();
-      final busyCheck = expectLater(
-          bus.requestLegacy<int>(2, paths: ['x']), throwsA(isA<BusyException>()));
+      final busyCheck = expectLater(bus.request(EventKey<int>('int.x'), 2),
+          throwsA(isA<BusyException>()));
       await busyCheck;
       await pump();
 
@@ -93,26 +85,23 @@ void main() {
       final errors = <EventBusError>[];
       final errorsSub = bus.errors.listen(errors.add);
       final gates = <Completer<void>>[];
-      final handler = bus.subscribeEventsLegacy<int>(
-        paths: ['x'],
-        handlerConcurrency: 2,
-        requestQueueCapacity: 0,
-        handler: (dto, lastData) async {
-          final gate = Completer<void>();
-          gates.add(gate);
-          await gate.future;
-          return dto.data;
-        },
-      );
+      final handler = bus.subscribe(EventKey<int>('int.x'),
+          handlerConcurrency: 2,
+          requestQueueCapacity: 0, handler: (dto, lastData) async {
+        final gate = Completer<void>();
+        gates.add(gate);
+        await gate.future;
+        return dto.data;
+      });
 
       final timeoutCheck = expectLater(
-        bus.requestLegacy<int>(1,
-            paths: ['x'], timeout: const Duration(milliseconds: 20)),
+        bus.request(EventKey<int>('int.x'), 1,
+            timeout: const Duration(milliseconds: 20)),
         throwsA(isA<RequestTimeoutException>()),
       );
       final token = CancelToken();
       final cancelCheck = expectLater(
-        bus.requestLegacy<int>(2, paths: ['x'], cancelToken: token),
+        bus.request(EventKey<int>('int.x'), 2, cancelToken: token),
         throwsA(isA<RequestCanceledException>()),
       );
       token.cancel();
@@ -121,11 +110,12 @@ void main() {
       await cancelCheck;
       await pump();
 
-      expect(errors.map((e) => e.kind),
+      expect(
+          errors.map((e) => e.kind),
           containsAll(<EventBusErrorKind>[
-        EventBusErrorKind.requestTimeout,
-        EventBusErrorKind.requestCanceled,
-      ]));
+            EventBusErrorKind.requestTimeout,
+            EventBusErrorKind.requestCanceled,
+          ]));
 
       for (final gate in gates) {
         gate.complete();
@@ -141,13 +131,11 @@ void main() {
       final bus = EventBus();
       final errors = <EventBusError>[];
       final errorsSub = bus.errors.listen(errors.add);
-      final handler = bus.subscribeEventsLegacy<int>(
-        paths: ['x'],
-        handler: (dto, lastData) async => throw StateError('boom'),
-      );
+      final handler = bus.subscribe(EventKey<int>('int.x'),
+          handler: (dto, lastData) async => throw StateError('boom'));
 
       await expectLater(
-          bus.requestLegacy<int>(1, paths: ['x']), throwsStateError);
+          bus.request(EventKey<int>('int.x'), 1), throwsStateError);
       await pump();
 
       expect(errors, hasLength(1));
@@ -162,22 +150,18 @@ void main() {
     test('the per-kind rate limit bounds a storm', () async {
       final bus = EventBus();
       final gate = Completer<void>();
-      final handler = bus.subscribeEventsLegacy<int>(
-        paths: ['x'],
-        requestQueueCapacity: 0,
-        handler: (dto, lastData) async {
-          await gate.future;
-          return dto.data;
-        },
-      );
+      final handler = bus.subscribe(EventKey<int>('int.x'),
+          requestQueueCapacity: 0, handler: (dto, lastData) async {
+        await gate.future;
+        return dto.data;
+      });
 
-      final first = bus.requestLegacy<int>(1, paths: ['x']);
+      final first = bus.request(EventKey<int>('int.x'), 1);
       await pump();
 
       final checks = <Future<void>>[];
       for (var i = 0; i < 25; i++) {
-        checks.add(expectLater(
-            bus.requestLegacy<int>(i + 2, paths: ['x']),
+        checks.add(expectLater(bus.request(EventKey<int>('int.x'), i + 2),
             throwsA(isA<BusyException>())));
       }
       await Future.wait(checks);
@@ -205,13 +189,13 @@ void main() {
     expect(monitor.add(first), isFalse);
     expect(monitor.add(second), isTrue);
 
-    final firstListener = first.subscribeEventsLegacy<int>(
-        paths: ['a'], onEvent: (_) => throw StateError('first'));
-    final secondListener = second.subscribeEventsLegacy<int>(
-        paths: ['b'], onEvent: (_) => throw StateError('second'));
+    final firstListener = first.subscribe(EventKey<int>('int.a'),
+        onEvent: (_) => throw StateError('first'));
+    final secondListener = second.subscribe(EventKey<int>('int.b'),
+        onEvent: (_) => throw StateError('second'));
 
-    first.fireLegacy<int>(1, paths: ['a']);
-    second.fireLegacy<int>(2, paths: ['b']);
+    first.fire(EventKey<int>('int.a'), 1);
+    second.fire(EventKey<int>('int.b'), 2);
     await pump();
     await pump();
 

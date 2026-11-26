@@ -1,8 +1,8 @@
+// ignore_for_file: deprecated_member_use
 import 'dart:async';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 void main() {
   group('EventBus Tests', () {
@@ -16,20 +16,18 @@ void main() {
       final Completer<String> completer = Completer<String>();
 
       // Set up handler
-      bus.subscribeEventsLegacy<String>(
-        handler: (dto, lastData) async {
-          return 'handled';
-        },
-      );
+      bus.subscribe(EventKey<String>('String'), handler: (dto, lastData) async {
+        return 'handled';
+      });
 
       // Listen to events
-      final stream = bus.listenLegacy<String>();
+      final stream = bus.listen(EventKey<String>('String'));
       final subscription = stream.listen((data) {
         completer.complete(data);
       });
 
       // Send event
-      final result = await bus.requestLegacy('test data');
+      final result = await bus.request(EventKey<String>('String'), 'test data');
 
       // Verify result
       expect(result, isNotNull);
@@ -43,15 +41,13 @@ void main() {
       final results = <String>[];
 
       // Set up handler
-      bus.subscribeEventsLegacy<String>(
-        handler: (dto, lastData) async {
-          return 'handled';
-        },
-      );
+      bus.subscribe(EventKey<String>('String'), handler: (dto, lastData) async {
+        return 'handled';
+      });
 
       // Create multiple listeners
-      final stream1 = bus.listenLegacy<String>();
-      final stream2 = bus.listenLegacy<String>();
+      final stream1 = bus.listen(EventKey<String>('String'));
+      final stream2 = bus.listen(EventKey<String>('String'));
 
       final subscription1 = stream1.listen((data) {
         results.add('listener1: $data');
@@ -62,7 +58,7 @@ void main() {
       });
 
       // Send event
-      await bus.requestLegacy('test data');
+      await bus.request(EventKey<String>('String'), 'test data');
       await Future.delayed(Duration(milliseconds: 10));
       // Verify both listeners received the event
       expect(results.length, 2);
@@ -76,17 +72,15 @@ void main() {
       final bus = EventBus();
 
       // Set initial data
-      bus.subscribeEventsLegacy<String>(
-        handler: (dto, lastData) async {
-          return 'handled';
-        },
-      );
+      bus.subscribe(EventKey<String>('String'), handler: (dto, lastData) async {
+        return 'handled';
+      });
 
       // Send event
-      await bus.requestLegacy('test data');
+      await bus.request(EventKey<String>('String'), 'test data');
 
       // Get last data
-      final last = bus.currentDataLegacy<String>();
+      final last = bus.currentData(EventKey<String>('String'));
       expect(last, 'test data');
     });
 
@@ -94,31 +88,29 @@ void main() {
       final bus = EventBus();
 
       // Initially should not have handler
-      expect(bus.haveHandlerLegacy<String>(), false);
+      expect(bus.haveHandler(EventKey<String>('String')), false);
 
       // Set handler
-      bus.subscribeEventsLegacy<String>(
-        handler: (dto, lastData) async {
-          return 'handled';
-        },
-      );
+      bus.subscribe(EventKey<String>('String'), handler: (dto, lastData) async {
+        return 'handled';
+      });
 
       // Should now have handler
-      expect(bus.haveHandlerLegacy<String>(), true);
+      expect(bus.haveHandler(EventKey<String>('String')), true);
     });
 
     test('Should have listener', () {
       final bus = EventBus();
 
       // Initially should not have listener
-      expect(bus.haveListenerLegacy<String>(), false);
+      expect(bus.haveListener(EventKey<String>('String')), false);
 
       // Create listener
-      final stream = bus.listenLegacy<String>();
+      final stream = bus.listen(EventKey<String>('String'));
       final subscription = stream.listen((data) {});
 
       // Should now have listener
-      expect(bus.haveListenerLegacy<String>(), true);
+      expect(bus.haveListener(EventKey<String>('String')), true);
 
       // Clean up
       subscription.cancel();
@@ -128,34 +120,31 @@ void main() {
       final bus = EventBus();
 
       // Set handler
-      final handler = bus.subscribeEventsLegacy<String>(
-        handler: (dto, lastData) async {
-          return 'handled';
-        },
-      );
+      final handler = bus.subscribe(EventKey<String>('String'),
+          handler: (dto, lastData) async {
+        return 'handled';
+      });
 
       // Should have handler
-      expect(bus.haveHandlerLegacy<String>(), true);
+      expect(bus.haveHandler(EventKey<String>('String')), true);
 
       // Remove handler
       await handler.cancel();
 
       // Should not have handler anymore
-      expect(bus.haveHandlerLegacy<String>(), false);
+      expect(bus.haveHandler(EventKey<String>('String')), false);
     });
 
     test('Should return the handler result', () async {
       final bus = EventBus();
 
       // Set up handler that returns a result
-      bus.subscribeEventsLegacy<int>(
-        handler: (dto, lastData) async {
-          return 42;
-        },
-      );
+      bus.subscribe(EventKey<int>('int'), handler: (dto, lastData) async {
+        return 42;
+      });
 
       // Send event and get result
-      final result = await bus.requestLegacy(10);
+      final result = await bus.request(EventKey<int>('int'), 10);
 
       // Verify result
       expect(result, 42);
@@ -170,22 +159,21 @@ void main() {
       final bus = EventBus();
 
       // Nobody listens and no transport knows the topic.
-      expect(bus.fireLegacy('test data'), isFalse);
+      expect(bus.fire(EventKey<String>('String'), 'test data'), isFalse);
     });
 
     test('Should send event with different topic paths', () async {
       final bus = EventBus();
 
       // Set up handler for specific path
-      bus.subscribeEventsLegacy<String>(
-        paths: ['test'],
-        handler: (dto, lastData) async {
-          return 'handled';
-        },
-      );
+      bus.subscribe(EventKey<String>('String.test'),
+          handler: (dto, lastData) async {
+        return 'handled';
+      });
 
       // Send event to specific path
-      final result = await bus.requestLegacy('test data', paths: ['test']);
+      final result =
+          await bus.request(EventKey<String>('String.test'), 'test data');
 
       // Should return a future
       expect(result, isNotNull);
@@ -196,16 +184,14 @@ void main() {
       Map<String, String>? seen;
 
       // Set up handler
-      bus.subscribeEventsLegacy<String>(
-        handler: (dto, lastData) async {
-          seen = dto.arguments;
-          return 'handled';
-        },
-      );
+      bus.subscribe(EventKey<String>('String'), handler: (dto, lastData) async {
+        seen = dto.arguments;
+        return 'handled';
+      });
 
       // Send event with arguments
-      final result =
-          await bus.requestLegacy('test data', arguments: {'key': 'value'});
+      final result = await bus.request(EventKey<String>('String'), 'test data',
+          arguments: {'key': 'value'});
 
       // Should return a future
       expect(result, isNotNull);
@@ -217,16 +203,14 @@ void main() {
       final bus = EventBus();
 
       // Set up handler for a path of two tokens
-      bus.subscribeEventsLegacy<String>(
-        paths: ['specific', 'path'],
-        handler: (dto, lastData) async {
-          return 'handled';
-        },
-      );
+      bus.subscribe(EventKey<String>('String.specific.path'),
+          handler: (dto, lastData) async {
+        return 'handled';
+      });
 
       // Send event to a different path: a different node, no handler.
       await expectLater(
-        bus.requestLegacy('test data', paths: ['specific']),
+        bus.request(EventKey<String>('String.specific'), 'test data'),
         throwsA(isA<NoHandlerException>()),
       );
     });
@@ -235,24 +219,19 @@ void main() {
       final bus = EventBus();
       final received = <String>[];
 
-      bus.subscribeEventsLegacy<String>(
-        paths: ['a'],
-        handler: (dto, lastData) async {
-          received.add('a: ${dto.data}');
-        },
-      );
-      bus.subscribeEventsLegacy<String>(
-        paths: ['b'],
-        handler: (dto, lastData) async {
-          received.add('b: ${dto.data}');
-        },
-      );
+      bus.subscribe(EventKey<String>('String.a'),
+          handler: (dto, lastData) async {
+        received.add('a: ${dto.data}');
+      });
+      bus.subscribe(EventKey<String>('String.b'),
+          handler: (dto, lastData) async {
+        received.add('b: ${dto.data}');
+      });
 
-      await bus.requestLegacy('to a', paths: ['a']);
-      await bus.requestLegacy('to b', paths: ['b']);
+      await bus.request(EventKey<String>('String.a'), 'to a');
+      await bus.request(EventKey<String>('String.b'), 'to b');
 
       expect(received, ['a: to a', 'b: to b']);
     });
-
   });
 }

@@ -1,7 +1,6 @@
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_patterns/event_bus_arch_patterns.dart';
 import 'package:test/test.dart';
-import '../../../test/legacy_compat.dart';
 
 ///The names of public parameters are part of the API. This file calls the
 ///members with named arguments on purpose: renaming one breaks the build here
@@ -49,11 +48,11 @@ void main() {
       final machine = _NameMachine(bus);
 
       // the transition is registered for NameEvent.go: another address is another node
-      bus.fireLegacy<NameEvent>(NameEvent(), paths: ['other']);
+      bus.fire(EventKey<NameEvent>('NameEvent.other'), NameEvent());
       await pumpEventQueue();
       expect(machine.state, NameState.a);
 
-      bus.fireLegacy<NameEvent>(NameEvent(), paths: ['go']);
+      bus.fire(EventKey<NameEvent>('NameEvent.go'), NameEvent());
       await pumpEventQueue();
 
       expect(machine.state, NameState.b);

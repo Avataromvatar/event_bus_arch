@@ -1,14 +1,13 @@
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 void main() {
   group('fire return semantics (D14)', () {
     test('true when a listener subscription accepts', () async {
       final bus = EventBus();
-      final sub = bus.subscribeEventsLegacy<int>(paths: ['x'], onEvent: (_) {});
+      final sub = bus.subscribe(EventKey<int>('int.x'), onEvent: (_) {});
 
-      expect(bus.fireLegacy<int>(1, paths: ['x']), isTrue);
+      expect(bus.fire(EventKey<int>('int.x'), 1), isTrue);
 
       await sub.cancel();
       await bus.dispose();
@@ -16,9 +15,9 @@ void main() {
 
     test('true for a legacy stream listener', () async {
       final bus = EventBus();
-      final sub = bus.subscribeLegacy<int>(paths: ['x'], onData: (_) {});
+      final sub = bus.listen(EventKey<int>('int.x')).listen((_) {});
 
-      expect(bus.fireLegacy<int>(1, paths: ['x']), isTrue);
+      expect(bus.fire(EventKey<int>('int.x'), 1), isTrue);
 
       await sub.cancel();
       await bus.dispose();
@@ -27,9 +26,9 @@ void main() {
     test('false for a handler-only node', () async {
       final bus = EventBus();
       final handler =
-          bus.subscribeEventsLegacy<int>(paths: ['x'], handler: (dto, last) async {});
+          bus.subscribe(EventKey<int>('int.x'), handler: (dto, last) async {});
 
-      expect(bus.fireLegacy<int>(1, paths: ['x']), isFalse);
+      expect(bus.fire(EventKey<int>('int.x'), 1), isFalse);
 
       await handler.cancel();
       await bus.dispose();
@@ -37,15 +36,13 @@ void main() {
 
     test('false when every listener rejects the event', () async {
       final bus = EventBus();
-      final sub = bus.subscribeEventsLegacy<int>(
-        paths: ['x'],
-        bufferCapacity: 0,
-        bufferOverflow: BufferOverflow.reject,
-        onEvent: (_) {},
-      );
+      final sub = bus.subscribe(EventKey<int>('int.x'),
+          bufferCapacity: 0,
+          bufferOverflow: BufferOverflow.reject,
+          onEvent: (_) {});
       sub.pause();
 
-      expect(bus.fireLegacy<int>(1, paths: ['x']), isFalse);
+      expect(bus.fire(EventKey<int>('int.x'), 1), isFalse);
 
       await sub.cancel();
       await bus.dispose();
@@ -54,8 +51,8 @@ void main() {
     test('true on a model bus even when nobody is listening', () async {
       final bus = EventBus(isModelBus: true);
 
-      expect(bus.fireLegacy<int>(1, paths: ['x']), isTrue);
-      expect(bus.currentDataLegacy<int>(paths: ['x']), 1);
+      expect(bus.fire(EventKey<int>('int.x'), 1), isTrue);
+      expect(bus.currentData(EventKey<int>('int.x')), 1);
 
       await bus.dispose();
     });
@@ -63,9 +60,9 @@ void main() {
     test('true when a pattern listener matches a concrete fire', () async {
       final bus = EventBus();
       final sub =
-          bus.subscribeEventsLegacy<int>(paths: ['a', '*'], onEvent: (_) {});
+          bus.subscribe(EventPatternKey<int>('int.a.*'), onEvent: (_) {});
 
-      expect(bus.fireLegacy<int>(1, paths: ['a', 'b']), isTrue);
+      expect(bus.fire(EventKey<int>('int.a.b'), 1), isTrue);
 
       await sub.cancel();
       await bus.dispose();

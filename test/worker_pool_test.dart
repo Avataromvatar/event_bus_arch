@@ -3,21 +3,20 @@ import 'dart:isolate';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 // --- workers (top-level only: they run in separate isolates) ---
 
 ///Answers with the per-worker index from `initialDataFor`.
 void identityWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
-  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async => index);
+  bus.subscribe(EventKey<int>('int'), handler: (dto, lastData) async => index);
 }
 
 ///Like [identityWorker], but a request with data 0 stays in flight long enough
 ///to observe the worker as busy.
 void slowIndexWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
-  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
+  bus.subscribe(EventKey<int>('int'), handler: (dto, lastData) async {
     if (dto.data == 0) {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
@@ -27,19 +26,20 @@ void slowIndexWorker(EventBus bus, Object? initialData) {
 
 ///Answers requests on `int/a/b`; used by the custom-separator test.
 void pathWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEventsLegacy<int>(
-      paths: ['a', 'b'], handler: (dto, lastData) async => dto.data);
+  bus.subscribe(EventKey<int>('int.a.b'),
+      handler: (dto, lastData) async => dto.data);
 }
 
 ///Answers String requests with the per-worker index.
 void stringIdentityWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
-  bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async => index);
+  bus.subscribe(EventKey<String>('String'),
+      handler: (dto, lastData) async => index);
 }
 
 ///Data 1 is slow, so two requests with the same key must complete in order.
 void orderedWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
+  bus.subscribe(EventKey<int>('int'), handler: (dto, lastData) async {
     if (dto.data == 1) {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
@@ -50,22 +50,22 @@ void orderedWorker(EventBus bus, Object? initialData) {
 ///Reports a 'ping' fire to the SendPort from initialData.
 void portWorker(EventBus bus, Object? initialData) {
   final port = initialData as SendPort;
-  bus.subscribeLegacy<String>(paths: ['ping'], onData: (e) => port.send('$e:ok'));
+  bus.listen(EventKey<String>('String.ping')).listen((e) => port.send('$e:ok'));
 }
 
 ///Answers with the worker index and kills the isolate on a 'die' fire.
 void dieWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
-  bus.subscribeLegacy<String>(
-      paths: ['die'],
-      onData: (_) => Isolate.current.kill(priority: Isolate.immediate));
-  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async => index);
+  bus
+      .listen(EventKey<String>('String.die'))
+      .listen((_) => Isolate.current.kill(priority: Isolate.immediate));
+  bus.subscribe(EventKey<int>('int'), handler: (dto, lastData) async => index);
 }
 
 ///Kills the isolate while a request is being handled.
 void dyingHandlerWorker(EventBus bus, Object? initialData) {
   final index = initialData as int;
-  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
+  bus.subscribe(EventKey<int>('int'), handler: (dto, lastData) async {
     if (dto.data == 0) {
       Isolate.current.kill(priority: Isolate.immediate);
     }
@@ -94,7 +94,7 @@ void main() {
       await pool.close();
       await pool.close();
       expect(pool.state, WorkerPoolState.closed);
-      expect(() => pool.fireLegacy<int>(1), throwsStateError);
+      expect(() => pool.fire(EventKey<int>('int'), 1), throwsStateError);
     });
 
     test('a worker init failure fails the pool', () async {
@@ -105,7 +105,6 @@ void main() {
 
       await pool.close();
     });
-
   });
 
   group('WorkerPool: strategies', () {
@@ -119,7 +118,7 @@ void main() {
 
       final indices = <int>[];
       for (var i = 0; i < 6; i++) {
-        indices.add(await pool.requestLegacy<int>(i) as int);
+        indices.add(await pool.request(EventKey<int>('int'), i) as int);
       }
 
       expect(indices, [0, 1, 2, 0, 1, 2]);
@@ -147,10 +146,10 @@ void main() {
 
       final key0 = keyFor(0);
       final key1 = keyFor(1);
-      expect(await pool.requestLegacy<String>(key0), 0);
-      expect(await pool.requestLegacy<String>(key0), 0);
-      expect(await pool.requestLegacy<String>(key1), 1);
-      expect(await pool.requestLegacy<String>(key1), 1);
+      expect(await pool.request(EventKey<String>('String'), key0), 0);
+      expect(await pool.request(EventKey<String>('String'), key0), 0);
+      expect(await pool.request(EventKey<String>('String'), key1), 1);
+      expect(await pool.request(EventKey<String>('String'), key1), 1);
 
       await pool.close();
     });
@@ -166,10 +165,12 @@ void main() {
       await pool.waitInit;
 
       final order = <int>[];
-      final first =
-          pool.requestLegacy<int>(1).then((value) => order.add(value as int));
-      final second =
-          pool.requestLegacy<int>(2).then((value) => order.add(value as int));
+      final first = pool
+          .request(EventKey<int>('int'), 1)
+          .then((value) => order.add(value as int));
+      final second = pool
+          .request(EventKey<int>('int'), 2)
+          .then((value) => order.add(value as int));
       await Future.wait([first, second]);
 
       expect(order, [1, 2]);
@@ -185,8 +186,10 @@ void main() {
       );
       await pool.waitInit;
 
-      final slow = pool.requestLegacy<int>(0); // both empty: worker 0
-      final quick = await pool.requestLegacy<int>(1); // worker 0 busy: worker 1
+      final slow =
+          pool.request(EventKey<int>('int'), 0); // both empty: worker 0
+      final quick = await pool.request(
+          EventKey<int>('int'), 1); // worker 0 busy: worker 1
 
       expect(quick, 1);
       expect(await slow, 0);
@@ -206,15 +209,15 @@ void main() {
         ),
       );
       await pool.waitInit;
-      expect(await pool.requestLegacy<int>(1), 0);
+      expect(await pool.request(EventKey<int>('int'), 1), 0);
 
       final death = pool.errors
           .firstWhere((error) => error.kind == EventBusErrorKind.isolateDeath)
           .timeout(const Duration(seconds: 2));
-      expect(pool.fireLegacy<String>('x', paths: ['die']), isTrue);
+      expect(pool.fire(EventKey<String>('String.die'), 'x'), isTrue);
       await death;
 
-      expect(await pool.requestLegacy<int>(1), 1);
+      expect(await pool.request(EventKey<int>('int'), 1), 1);
       await pool.close();
     });
 
@@ -229,12 +232,12 @@ void main() {
       await pool.waitInit;
 
       final hits = receive.take(3).toList();
-      expect(pool.fireLegacy<String>('x', paths: ['ping']), isTrue);
+      expect(pool.fire(EventKey<String>('String.ping'), 'x'), isTrue);
       expect(await hits.timeout(const Duration(seconds: 2)),
           ['x:ok', 'x:ok', 'x:ok']);
 
-      await expectLater(
-          pool.requestLegacy<String>('x'), throwsA(isA<UnsupportedError>()));
+      await expectLater(pool.request(EventKey<String>('String'), 'x'),
+          throwsA(isA<UnsupportedError>()));
 
       await pool.close();
       receive.close();
@@ -258,12 +261,12 @@ void main() {
       final death = pool.errors
           .firstWhere((error) => error.kind == EventBusErrorKind.isolateDeath)
           .timeout(const Duration(seconds: 2));
-      expect(pool.fireLegacy<String>('x', paths: ['die']), isTrue);
+      expect(pool.fire(EventKey<String>('String.die'), 'x'), isTrue);
       await death;
 
       await pool.waitReady().timeout(const Duration(seconds: 2));
       expect(pool.isReady, isTrue);
-      expect(await pool.requestLegacy<int>(1), 0);
+      expect(await pool.request(EventKey<int>('int'), 1), 0);
       expect(pool.metrics.restarts, 1);
 
       await pool.close();
@@ -284,14 +287,15 @@ void main() {
       final failure = pool.errors
           .firstWhere((error) => error.kind == EventBusErrorKind.supervision)
           .timeout(const Duration(seconds: 2));
-      expect(pool.fireLegacy<String>('x', paths: ['die']), isTrue);
+      expect(pool.fire(EventKey<String>('String.die'), 'x'), isTrue);
       final error = await failure;
 
       expect(error.source, EventBusErrorSource.supervision);
       expect(pool.state, WorkerPoolState.failed);
-      expect(() => pool.fireLegacy<int>(1), throwsA(isA<EventBusException>()));
-      await expectLater(
-          pool.requestLegacy<int>(1), throwsA(isA<EventBusException>()));
+      expect(() => pool.fire(EventKey<int>('int'), 1),
+          throwsA(isA<EventBusException>()));
+      await expectLater(pool.request(EventKey<int>('int'), 1),
+          throwsA(isA<EventBusException>()));
 
       await pool.close();
     });
@@ -312,11 +316,12 @@ void main() {
       final death = pool.errors
           .firstWhere((error) => error.kind == EventBusErrorKind.isolateDeath)
           .timeout(const Duration(seconds: 2));
-      expect(pool.fireLegacy<String>('x', paths: ['die']), isTrue);
+      expect(pool.fire(EventKey<String>('String.die'), 'x'), isTrue);
       await death;
 
-      await expectLater(pool.requestLegacy<int>(1), throwsA(isA<BusyException>()));
-      expect(pool.fireLegacy<int>(1), isFalse);
+      await expectLater(
+          pool.request(EventKey<int>('int'), 1), throwsA(isA<BusyException>()));
+      expect(pool.fire(EventKey<int>('int'), 1), isFalse);
       expect(pool.metrics.dropped, greaterThan(0));
 
       await pool.close();
@@ -331,8 +336,10 @@ void main() {
       );
       await pool.waitInit;
 
-      final slow = pool.requestLegacy<int>(0); // occupies the only credit
-      await expectLater(pool.requestLegacy<int>(1), throwsA(isA<BusyException>()));
+      final slow =
+          pool.request(EventKey<int>('int'), 0); // occupies the only credit
+      await expectLater(
+          pool.request(EventKey<int>('int'), 1), throwsA(isA<BusyException>()));
       expect(await slow, 0);
 
       await pool.close();
@@ -353,8 +360,8 @@ void main() {
           .firstWhere((error) => error.kind == EventBusErrorKind.supervision)
           .timeout(const Duration(seconds: 2));
 
-      await expectLater(
-          pool.requestLegacy<int>(0), throwsA(isA<EventBusException>()));
+      await expectLater(pool.request(EventKey<int>('int'), 0),
+          throwsA(isA<EventBusException>()));
       await failure;
 
       expect(pool.metrics.failedRequests, 1);

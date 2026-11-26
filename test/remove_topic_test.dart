@@ -1,6 +1,6 @@
+// ignore_for_file: deprecated_member_use
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 // --- functions that run IN A WORKER ISOLATE (top-level only) ---
 
@@ -9,20 +9,20 @@ import 'legacy_compat.dart';
 ///handler on the worker side.
 void doneReporterWorker(EventBus bus, Object? initialData) {
   var done = false;
-  bus.subscribeLegacy<int>(
-      paths: ['state'], onData: (_) {}, onDone: () => done = true);
-  bus.subscribeEventsLegacy<bool>(
-      paths: ['was_done'], handler: (dto, lastData) async => done);
+  bus
+      .listen(EventKey<int>('int.state'))
+      .listen((_) {}, onDone: () => done = true);
+  bus.subscribe(EventKey<bool>('bool.was_done'),
+      handler: (dto, lastData) async => done);
 }
 
 ///Removes `state` from inside the worker and reports through the request.
 void workerDeleteWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEventsLegacy<String>(
-      paths: ['delete_state'],
+  bus.subscribe(EventKey<String>('String.delete_state'),
       handler: (dto, lastData) async {
-        bus.removeTopicLegacy<int>(paths: ['state']);
-        return 'deleted';
-      });
+    bus.remove(EventKey<int>('int.state'));
+    return 'deleted';
+  });
 }
 
 void silentWorker(EventBus bus, Object? initialData) {}
@@ -31,40 +31,41 @@ void main() {
   group('removeTopic: model bus', () {
     test('forgets the value and removes the node', () async {
       final bus = EventBus(isModelBus: true);
-      bus.fireLegacy<int>(1, paths: ['state']);
-      expect(bus.currentDataLegacy<int>(paths: ['state']), 1);
+      bus.fire(EventKey<int>('int.state'), 1);
+      expect(bus.currentData(EventKey<int>('int.state')), 1);
 
-      expect(bus.removeTopicLegacy<int>(paths: ['state']), isTrue);
+      expect(bus.remove(EventKey<int>('int.state')), isTrue);
 
-      expect(bus.currentDataLegacy<int>(paths: ['state']), isNull);
-      expect(bus.haveListenerLegacy<int>(paths: ['state']), isFalse);
+      expect(bus.currentData(EventKey<int>('int.state')), isNull);
+      expect(bus.haveListener(EventKey<int>('int.state')), isFalse);
       await bus.dispose();
     });
 
     test('returns false for a topic without a node', () async {
       final bus = EventBus(isModelBus: true);
 
-      expect(bus.removeTopicLegacy<int>(paths: ['missing']), isFalse);
+      expect(bus.remove(EventKey<int>('int.missing')), isFalse);
       await bus.dispose();
     });
 
     test('a later fire creates the node and stores the value again', () async {
       final bus = EventBus(isModelBus: true);
-      bus.fireLegacy<int>(1, paths: ['state']);
-      bus.removeTopicLegacy<int>(paths: ['state']);
+      bus.fire(EventKey<int>('int.state'), 1);
+      bus.remove(EventKey<int>('int.state'));
 
-      expect(bus.fireLegacy<int>(2, paths: ['state']), isTrue);
-      expect(bus.currentDataLegacy<int>(paths: ['state']), 2);
+      expect(bus.fire(EventKey<int>('int.state'), 2), isTrue);
+      expect(bus.currentData(EventKey<int>('int.state')), 2);
       await bus.dispose();
     });
 
     test('active listeners receive done', () async {
       final bus = EventBus(isModelBus: true);
       var done = false;
-      bus.subscribeLegacy<int>(
-          paths: ['state'], onData: (_) {}, onDone: () => done = true);
+      bus
+          .listen(EventKey<int>('int.state'))
+          .listen((_) {}, onDone: () => done = true);
 
-      bus.removeTopicLegacy<int>(paths: ['state']);
+      bus.remove(EventKey<int>('int.state'));
       await Future<void>.delayed(Duration.zero);
 
       expect(done, isTrue);
@@ -74,15 +75,15 @@ void main() {
     test('a pattern topic is removed with its listeners', () async {
       final bus = EventBus(isModelBus: true);
       final seen = <int>[];
-      bus.subscribeLegacy<int>(paths: ['a', '*'], onData: seen.add);
-      bus.fireLegacy<int>(1, paths: ['a', 'b']);
+      bus.listen(EventPatternKey<int>('int.a.*')).listen(seen.add);
+      bus.fire(EventKey<int>('int.a.b'), 1);
       await Future<void>.delayed(Duration.zero);
       expect(seen, [1]);
 
-      expect(bus.removeTopicLegacy<int>(paths: ['a', '*']), isTrue);
-      expect(bus.haveListenerLegacy<int>(paths: ['a', '*']), isFalse);
+      expect(bus.remove(EventPatternKey<int>('int.a.*')), isTrue);
+      expect(bus.haveListener(EventPatternKey<int>('int.a.*')), isFalse);
 
-      bus.fireLegacy<int>(2, paths: ['a', 'b']);
+      bus.fire(EventKey<int>('int.a.b'), 2);
       await Future<void>.delayed(Duration.zero);
       expect(seen, [1]);
       await bus.dispose();
@@ -91,23 +92,21 @@ void main() {
     test('removeTopic also cancels the handler subscription', () async {
       final bus = EventBus(isModelBus: true);
       final previous = <String?>[];
-      bus.subscribeEventsLegacy<String>(
-        paths: ['state'],
-        handler: (dto, lastData) async {
-          previous.add(lastData);
-          return dto.data;
-        },
-      );
+      bus.subscribe(EventKey<String>('String.state'),
+          handler: (dto, lastData) async {
+        previous.add(lastData);
+        return dto.data;
+      });
 
-      await bus.requestLegacy<String>('a', paths: ['state']);
-      expect(bus.haveHandlerLegacy<String>(paths: ['state']), isTrue);
+      await bus.request(EventKey<String>('String.state'), 'a');
+      expect(bus.haveHandler(EventKey<String>('String.state')), isTrue);
 
-      expect(bus.removeTopicLegacy<String>(paths: ['state']), isTrue);
-      expect(bus.currentDataLegacy<String>(paths: ['state']), isNull);
-      expect(bus.haveHandlerLegacy<String>(paths: ['state']), isFalse);
+      expect(bus.remove(EventKey<String>('String.state')), isTrue);
+      expect(bus.currentData(EventKey<String>('String.state')), isNull);
+      expect(bus.haveHandler(EventKey<String>('String.state')), isFalse);
 
       await expectLater(
-        bus.requestLegacy<String>('b', paths: ['state']),
+        bus.request(EventKey<String>('String.state'), 'b'),
         throwsA(isA<NoHandlerException>()),
       );
       expect(previous, [null]);
@@ -118,28 +117,29 @@ void main() {
   group('removeTopic: common bus', () {
     test('removes an existing node and returns true once', () async {
       final bus = EventBus();
-      bus.subscribeLegacy<int>(paths: ['state'], onData: (_) {});
+      bus.listen(EventKey<int>('int.state')).listen((_) {});
 
-      expect(bus.removeTopicLegacy<int>(paths: ['state']), isTrue);
-      expect(bus.removeTopicLegacy<int>(paths: ['state']), isFalse);
+      expect(bus.remove(EventKey<int>('int.state')), isTrue);
+      expect(bus.remove(EventKey<int>('int.state')), isFalse);
       await bus.dispose();
     });
 
     test('a late cancel of a removed node does not remove the new node',
         () async {
       final bus = EventBus();
-      bus.subscribeLegacy<int>(paths: ['state'], onData: (_) {});
+      bus.listen(EventKey<int>('int.state')).listen((_) {});
 
-      expect(bus.removeTopicLegacy<int>(paths: ['state']), isTrue);
+      expect(bus.remove(EventKey<int>('int.state')), isTrue);
 
       final received = <int>[];
-      final second = bus.subscribeLegacy<int>(paths: ['state'], onData: received.add);
+      final second =
+          bus.listen(EventKey<int>('int.state')).listen(received.add);
 
       // Let the done/doOnCancel callbacks of the removed node run: with a
       // key-only removal they would delete the node created just above.
       await Future<void>.delayed(Duration.zero);
 
-      expect(bus.fireLegacy<int>(1, paths: ['state']), isTrue);
+      expect(bus.fire(EventKey<int>('int.state'), 1), isTrue);
       await Future<void>.delayed(Duration.zero);
       expect(received, [1]);
 
@@ -151,7 +151,7 @@ void main() {
       final bus = EventBus();
       await bus.dispose();
 
-      expect(() => bus.removeTopicLegacy<int>(paths: ['state']), throwsStateError);
+      expect(() => bus.remove(EventKey<int>('int.state')), throwsStateError);
     });
   });
 
@@ -159,15 +159,15 @@ void main() {
     test('main-side delete reaches the worker', () async {
       final iso = EventBusIsolate(onInit: doneReporterWorker, isModelBus: true);
       await iso.waitInit;
-      final sub = iso.subscribeLegacy<int>(paths: ['state'], onData: (_) {});
-      expect(iso.haveListenerLegacy<int>(paths: ['state']), isTrue);
+      final sub = iso.listen(EventKey<int>('int.state')).listen((_) {});
+      expect(iso.haveListener(EventKey<int>('int.state')), isTrue);
 
-      expect(iso.removeTopicLegacy<int>(paths: ['state']), isTrue);
-      expect(iso.haveListenerLegacy<int>(paths: ['state']), isFalse);
+      expect(iso.remove(EventKey<int>('int.state')), isTrue);
+      expect(iso.haveListener(EventKey<int>('int.state')), isFalse);
 
       // The delete is in the port before this request: the worker has already
       // completed its subscription.
-      expect(await iso.requestLegacy<bool>(true, paths: ['was_done']), isTrue);
+      expect(await iso.request(EventKey<bool>('bool.was_done'), true), isTrue);
 
       await sub.cancel();
       await iso.dispose();
@@ -176,24 +176,24 @@ void main() {
     test('a worker-side delete reaches the main isolate', () async {
       final iso = EventBusIsolate(onInit: workerDeleteWorker, isModelBus: true);
       await iso.waitInit;
-      final sub = iso.subscribeLegacy<int>(paths: ['state'], onData: (_) {});
-      expect(iso.haveListenerLegacy<int>(paths: ['state']), isTrue);
+      final sub = iso.listen(EventKey<int>('int.state')).listen((_) {});
+      expect(iso.haveListener(EventKey<int>('int.state')), isTrue);
 
-      expect(
-          await iso.requestLegacy<String>('go', paths: ['delete_state']), 'deleted');
+      expect(await iso.request(EventKey<String>('String.delete_state'), 'go'),
+          'deleted');
 
-      expect(iso.haveListenerLegacy<int>(paths: ['state']), isFalse);
+      expect(iso.haveListener(EventKey<int>('int.state')), isFalse);
       await sub.cancel();
       await iso.dispose();
     });
 
     test('throws before waitInit and after dispose', () async {
       final iso = EventBusIsolate(onInit: silentWorker, isModelBus: true);
-      expect(() => iso.removeTopicLegacy<int>(paths: ['state']), throwsStateError);
+      expect(() => iso.remove(EventKey<int>('int.state')), throwsStateError);
 
       await iso.waitInit;
       await iso.dispose();
-      expect(() => iso.removeTopicLegacy<int>(paths: ['state']), throwsStateError);
+      expect(() => iso.remove(EventKey<int>('int.state')), throwsStateError);
     });
   });
 }

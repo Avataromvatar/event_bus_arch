@@ -7,8 +7,6 @@ import 'package:event_bus_arch_mqtt/event_bus_arch_mqtt.dart';
 import 'package:test/test.dart';
 
 import 'fakes/fake_mqtt_connection.dart';
-import '../../../test/legacy_compat.dart';
-import 'legacy_mqtt.dart';
 
 void main() {
   test('the public types are exported', () {
@@ -19,8 +17,9 @@ void main() {
 
   test('the bus exposes the connection state', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
+      codecs: EventCodecRegistry(),
       connection: connection,
     );
     addTearDown(bus.dispose);
@@ -32,8 +31,9 @@ void main() {
 
   test('dispose closes the connection and can be repeated', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
+      codecs: EventCodecRegistry(),
       connection: connection,
     );
     await Future<void>.delayed(Duration.zero);
@@ -47,18 +47,28 @@ void main() {
 
   test('fire creates a node for a registered topic and publishes it', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
-      serializers: {
-        'int.sensor': (dto) =>
-            (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
-      },
+      codecs: EventCodecRegistry(
+        exact: {
+          EventAddress('int.sensor'): EventCodec(
+            encode: (dto) =>
+                (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+          ),
+        },
+        patterns: {
+          EventPattern('int.sensor.>'): EventCodec(
+            encode: (dto) =>
+                (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+          ),
+        },
+      ),
       connection: connection,
     );
     addTearDown(bus.dispose);
 
     expect(
-      bus.fireLegacy<int>(21, paths: ['sensor'], arguments: {'tenant': 'acme'}),
+      bus.fire(EventKey<int>('int.sensor'), 21, arguments: {'tenant': 'acme'}),
       isTrue,
     );
     await Future<void>.delayed(Duration.zero);
@@ -70,60 +80,93 @@ void main() {
     expect(published.arguments, {'tenant': 'acme'});
     expect(published.originId, bus.originId);
     // A fire-only node is detached after publication, so it keeps no value.
-    expect(bus.currentDataLegacy<int>(paths: ['sensor']), isNull);
+    expect(bus.currentData(EventKey<int>('int.sensor')), isNull);
   });
 
   test('fire throws when the connection is down', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
-      serializers: {'int.sensor': (dto) => (null, Uint8List(0))},
+      codecs: EventCodecRegistry(
+        exact: {
+          EventAddress('int.sensor'): EventCodec(
+            encode: (dto) => (null, Uint8List(0)),
+          ),
+        },
+        patterns: {
+          EventPattern('int.sensor.>'): EventCodec(
+            encode: (dto) => (null, Uint8List(0)),
+          ),
+        },
+      ),
       connection: connection,
     );
     addTearDown(bus.dispose);
     connection.setStatus(MqttConnectionStatus.disconnected);
 
     expect(
-      () => bus.fireLegacy<int>(21, paths: ['sensor']),
+      () => bus.fire(EventKey<int>('int.sensor'), 21),
       throwsA(isA<MqttServerUnavailableException>()),
     );
 
     expect(connection.publishes, isEmpty);
-    expect(bus.currentDataLegacy<int>(paths: ['sensor']), isNull);
+    expect(bus.currentData(EventKey<int>('int.sensor')), isNull);
   });
 
   test('fire without a registration keeps the local semantics', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
+      codecs: EventCodecRegistry(),
       connection: connection,
     );
     addTearDown(bus.dispose);
 
-    expect(bus.fireLegacy<String>('v', paths: ['x']), isFalse);
-    expect(bus.currentDataLegacy<String>(paths: ['x']), isNull);
+    expect(bus.fire(EventKey<String>('String.x'), 'v'), isFalse);
+    expect(bus.currentData(EventKey<String>('String.x')), isNull);
   });
 
   test('delivers incoming messages to a listener', () async {
     final connection = FakeMqttConnection();
     String? seenTopic;
     Map<String, String>? seenArguments;
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
-      deserializers: {
-        'int.sensor.temp': (data, topic, {arguments}) {
-          seenTopic = topic;
-          seenArguments = arguments;
-          return EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)));
+      codecs: EventCodecRegistry(
+        exact: {
+          EventAddress('int.sensor.temp'): EventCodec(
+            decode: (data, address, {arguments}) =>
+                ((data, topic, {arguments}) {
+                  seenTopic = topic;
+                  seenArguments = arguments;
+                  return EventDTO.withKey(
+                    EventKey<int>(topic),
+                    int.parse(utf8.decode(data)),
+                  );
+                })(data, address.value, arguments: arguments),
+          ),
         },
-      },
+        patterns: {
+          EventPattern('int.sensor.temp.>'): EventCodec(
+            decode: (data, address, {arguments}) =>
+                ((data, topic, {arguments}) {
+                  seenTopic = topic;
+                  seenArguments = arguments;
+                  return EventDTO.withKey(
+                    EventKey<int>(topic),
+                    int.parse(utf8.decode(data)),
+                  );
+                })(data, address.value, arguments: arguments),
+          ),
+        },
+      ),
       connection: connection,
     );
     addTearDown(bus.dispose);
 
     final received = Completer<int>();
     final subscription = bus
-        .listenLegacy<int>(paths: ['sensor', 'temp'])
+        .listen(EventKey<int>('int.sensor.temp'))
         .listen((value) => received.complete(value));
     addTearDown(subscription.cancel);
 
@@ -140,25 +183,33 @@ void main() {
     expect(await received.future.timeout(const Duration(seconds: 1)), 42);
     expect(seenTopic, 'int.sensor.temp');
     expect(seenArguments, {'tenant': 'acme'});
-    expect(bus.currentDataLegacy<int>(paths: ['sensor', 'temp']), 42);
+    expect(bus.currentData(EventKey<int>('int.sensor.temp')), 42);
   });
 
   test(
     'delivers incoming messages matched by a wildcard subscription',
     () async {
       final connection = FakeMqttConnection();
-      final bus = legacyMqtt(
+      final bus = EventBusMqtt.keys(
         Uri.parse('mqtt://localhost:1883'),
-        deserializers: {
-          'int.sensor.*': (data, topic, {arguments}) => EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data))),
-        },
+        codecs: EventCodecRegistry(
+          patterns: {
+            EventPattern('int.sensor.*'): EventCodec(
+              decode: (data, address, {arguments}) =>
+                  ((data, topic, {arguments}) => EventDTO.withKey(
+                    EventKey<int>(topic),
+                    int.parse(utf8.decode(data)),
+                  ))(data, address.value, arguments: arguments),
+            ),
+          },
+        ),
         connection: connection,
       );
       addTearDown(bus.dispose);
 
       final received = Completer<int>();
       final subscription = bus
-          .listenLegacy<int>(paths: ['sensor', '*'])
+          .listen(EventPatternKey<int>('int.sensor.*'))
           .listen((value) => received.complete(value));
       addTearDown(subscription.cancel);
 
@@ -177,17 +228,27 @@ void main() {
 
   test('drops a tail-wildcard match with zero levels', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
-      deserializers: {
-        'int.>': (data, topic, {arguments}) => EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data))),
-      },
+      codecs: EventCodecRegistry(
+        patterns: {
+          EventPattern('int.>'): EventCodec(
+            decode: (data, address, {arguments}) =>
+                ((data, topic, {arguments}) => EventDTO.withKey(
+                  EventKey<int>(topic),
+                  int.parse(utf8.decode(data)),
+                ))(data, address.value, arguments: arguments),
+          ),
+        },
+      ),
       connection: connection,
     );
     addTearDown(bus.dispose);
 
     final received = <int>[];
-    final subscription = bus.listenLegacy<int>(paths: ['>']).listen(received.add);
+    final subscription = bus
+        .listen(EventPatternKey<int>('int.>'))
+        .listen(received.add);
     addTearDown(subscription.cancel);
 
     expect(connection.subscribedSubjects, ['int/#']);
@@ -205,37 +266,62 @@ void main() {
 
     await Future<void>.delayed(Duration.zero);
     expect(received, [2]);
-    expect(bus.currentDataLegacy<int>(paths: ['>']), 2);
+    expect(bus.currentData(EventPatternKey<int>('int.>')), 2);
   });
 
   test('uses the serializer subject override', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
-      serializers: {
-        'int.sensor': (dto) => ('custom/subject', Uint8List.fromList([1])),
-      },
+      codecs: EventCodecRegistry(
+        exact: {
+          EventAddress('int.sensor'): EventCodec(
+            encode: (dto) => ('custom/subject', Uint8List.fromList([1])),
+          ),
+        },
+        patterns: {
+          EventPattern('int.sensor.>'): EventCodec(
+            encode: (dto) => ('custom/subject', Uint8List.fromList([1])),
+          ),
+        },
+      ),
       connection: connection,
     );
     addTearDown(bus.dispose);
 
-    expect(bus.fireLegacy<int>(1, paths: ['sensor']), isTrue);
+    expect(bus.fire(EventKey<int>('int.sensor'), 1), isTrue);
 
     expect(connection.publishes.single.subject, 'custom/subject');
   });
 
   test('dispose cancels node subscriptions', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
-      deserializers: {
-        'int.sensor.temp': (data, topic, {arguments}) =>
-            EventDTO.withKey(EventKey<int>(topic), 0),
-      },
+      codecs: EventCodecRegistry(
+        exact: {
+          EventAddress('int.sensor.temp'): EventCodec(
+            decode: (data, address, {arguments}) =>
+                ((data, topic, {arguments}) => EventDTO.withKey(
+                  EventKey<int>(topic),
+                  0,
+                ))(data, address.value, arguments: arguments),
+          ),
+        },
+        patterns: {
+          EventPattern('int.sensor.temp.>'): EventCodec(
+            decode: (data, address, {arguments}) =>
+                ((data, topic, {arguments}) => EventDTO.withKey(
+                  EventKey<int>(topic),
+                  0,
+                ))(data, address.value, arguments: arguments),
+          ),
+        },
+      ),
       connection: connection,
     );
     final subscription = bus
-        .listenLegacy<int>(paths: ['sensor', 'temp'])
+        .listen(EventKey<int>('int.sensor.temp'))
         .listen((_) {});
     expect(connection.subscribedSubjects, ['int/sensor/temp']);
 
@@ -250,15 +336,26 @@ void main() {
 
   test('reports a serializer failure to the sender', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
-      serializers: {'int.sensor': (dto) => throw StateError('boom')},
+      codecs: EventCodecRegistry(
+        exact: {
+          EventAddress('int.sensor'): EventCodec(
+            encode: (dto) => throw StateError('boom'),
+          ),
+        },
+        patterns: {
+          EventPattern('int.sensor.>'): EventCodec(
+            encode: (dto) => throw StateError('boom'),
+          ),
+        },
+      ),
       connection: connection,
     );
     addTearDown(bus.dispose);
 
     expect(
-      () => bus.fireLegacy<int>(1, paths: ['sensor']),
+      () => bus.fire(EventKey<int>('int.sensor'), 1),
       throwsA(isA<MqttSerializationException>()),
     );
   });
@@ -268,18 +365,36 @@ void main() {
     () async {
       final connection = FakeMqttConnection();
       final errors = <Object>[];
-      final bus = legacyMqtt(
+      final bus = EventBusMqtt.keys(
         Uri.parse('mqtt://localhost:1883'),
-        deserializers: {
-          'int.sensor': (data, topic, {arguments}) =>
-              EventDTO.withKey(EventKey<String>(topic), 'wrong'),
-        },
+        codecs: EventCodecRegistry(
+          exact: {
+            EventAddress('int.sensor'): EventCodec(
+              decode: (data, address, {arguments}) =>
+                  ((data, topic, {arguments}) => EventDTO.withKey(
+                    EventKey<String>(topic),
+                    'wrong',
+                  ))(data, address.value, arguments: arguments),
+            ),
+          },
+          patterns: {
+            EventPattern('int.sensor.>'): EventCodec(
+              decode: (data, address, {arguments}) =>
+                  ((data, topic, {arguments}) => EventDTO.withKey(
+                    EventKey<String>(topic),
+                    'wrong',
+                  ))(data, address.value, arguments: arguments),
+            ),
+          },
+        ),
         connection: connection,
       );
       addTearDown(bus.dispose);
       final errorSubscription = bus.errors.listen(errors.add);
       addTearDown(errorSubscription.cancel);
-      final subscription = bus.listenLegacy<int>(paths: ['sensor']).listen((_) {});
+      final subscription = bus
+          .listen(EventKey<int>('int.sensor'))
+          .listen((_) {});
       addTearDown(subscription.cancel);
 
       connection.deliver(
@@ -289,28 +404,47 @@ void main() {
 
       final reported = errors.single as EventBusError;
       expect(reported.error, isA<MqttDeserializationException>());
-      expect(bus.currentDataLegacy<int>(paths: ['sensor']), isNull);
+      expect(bus.currentData(EventKey<int>('int.sensor')), isNull);
     },
   );
 
   test('an outgoing request is answered through the connection', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
-      serializers: {
-        'int.sensor': (dto) =>
-            (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
-      },
-      deserializers: {
-        'int.sensor': (data, topic, {arguments}) => EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)), arguments: arguments),
-      },
+      codecs: EventCodecRegistry(
+        exact: {
+          EventAddress('int.sensor'): EventCodec(
+            encode: (dto) =>
+                (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+            decode: (data, address, {arguments}) =>
+                ((data, topic, {arguments}) => EventDTO.withKey(
+                  EventKey<int>(topic),
+                  int.parse(utf8.decode(data)),
+                  arguments: arguments,
+                ))(data, address.value, arguments: arguments),
+          ),
+        },
+        patterns: {
+          EventPattern('int.sensor.>'): EventCodec(
+            encode: (dto) =>
+                (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+            decode: (data, address, {arguments}) =>
+                ((data, topic, {arguments}) => EventDTO.withKey(
+                  EventKey<int>(topic),
+                  int.parse(utf8.decode(data)),
+                  arguments: arguments,
+                ))(data, address.value, arguments: arguments),
+          ),
+        },
+      ),
       connection: connection,
     );
     addTearDown(bus.dispose);
 
-    final pending = bus.requestLegacy<int>(
+    final pending = bus.request(
+      EventKey<int>('int.sensor'),
       21,
-      paths: ['sensor'],
       timeout: const Duration(seconds: 1),
     );
 
@@ -330,20 +464,39 @@ void main() {
 
   test('an incoming request is answered by the local handler', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
-      serializers: {
-        'int.sensor': (dto) =>
-            (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
-      },
-      deserializers: {
-        'int.sensor': (data, topic, {arguments}) => EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)), arguments: arguments),
-      },
+      codecs: EventCodecRegistry(
+        exact: {
+          EventAddress('int.sensor'): EventCodec(
+            encode: (dto) =>
+                (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+            decode: (data, address, {arguments}) =>
+                ((data, topic, {arguments}) => EventDTO.withKey(
+                  EventKey<int>(topic),
+                  int.parse(utf8.decode(data)),
+                  arguments: arguments,
+                ))(data, address.value, arguments: arguments),
+          ),
+        },
+        patterns: {
+          EventPattern('int.sensor.>'): EventCodec(
+            encode: (dto) =>
+                (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+            decode: (data, address, {arguments}) =>
+                ((data, topic, {arguments}) => EventDTO.withKey(
+                  EventKey<int>(topic),
+                  int.parse(utf8.decode(data)),
+                  arguments: arguments,
+                ))(data, address.value, arguments: arguments),
+          ),
+        },
+      ),
       connection: connection,
     );
     addTearDown(bus.dispose);
-    bus.subscribeEventsLegacy<int>(
-      paths: ['sensor'],
+    bus.subscribe(
+      EventKey<int>('int.sensor'),
       handler: (dto, lastData) async => dto.data * 2,
     );
 
@@ -362,14 +515,15 @@ void main() {
 
   test('a request without a local handler or transport route throws', () async {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
+      codecs: EventCodecRegistry(),
       connection: connection,
     );
     addTearDown(bus.dispose);
 
     expect(
-      () => bus.requestLegacy<int>(1, paths: ['sensor']),
+      () => bus.request(EventKey<int>('int.sensor'), 1),
       throwsA(isA<NoHandlerException>()),
     );
   });
@@ -378,15 +532,26 @@ void main() {
     'a remote request without a deserializer reports the missing half',
     () async {
       final connection = FakeMqttConnection();
-      final bus = legacyMqtt(
+      final bus = EventBusMqtt.keys(
         Uri.parse('mqtt://localhost:1883'),
-        serializers: {'int.sensor': (dto) => (null, Uint8List(0))},
+        codecs: EventCodecRegistry(
+          exact: {
+            EventAddress('int.sensor'): EventCodec(
+              encode: (dto) => (null, Uint8List(0)),
+            ),
+          },
+          patterns: {
+            EventPattern('int.sensor.>'): EventCodec(
+              encode: (dto) => (null, Uint8List(0)),
+            ),
+          },
+        ),
         connection: connection,
       );
       addTearDown(bus.dispose);
 
       expect(
-        () => bus.requestLegacy<int>(1, paths: ['sensor']),
+        () => bus.request(EventKey<int>('int.sensor'), 1),
         throwsA(isA<EventBusTransportException>()),
       );
     },
@@ -394,16 +559,16 @@ void main() {
 
   test('a request with a wildcard path is rejected', () {
     final connection = FakeMqttConnection();
-    final bus = legacyMqtt(
+    final bus = EventBusMqtt.keys(
       Uri.parse('mqtt://localhost:1883'),
+      codecs: EventCodecRegistry(),
       connection: connection,
     );
     addTearDown(bus.dispose);
 
     expect(
-      () => bus.requestLegacy<int>(1, paths: ['sensor', '*']),
+      () => bus.request(EventKey<int>('int.sensor.*'), 1),
       throwsA(isA<EventBusException>()),
     );
   });
-
 }

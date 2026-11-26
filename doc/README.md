@@ -24,6 +24,7 @@ and a quick example.
 | [05-observability.md](05-observability.md) | `EventBusError`, error monitor, metrics, correlation ids |
 | [06-api-reference.md](06-api-reference.md) | Public types and signatures |
 | [07-platforms.md](07-platforms.md) | VM and Web support |
+| [08-migration-3-to-4.md](08-migration-3-to-4.md) | Migrating from 3.x |
 
 ## Developer documentation
 

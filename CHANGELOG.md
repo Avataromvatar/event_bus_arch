@@ -1,3 +1,18 @@
+## 4.2.0
+-  fix: whole-address deletion is directional again; `_IsolateDeleteAddress` applies the delete locally and does not forward it back
+-  fix: `bus.dispose`, `subscription.cancel` and `EventBusErrorMonitor.dispose` no longer await broadcast-controller close, so a paused stream subscriber cannot hang cleanup
+-  fix: dispatch snapshots exact/pattern node buckets and skips disposed nodes, so a synchronous listener may subscribe or remove during `fire`
+-  fix: the parent watchdog tolerates a blocked parent (three missed 5-second pings, ~30 s) instead of killing a live worker after ~1.5 s
+-  fix: a worker death in the pool's initial start window fails `waitInit` instead of leaving a ready pool with a dead slot
+-  fix: MQTT `ws://`/`wss://` use the full URI and do not set the TCP-only `secure` flag; a local WebSocket upgrade test covers `ws://`
+-  fix: pending transport requests fail with `TransportConnectionException` on connection drop/close instead of hanging without a timeout
+-  add: [migration guide](doc/08-migration-3-to-4.md) for 3.x → 4.x, including address choice, API mapping, transport codecs and the patterns package
+-  add: `tool/migrate_3_to_4.dart` reports `paths:`/`separator:`, `Topic`/`TopicPattern`, `subscribeEvents`, `removeTopic` and legacy transport registries with line numbers; `handlers.setHandler` remains the only automatic rewrite
+-  change: all test call sites use the keyed API; the test-only `legacy_compat.dart` facade and the legacy NATS/MQTT codec adapters are removed
+-  add: proposed ADRs `0011` (typed request responses) and `0012` (request middleware) for the next API decision
+-  change: workspace packages require `event_bus_arch` ^4.2.0
+-  tests: 292 core tests, 21 pattern tests, 41 transport tests, NATS 24 (+10 skipped without a broker), MQTT 20 (+7 skipped without a broker)
+
 ## 4.1.1
 -  fix: `initTimeout` now aborts initialization — the generation is invalidated, pending link work is failed, the receive port is closed, the isolate is killed and only then is `waitInit` completed with `EventBusException`; a late ready/exit message cannot revive the bridge, and `restart()` works after a timeout
 -  add: `RequestProbe.transportRequests` and `canRequest`; the transport bus reports `transportRequests` only when a keyed codec has both `encode` and `decode`, while `hasHandler` keeps its local/remote meaning

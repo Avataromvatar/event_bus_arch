@@ -1,6 +1,6 @@
 # Architecture decision records
 
-These records describe the architecture of the current `4.1.1` codebase. The numbering follows the
+These records describe the architecture of the current `4.2.0` codebase. The numbering follows the
 pre-4.1 ADR set so references such as `ADR-0008` (Web capability) and `ADR-0009` (address model)
 remain valid. The records were rewritten on 2026-11-24 to reflect the current code rather than the
 historical 4.0 planning baseline.
@@ -17,6 +17,8 @@ historical 4.0 planning baseline.
 | [0008](0008-library-layout-web-rxdart-migration.md) | Library layout, Web, dependencies and migration | Accepted |
 | [0009](0009-event-key-and-address.md) | Explicit event address and local type (`EventKey`) | Accepted |
 | [0010](0010-keyed-transport-seam.md) | Keyed transport seam and node lifecycle | Accepted |
+| [0011](0011-typed-request-response.md) | Typed request responses | Proposed |
+| [0012](0012-request-middleware.md) | Request middleware and pipelines | Proposed |
 
 ## Conventions
 

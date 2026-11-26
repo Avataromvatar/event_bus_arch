@@ -1,6 +1,6 @@
 ## 1.1.0
 
-- Targets `event_bus_arch` `^4.1.1` and `event_bus_arch_transport` `^0.2.0`.
+- Targets `event_bus_arch` `^4.2.0` and `event_bus_arch_transport` `^0.2.0`.
 - `EventDTO.correlationId` travels in the `X-EventBus-Correlation-Id` NATS header and is attached
   to incoming DTOs; request responses carry it too.
 - `EventBusNats` accepts `ObservabilityConfig` and forwards it to `TransportEventBus`.

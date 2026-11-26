@@ -1,8 +1,8 @@
+// ignore_for_file: deprecated_member_use
 import 'dart:async';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 ///A handler that throws SYNCHRONOUSLY (not an async function).
 Future<void> syncThrowingHandler(EventDTO<String> dto, String? lastData) {
@@ -14,15 +14,14 @@ void main() {
     test('handler receives the previous value, not the current one', () async {
       final bus = EventBus();
       final seen = <String?>[];
-      bus.subscribeEventsLegacy<String>(
-          initialData: 'INIT',
+      bus.subscribe(EventKey<String>('String'), initialData: 'INIT',
           handler: (dto, lastData) async {
-            seen.add(lastData);
-            return dto.data;
-          });
+        seen.add(lastData);
+        return dto.data;
+      });
 
-      await bus.requestLegacy<String>('one');
-      await bus.requestLegacy<String>('two');
+      await bus.request(EventKey<String>('String'), 'one');
+      await bus.request(EventKey<String>('String'), 'two');
 
       expect(seen, ['INIT', 'one']);
       await bus.dispose();
@@ -30,27 +29,27 @@ void main() {
 
     test('lastData is updated synchronously, right after send', () async {
       final bus = EventBus();
-      bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {});
+      bus.subscribe(EventKey<String>('String'),
+          handler: (dto, lastData) async {});
 
-      await bus.requestLegacy<String>('data');
+      await bus.request(EventKey<String>('String'), 'data');
 
-      expect(bus.currentDataLegacy<String>(), 'data');
+      expect(bus.currentData(EventKey<String>('String')), 'data');
     });
 
     test('lastData in the handler does not depend on the initial value',
         () async {
       final bus = EventBus();
       int? previous;
-      bus.subscribeEventsLegacy<int>(
-          initialData: 5,
+      bus.subscribe(EventKey<int>('int'), initialData: 5,
           handler: (dto, lastData) async {
-            previous = lastData;
-          });
+        previous = lastData;
+      });
 
-      await bus.requestLegacy<int>(7);
+      await bus.request(EventKey<int>('int'), 7);
 
       expect(previous, 5);
-      expect(bus.currentDataLegacy<int>(), 7);
+      expect(bus.currentData(EventKey<int>('int')), 7);
     });
   });
 
@@ -59,12 +58,13 @@ void main() {
         () async {
       final bus = EventBus();
       final received = <String>[];
-      final sub = bus.subscribeLegacy<String>(onData: received.add);
-      bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {
+      final sub = bus.listen(EventKey<String>('String')).listen(received.add);
+      bus.subscribe(EventKey<String>('String'), handler: (dto, lastData) async {
         throw StateError('boom');
       });
 
-      await expectLater(bus.requestLegacy<String>('x'), throwsStateError);
+      await expectLater(
+          bus.request(EventKey<String>('String'), 'x'), throwsStateError);
 
       await Future<void>.delayed(Duration.zero);
       expect(received, ['x']);
@@ -74,16 +74,17 @@ void main() {
 
     test('a synchronous handler throw also reaches the sender', () async {
       final bus = EventBus();
-      bus.subscribeEventsLegacy<String>(handler: syncThrowingHandler);
+      bus.subscribe(EventKey<String>('String'), handler: syncThrowingHandler);
 
-      await expectLater(bus.requestLegacy<String>('x'), throwsStateError);
+      await expectLater(
+          bus.request(EventKey<String>('String'), 'x'), throwsStateError);
       await bus.dispose();
     });
 
     test('the bus keeps working after a handler error', () async {
       final bus = EventBus();
       var calls = 0;
-      bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
+      bus.subscribe(EventKey<int>('int'), handler: (dto, lastData) async {
         calls++;
         if (dto.data == 1) {
           throw StateError('boom');
@@ -91,8 +92,8 @@ void main() {
         return dto.data * 10;
       });
 
-      await expectLater(bus.requestLegacy<int>(1), throwsStateError);
-      expect(await bus.requestLegacy<int>(2), 20);
+      await expectLater(bus.request(EventKey<int>('int'), 1), throwsStateError);
+      expect(await bus.request(EventKey<int>('int'), 2), 20);
       expect(calls, 2);
       await bus.dispose();
     });
@@ -102,15 +103,16 @@ void main() {
     test('listeners receive the value before await send completes', () async {
       final bus = EventBus();
       final order = <String>[];
-      final sub =
-          bus.subscribeLegacy<String>(onData: (e) => order.add('listener:$e'));
-      bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {
+      final sub = bus
+          .listen(EventKey<String>('String'))
+          .listen((e) => order.add('listener:$e'));
+      bus.subscribe(EventKey<String>('String'), handler: (dto, lastData) async {
         order.add('handler-start');
         order.add('handler-end');
         return 'ok';
       });
 
-      await bus.requestLegacy<String>('x');
+      await bus.request(EventKey<String>('String'), 'x');
       order.add('sender');
 
       // delivery to the listener runs in a separate microtask, but is scheduled BEFORE
@@ -125,9 +127,9 @@ void main() {
     test('fire schedules the value before a later cancel', () async {
       final bus = EventBus();
       final received = <String>[];
-      final sub = bus.subscribeLegacy<String>(onData: received.add);
+      final sub = bus.listen(EventKey<String>('String')).listen(received.add);
 
-      expect(bus.fireLegacy<String>('x'), isTrue);
+      expect(bus.fire(EventKey<String>('String'), 'x'), isTrue);
       await Future<void>.delayed(Duration.zero);
       await sub.cancel();
 
@@ -138,9 +140,9 @@ void main() {
     test('listeners receive the value even without a handler', () async {
       final bus = EventBus();
       final received = <String>[];
-      bus.subscribeLegacy<String>(onData: received.add);
+      bus.listen(EventKey<String>('String')).listen(received.add);
 
-      expect(bus.fireLegacy<String>('x'), isTrue);
+      expect(bus.fire(EventKey<String>('String'), 'x'), isTrue);
       await Future<void>.delayed(Duration.zero);
       expect(received, ['x']);
       await bus.dispose();
@@ -151,12 +153,12 @@ void main() {
     test('an event of a mismatched type does not hang the sender', () async {
       final bus = EventBus(isModelBus: true);
       // the node is created for Object, but a String arrives
-      bus.subscribeEventsLegacy<Object>(handler: (dto, lastData) async {
+      bus.subscribe(EventKey<Object>('Object'), handler: (dto, lastData) async {
         return 'handled';
       });
 
       await expectLater(
-        bus.requestLegacy<String>('x'),
+        bus.request(EventKey<String>('String'), 'x'),
         throwsA(isA<NoHandlerException>()),
       );
       await bus.dispose();
@@ -167,12 +169,12 @@ void main() {
     test('fire does not invoke a request handler', () async {
       final bus = EventBus();
       var called = false;
-      bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {
+      bus.subscribe(EventKey<String>('String'), handler: (dto, lastData) async {
         called = true;
       });
 
       // A handler-only node is not a listener, so fire returns false (D14).
-      expect(bus.fireLegacy<String>('x'), isFalse);
+      expect(bus.fire(EventKey<String>('String'), 'x'), isFalse);
       await Future<void>.delayed(Duration.zero);
 
       expect(called, isFalse);
@@ -182,14 +184,15 @@ void main() {
     test('cancelling a handler keeps the node listeners', () async {
       final bus = EventBus();
       final received = <String>[];
-      final subscription = bus.subscribeLegacy<String>(onData: received.add);
-      final handler =
-          bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {});
+      final subscription =
+          bus.listen(EventKey<String>('String')).listen(received.add);
+      final handler = bus.subscribe(EventKey<String>('String'),
+          handler: (dto, lastData) async {});
       await handler.cancel();
 
-      expect(bus.haveHandlerLegacy<String>(), isFalse);
-      expect(bus.haveListenerLegacy<String>(), isTrue);
-      expect(bus.fireLegacy<String>('x'), isTrue);
+      expect(bus.haveHandler(EventKey<String>('String')), isFalse);
+      expect(bus.haveListener(EventKey<String>('String')), isTrue);
+      expect(bus.fire(EventKey<String>('String'), 'x'), isTrue);
       await Future<void>.delayed(Duration.zero);
       expect(received, ['x']);
 
@@ -200,17 +203,18 @@ void main() {
     test('a registered handler keeps its node alive after listeners cancel',
         () async {
       final bus = EventBus();
-      final subscription = bus.subscribeLegacy<String>(onData: (_) {});
-      bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async => 'ok');
+      final subscription =
+          bus.listen(EventKey<String>('String')).listen((_) {});
+      bus.subscribe(EventKey<String>('String'),
+          handler: (dto, lastData) async => 'ok');
 
       await subscription.cancel();
 
-      expect(bus.haveHandlerLegacy<String>(), isTrue);
-      expect(await bus.requestLegacy<String>('x'), 'ok');
+      expect(bus.haveHandler(EventKey<String>('String')), isTrue);
+      expect(await bus.request(EventKey<String>('String'), 'x'), 'ok');
       await bus.dispose();
     });
   });
 
-  group('EventNode: request validation', () {
-  });
+  group('EventNode: request validation', () {});
 }

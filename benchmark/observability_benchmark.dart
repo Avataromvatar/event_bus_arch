@@ -15,7 +15,6 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:event_bus_arch/event_bus_arch.dart';
-import '../test/legacy_compat.dart';
 
 const _fires = 200000;
 const _requests = 20000;
@@ -56,15 +55,15 @@ Future<void> main() async {
 Future<double> _fireBenchmark({required bool enabled}) async {
   final bus = EventBus(
       observability: ObservabilityConfig(enabled: enabled, metrics: enabled));
-  final sub = bus.subscribeEventsLegacy<int>(
-      paths: ['x'], deliveryMode: DeliveryMode.sync, onEvent: (_) {});
+  final sub = bus.subscribe(EventKey<int>('int.x'),
+      deliveryMode: DeliveryMode.sync, onEvent: (_) {});
 
   for (var i = 0; i < 10000; i++) {
-    bus.fireLegacy<int>(i, paths: ['x']);
+    bus.fire(EventKey<int>('int.x'), i);
   }
   final stopwatch = Stopwatch()..start();
   for (var i = 0; i < _fires; i++) {
-    bus.fireLegacy<int>(i, paths: ['x']);
+    bus.fire(EventKey<int>('int.x'), i);
   }
   stopwatch.stop();
 
@@ -76,15 +75,15 @@ Future<double> _fireBenchmark({required bool enabled}) async {
 Future<double> _requestBenchmark({required bool enabled}) async {
   final bus = EventBus(
       observability: ObservabilityConfig(enabled: enabled, metrics: enabled));
-  final sub =
-      bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async => dto.data);
+  final sub = bus.subscribe(EventKey<int>('int'),
+      handler: (dto, lastData) async => dto.data);
 
   for (var i = 0; i < 500; i++) {
-    await bus.requestLegacy<int>(i);
+    await bus.request(EventKey<int>('int'), i);
   }
   final stopwatch = Stopwatch()..start();
   for (var i = 0; i < _requests; i++) {
-    await bus.requestLegacy<int>(i);
+    await bus.request(EventKey<int>('int'), i);
   }
   stopwatch.stop();
 

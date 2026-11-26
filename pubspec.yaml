@@ -1,6 +1,6 @@
 name: event_bus_arch
 description: "Typed addressed event bus for Dart and Flutter: events, requests, subscriptions, isolates, worker pools, layers and observability."
-version: 4.1.1
+version: 4.2.0
 repository: https://github.com/Avataromvatar/dart_event_bus
 # publish_to: none
 environment:

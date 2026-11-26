@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-24
-- Current in: 4.1.1
+- Current in: 4.2.0
 - Implementation note: the `initTimeout` abort cleanup was implemented in 4.1.1 (REL-01 in the
   [post-4.1 plan](../artifacts/plans/2026-11-24-post-4.1-hardening-and-migration-plan.md))
 

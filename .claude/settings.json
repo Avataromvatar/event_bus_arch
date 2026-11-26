@@ -64,7 +64,12 @@
       "Bash(wc -l doc/decisions/*.md)",
       "Bash(grep -n \"class MqttServerConnection\\\\|MqttServerClient\\\\|ws://\\\\|wss://\\\\|useWebSocket\\\\|websocket\" -A 40 -B 10 packages/event_bus_arch_mqtt/lib/src/mqtt_connection.dart packages/event_bus_arch_mqtt/lib/src/mqtt5_client_connection.dart packages/event_bus_arch_mqtt/README.md)",
       "Bash(grep -rn \"useWebSocket\\\\|WebSocket\" -A 15 -B 5 \"/c/Users/Avatar/AppData/Local/Pub/Cache/hosted/pub.dev/mqtt5_client-5.1.0/lib\" | head -120)",
-      "Read(//c/Users/Avatar/AppData/Local/Pub/Cache/hosted/pub.dev/mqtt5_client-5.1.0/lib/**)"
+      "Read(//c/Users/Avatar/AppData/Local/Pub/Cache/hosted/pub.dev/mqtt5_client-5.1.0/lib/**)",
+      "Bash(cd \"e:/workspace/dart/event_bus_arch\" && cp test/bus_api_test.dart /tmp/bus_api_test.dart && python build/migrate_test_calls.py --write /tmp/bus_api_test.dart | tail -20 && sed -n '1,110p' /tmp/bus_api_test.dart)",
+      "Read(//tmp/**)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }

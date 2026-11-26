@@ -18,7 +18,8 @@ import 'package:rxdart/rxdart.dart';
     expect(report.removalsFound, 1);
     expect(report.crossBusFound, 1);
     expect(report.handlerTypeFound, 1);
-    expect(report.rxdartFound, 2); // 'package:rxdart/rxdart.dart' has two matches
+    expect(
+        report.rxdartFound, 2); // 'package:rxdart/rxdart.dart' has two matches
   });
 
   test('a clean file has no changes or warnings', () {
@@ -34,5 +35,30 @@ void main() {
     expect(report.hasChanges, isFalse);
     expect(report.hasWarnings, isFalse);
     expect(report.changed, isEmpty);
+  });
+
+  test('paths, topics and legacy transports are reported with line numbers',
+      () {
+    const source = r"""
+void main() {
+  bus.fire<int>(1, paths: ['sensor', 'temp']);
+  bus.subscribeEvents<int>(paths: ['sensor', '*']);
+  bus.removeTopic<int>(paths: ['sensor']);
+  final topic = Topic('sensor');
+  bus.serializers = {'int.sensor': encode};
+}
+""";
+
+    final report = migrateSource(source, 'sample.dart');
+
+    expect(report.pathCallsFound, 3);
+    expect(report.topicTypeFound, 1);
+    expect(report.removeTopicFound, 1);
+    expect(report.legacyTransportFound, 1);
+    expect(report.findings, hasLength(7));
+    expect(report.hasWarnings, isTrue);
+    expect(report.changed, isEmpty,
+        reason: 'an address cannot be invented by the tool');
+    expect(report.findings.every((finding) => finding.line >= 2), isTrue);
   });
 }

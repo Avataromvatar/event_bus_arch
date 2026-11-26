@@ -1,6 +1,6 @@
 ## 0.2.0
 
-- Targets `event_bus_arch` `^4.1.1`.
+- Targets `event_bus_arch` `^4.2.0`.
 - `TransportMessage` and `TransportConnection.publish`/`request` carry an optional
   `correlationId`; the transport node attaches it to incoming DTOs and forwards it on replies.
 - `TransportEventBus` accepts `ObservabilityConfig` and reports remote request metrics.

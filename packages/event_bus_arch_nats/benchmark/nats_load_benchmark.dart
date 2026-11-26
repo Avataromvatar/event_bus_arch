@@ -26,8 +26,6 @@ import 'dart:typed_data';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_nats/event_bus_arch_nats.dart';
-import '../../../test/legacy_compat.dart';
-import '../../event_bus_arch_transport/test/legacy_codecs.dart';
 
 ///Fire-and-forget event. `sentAtUs` comes from the benchmark stopwatch; both
 ///buses live in this isolate, so the subscriber can read the same clock.
@@ -293,7 +291,8 @@ Future<_Result> _fireRun(
     duration: options.duration,
     clock: clock,
     send: (seq, at) {
-      if (!publisher.fireLegacy<LoadEvent>(LoadEvent(seq, at))) rejected++;
+      if (!publisher.fire(EventKey<LoadEvent>('LoadEvent'), LoadEvent(seq, at)))
+        rejected++;
     },
   );
   final generationUs = clock.elapsedMicroseconds - start;
@@ -326,7 +325,8 @@ Future<_Result> _requestRun(
 
   Future<void> one(int seq, int sentAt) {
     return requester
-        .requestLegacy<RequestEvent>(
+        .request(
+      EventKey<RequestEvent>('RequestEvent'),
       RequestEvent(seq),
       timeout: const Duration(seconds: 10),
     )
@@ -362,16 +362,42 @@ Future<_Result> _requestRun(
   );
 }
 
-EventBusNats _legacyNats(
-  Uri url, {
-  Map<String, EventDTOSerialization>? serializers,
-  Map<String, EventDTODeserialization>? deserializers,
-}) =>
-    EventBusNats.keys(
-      url,
-      codecs: legacyCodecs(
-          serializers: serializers, deserializers: deserializers),
+EventCodec _loadCodec({required bool encode, required bool decode}) =>
+    EventCodec(
+      encode: encode ? _encodeLoad : null,
+      decode: decode
+          ? (data, address, {arguments}) =>
+              _decodeLoad(data, address.value, arguments: arguments)
+          : null,
     );
+
+EventCodec _requestCodec({required bool encode, required bool decode}) =>
+    EventCodec(
+      encode: encode ? _encodeRequest : null,
+      decode: decode
+          ? (data, address, {arguments}) =>
+              _decodeRequest(data, address.value, arguments: arguments)
+          : null,
+    );
+
+EventBusNats _benchNats(
+  Uri url, {
+  bool loadEncode = false,
+  bool loadDecode = false,
+  bool requestEncode = false,
+  bool requestDecode = false,
+}) {
+  final exact = <EventAddress, EventCodec>{};
+  if (loadEncode || loadDecode) {
+    exact[EventAddress('LoadEvent')] =
+        _loadCodec(encode: loadEncode, decode: loadDecode);
+  }
+  if (requestEncode || requestDecode) {
+    exact[EventAddress('RequestEvent')] =
+        _requestCodec(encode: requestEncode, decode: requestDecode);
+  }
+  return EventBusNats.keys(url, codecs: EventCodecRegistry(exact: exact));
+}
 
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
@@ -411,24 +437,12 @@ Future<void> _runShared(_Options options, Stopwatch clock) async {
   final fireErrors = <Object>[];
   final requestErrors = <Object>[];
 
-  final publisher = _legacyNats(
-    options.url,
-    serializers: {'LoadEvent': _encodeLoad},
-  );
-  final subscriber = _legacyNats(
-    options.url,
-    deserializers: {'LoadEvent': _decodeLoad},
-  );
-  final responder = _legacyNats(
-    options.url,
-    serializers: {'RequestEvent': _encodeRequest},
-    deserializers: {'RequestEvent': _decodeRequest},
-  );
-  final requester = _legacyNats(
-    options.url,
-    serializers: {'RequestEvent': _encodeRequest},
-    deserializers: {'RequestEvent': _decodeRequest},
-  );
+  final publisher = _benchNats(options.url, loadEncode: true);
+  final subscriber = _benchNats(options.url, loadDecode: true);
+  final responder =
+      _benchNats(options.url, requestEncode: true, requestDecode: true);
+  final requester =
+      _benchNats(options.url, requestEncode: true, requestDecode: true);
 
   try {
     await Future.wait([
@@ -457,11 +471,13 @@ Future<void> _runShared(_Options options, Stopwatch clock) async {
 
   final fireSamples = <int>[];
   final fireSeen = <int>{};
-  final fireSubscription = subscriber.listenLegacy<LoadEvent>().listen((event) {
+  final fireSubscription =
+      subscriber.listen(EventKey<LoadEvent>('LoadEvent')).listen((event) {
     fireSeen.add(event.seq);
     fireSamples.add(max(0, clock.elapsedMicroseconds - event.sentAtUs));
   });
-  responder.subscribeEventsLegacy<RequestEvent>(
+  responder.subscribe<RequestEvent>(
+    EventKey<RequestEvent>('RequestEvent'),
     handler: (dto, lastData) async => dto.data.seq,
   );
   await _waitForSubscriptions();
@@ -473,7 +489,8 @@ Future<void> _runShared(_Options options, Stopwatch clock) async {
         rate: 1000,
         duration: options.warmup,
         clock: clock,
-        send: (seq, at) => publisher.fireLegacy<LoadEvent>(LoadEvent(seq, at)),
+        send: (seq, at) => publisher.fire(
+            EventKey<LoadEvent>('LoadEvent'), LoadEvent(seq, at)),
       );
       await _waitUntilCount(() => fireSeen.length, warmupSent);
       fireSamples.clear();
@@ -646,15 +663,8 @@ Future<void> _isolatedWorker(List<dynamic> args) async {
   final control = args[0] as SendPort;
   final url = Uri.parse(args[1] as String);
   final clock = Stopwatch()..start();
-  final publisher = _legacyNats(
-    url,
-    serializers: {'LoadEvent': _encodeLoad},
-  );
-  final requester = _legacyNats(
-    url,
-    serializers: {'RequestEvent': _encodeRequest},
-    deserializers: {'RequestEvent': _decodeRequest},
-  );
+  final publisher = _benchNats(url, loadEncode: true);
+  final requester = _benchNats(url, requestEncode: true, requestDecode: true);
   var asyncErrors = 0;
   final errorSubscriptions = <StreamSubscription<Object>>[
     publisher.errors.listen((error) {
@@ -692,7 +702,8 @@ Future<void> _isolatedWorker(List<dynamic> args) async {
         duration: Duration(microseconds: message.durationUs),
         clock: clock,
         send: (seq, at) {
-          if (!publisher.fireLegacy<LoadEvent>(LoadEvent(seq, at))) rejected++;
+          if (!publisher.fire(
+              EventKey<LoadEvent>('LoadEvent'), LoadEvent(seq, at))) rejected++;
         },
       );
       control.send(
@@ -706,7 +717,8 @@ Future<void> _isolatedWorker(List<dynamic> args) async {
 
       Future<void> one(int seq, int sentAt) {
         return requester
-            .requestLegacy<RequestEvent>(
+            .request(
+          EventKey<RequestEvent>('RequestEvent'),
           RequestEvent(seq),
           timeout: const Duration(seconds: 10),
         )
@@ -759,15 +771,9 @@ Future<void> _runIsolated(_Options options, Stopwatch clock) async {
   var negatives = 0;
   int? offsetUs;
 
-  final subscriber = _legacyNats(
-    options.url,
-    deserializers: {'LoadEvent': _decodeLoad},
-  );
-  final responder = _legacyNats(
-    options.url,
-    serializers: {'RequestEvent': _encodeRequest},
-    deserializers: {'RequestEvent': _decodeRequest},
-  );
+  final subscriber = _benchNats(options.url, loadDecode: true);
+  final responder =
+      _benchNats(options.url, requestEncode: true, requestDecode: true);
   try {
     await Future.wait([
       subscriber.waitConnected(timeout: const Duration(seconds: 5)),
@@ -786,7 +792,8 @@ Future<void> _runIsolated(_Options options, Stopwatch clock) async {
     subscriber.errors.listen(mainErrors.add),
     responder.errors.listen(mainErrors.add),
   ];
-  final fireSubscription = subscriber.listenLegacy<LoadEvent>().listen((event) {
+  final fireSubscription =
+      subscriber.listen(EventKey<LoadEvent>('LoadEvent')).listen((event) {
     seen.add(event.seq);
     final offset = offsetUs;
     if (offset == null) return;
@@ -794,7 +801,8 @@ Future<void> _runIsolated(_Options options, Stopwatch clock) async {
     if (latency < 0) negatives++;
     samples.add(latency < 0 ? 0 : latency);
   });
-  responder.subscribeEventsLegacy<RequestEvent>(
+  responder.subscribe<RequestEvent>(
+    EventKey<RequestEvent>('RequestEvent'),
     handler: (dto, lastData) async => dto.data.seq,
   );
   await _waitForSubscriptions();

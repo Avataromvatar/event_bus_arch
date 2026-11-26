@@ -61,7 +61,10 @@
       "Bash(wc -l doc/decisions/*.md doc/*.md README.md packages/*/README.md)",
       "Bash(grep -n \"haveListenerFor\\\\|haveHandlerFor\\\\|exact \\\\`have\\\\*\\\\`\\\\|have\\\\*\" doc/artifacts/plans/2026-11-23-defect-remediation-plan.md)",
       "Bash(grep -E \"Some tests failed|All tests passed|Failing tests|^  test\\\\\\\\\\\\\\\\|\\\\[E\\\\]\")",
-      "Bash(wc -l doc/decisions/*.md)"
+      "Bash(wc -l doc/decisions/*.md)",
+      "Bash(grep -n \"class MqttServerConnection\\\\|MqttServerClient\\\\|ws://\\\\|wss://\\\\|useWebSocket\\\\|websocket\" -A 40 -B 10 packages/event_bus_arch_mqtt/lib/src/mqtt_connection.dart packages/event_bus_arch_mqtt/lib/src/mqtt5_client_connection.dart packages/event_bus_arch_mqtt/README.md)",
+      "Bash(grep -rn \"useWebSocket\\\\|WebSocket\" -A 15 -B 5 \"/c/Users/Avatar/AppData/Local/Pub/Cache/hosted/pub.dev/mqtt5_client-5.1.0/lib\" | head -120)",
+      "Read(//c/Users/Avatar/AppData/Local/Pub/Cache/hosted/pub.dev/mqtt5_client-5.1.0/lib/**)"
     ]
   }
 }

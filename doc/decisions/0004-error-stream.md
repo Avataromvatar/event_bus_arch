@@ -36,6 +36,8 @@ give an application one diagnostic surface. A burst of errors must not grow memo
 8. An exception thrown by an `errors` listener is sent to the zone and counted, not re-emitted as
    another bus error. Error reporting never recursively calls itself.
 9. `allEventStream` remains event tracing; errors are not mixed into it.
+10. Disposing the monitor initiates closing its merged broadcast stream but does not await a paused
+    external subscriber; otherwise `dispose()` could hang indefinitely.
 
 ## Consequences
 

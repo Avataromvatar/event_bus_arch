@@ -40,9 +40,11 @@ memory without bound and a fast producer must not silently lose events without a
    same buffer policy. An idle event occupies a pending slot that is not charged against capacity.
 6. A listener error is reported as `EventBusError(kind: listener)` and optionally through the
    subscription's `onError`/`cancelOnError`. It does not break the node or the other listeners.
-7. `cancel()` clears the buffer, cancels queued requests and closes the `.stream` view. When the
-   last subscription and raw listener leave a common node, the node is detached. A model bus keeps
-   the value; a transport node also detaches and cancels its broker subscription.
+7. `cancel()` clears the buffer, cancels queued requests and closes the `.stream` view. Closing a
+   broadcast controller is initiated but not awaited: a paused external subscriber must not make
+   disposal or cancellation hang. When the last subscription and raw listener leave a common node,
+   the node is detached. A model bus keeps the value; a transport node also detaches and cancels
+   its broker subscription.
 8. `rxdart` is neither a dependency nor a re-export. The small cancellation hook is implemented by
    the core.
 

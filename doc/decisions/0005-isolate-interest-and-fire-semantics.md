@@ -41,7 +41,9 @@ usable after the caller has already observed an initialization error.
    pending requests, exchanges interest with the new worker and returns its `waitInit`. A bridge is
    not usable during restart.
 9. `remove`/`removeAddress` remove the local nodes and forward the deletion so both interest
-   registries forget the selector.
+   registries forget the selector. A deletion that arrives from the other side is applied
+   **locally only** and is never forwarded back; this directional rule applies to typed and
+   whole-address deletes alike.
 10. Only sendable values cross the boundary. The protocol is 4.x-only; mixed 3.x/4.x peers are not
     supported.
 

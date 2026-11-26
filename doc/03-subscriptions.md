@@ -152,7 +152,8 @@ then invokes the handler.
 ## 6. Closing
 
 `cancel()` clears the buffers, fails queued requests with `RequestCanceledException`, closes the
-`.stream` view and removes the subscription from its node. If it was the last subscription on a
+`.stream` view and removes the subscription from its node. The close of a broadcast stream is
+initiated but not awaited, so a paused external stream subscriber cannot block cancellation. If it was the last subscription on a
 common bus, the node is removed. `onDone` is called when the node is disposed (`remove`,
 `removeAddress`, `dispose`), not on an ordinary `cancel`.
 

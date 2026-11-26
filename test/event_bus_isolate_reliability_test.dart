@@ -24,6 +24,20 @@ void exitOnInit(EventBus bus, Object? initialData) {
   Isolate.current.kill(priority: Isolate.immediate);
 }
 
+void noopOnInit(EventBus bus, Object? initialData) {}
+
+class CountingRemoveIsolate extends EventBusIsolate {
+  CountingRemoveIsolate() : super(onInit: noopOnInit);
+
+  int removeAddressCalls = 0;
+
+  @override
+  bool removeAddress(EventAddress address) {
+    removeAddressCalls++;
+    return super.removeAddress(address);
+  }
+}
+
 Future<void> hungOnInit(EventBus bus, Object? initialData) async {
   await Completer<void>().future;
 }
@@ -123,6 +137,35 @@ void main() {
 
       await iso.dispose();
       control.close();
+    });
+
+    test('a blocked main isolate does not make the watchdog kill the worker',
+        () async {
+      final iso = EventBusIsolate(onInit: noopOnInit);
+      await iso.waitInit;
+
+      final end = DateTime.now().add(const Duration(milliseconds: 1800));
+      while (DateTime.now().isBefore(end)) {
+        // Emulate a long synchronous operation on the main isolate.
+      }
+
+      expect(iso.isInit, isTrue);
+      expect(await iso.ping(timeout: const Duration(seconds: 2)), isTrue);
+
+      await iso.dispose();
+    });
+
+    test('removeAddress is directional and does not echo between isolates',
+        () async {
+      final iso = CountingRemoveIsolate();
+      await iso.waitInit;
+
+      iso.removeAddress(EventAddress('loop.check'));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(iso.removeAddressCalls, 1);
+
+      await iso.dispose();
     });
 
     test('initTimeout: null disables the timeout', () async {

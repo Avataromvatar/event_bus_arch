@@ -96,6 +96,9 @@ retained even without a listener.
   Pending requests fail; a generation counter ignores late messages from the old worker.
 - `ping()` checks liveness, not readiness.
 - `dispose()` cancels pending work, closes the ports and kills the worker.
+- A worker watches its parent with a ping watchdog. The watchdog tolerates a blocked parent for
+  about 30 seconds (three missed five-second pings) before killing the worker, so a long synchronous
+  operation on the main isolate does not destroy a live worker.
 
 Only sendable objects cross the boundary. Keys, `arguments` and `correlationId` travel with the
 DTO; a handler error is rethrown at the caller.

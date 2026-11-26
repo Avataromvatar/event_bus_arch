@@ -131,7 +131,9 @@ class EventNodeImp<T> implements EventNode<T>, SubscriptionHost<T> {
     final subscriptions = List<EventSubscription<T>>.of(_subscriptions);
     _subscriptions.clear();
     if (!_streamControllerValue.isClosed) {
-      await _streamControllerValue.close();
+      // A paused raw listener would otherwise keep the close future pending
+      // forever. The controller is closed; completion is the client's concern.
+      unawaited(_streamControllerValue.close());
     }
     await Future.wait(
         subscriptions.map((subscription) => subscription._close()));
@@ -376,8 +378,7 @@ mixin EventBusMixin implements EventBus {
     required EventKey<T> key,
     T? currentData,
   }) {
-    return createNode<T>(
-        address: key.address.value, currentData: currentData);
+    return createNode<T>(address: key.address.value, currentData: currentData);
   }
 
   ///Creates the node for a typed pattern key.
@@ -385,8 +386,7 @@ mixin EventBusMixin implements EventBus {
     required EventPatternKey<T> key,
     T? currentData,
   }) {
-    return createNode<T>(
-        address: key.pattern.value, currentData: currentData);
+    return createNode<T>(address: key.pattern.value, currentData: currentData);
   }
 
   ///Whether a send on an exact E key should create a node.
@@ -706,8 +706,8 @@ mixin EventBusMixin implements EventBus {
       final matched = _dispatchToListeners(dto);
       // A model bus accepted the value even when nobody is listening. A
       // handler subscription alone does not count for fire (D14).
-      final accepted = matched ||
-          (isModelBus && _eventsMap[key.address]?[key.type] != null);
+      final accepted =
+          matched || (isModelBus && _eventsMap[key.address]?[key.type] != null);
       _addAllEvent(dto, accepted);
       if (observing) {
         metrics.recordFire(key.address.value,
@@ -734,12 +734,16 @@ mixin EventBusMixin implements EventBus {
     final address = dto.key.address;
     final exact = _eventsMap[address];
     if (exact != null) {
-      for (final node in exact.values) {
+      // Snapshot the bucket: a synchronous listener may subscribe, remove or
+      // dispose nodes on the same address while this dispatch is running.
+      for (final node in List<EventNode>.of(exact.values)) {
+        if (node.isDisposed) continue;
         accepted = _deliverNode(node, dto, incoming) || accepted;
       }
     }
     for (final entry in _matchingPatternEntries(address)) {
-      for (final node in entry.value.values) {
+      for (final node in List<EventNode>.of(entry.value.values)) {
+        if (node.isDisposed) continue;
         accepted = _deliverNode(node, dto, incoming) || accepted;
       }
     }
@@ -755,8 +759,8 @@ mixin EventBusMixin implements EventBus {
   }
 
   ///Pattern buckets matching a concrete address, most specific first.
-  List<MapEntry<EventPattern, Map<Type, EventNode>>>
-      _matchingPatternEntries(EventAddress address) {
+  List<MapEntry<EventPattern, Map<Type, EventNode>>> _matchingPatternEntries(
+      EventAddress address) {
     final insertion = <EventPattern, int>{};
     final matches = <MapEntry<EventPattern, Map<Type, EventNode>>>[];
     var index = 0;
@@ -820,6 +824,14 @@ mixin EventBusMixin implements EventBus {
   @override
   bool removeAddress(EventAddress address) {
     _checkNotDisposed();
+    return _removeAddressLocally(address);
+  }
+
+  ///Removes every type node at [address] without forwarding a delete.
+  ///
+  ///Used by the isolate link when an address-wide delete arrives from the
+  ///other side; forwarding it again would bounce between the two buses.
+  bool _removeAddressLocally(EventAddress address) {
     final bucket = _eventsMap.remove(address);
     if (bucket == null) return false;
     for (final node in bucket.values) {
@@ -829,8 +841,7 @@ mixin EventBusMixin implements EventBus {
 
     bool atAddress(EventSelector selector) =>
         selector is EventKey && selector.address == address;
-    final removedListeners =
-        _listenerCounts.keys.where(atAddress).toSet();
+    final removedListeners = _listenerCounts.keys.where(atAddress).toSet();
     final removedHandlers = _handlerCounts.keys.where(atAddress).toSet();
     final removedModels = _modelTopics.where(atAddress).toSet();
     _listenerCounts.removeWhere((selector, _) => atAddress(selector));
@@ -916,8 +927,10 @@ mixin EventBusMixin implements EventBus {
 
   Future<void> _disposeImpl() async {
     _disposed = true;
-    await _allEventStream.close();
-    await _errorsController.close();
+    // Do not await broadcast-controller close: a paused external subscriber
+    // delays the close future indefinitely and would hang dispose forever.
+    if (!_allEventStream.isClosed) unawaited(_allEventStream.close());
+    if (!_errorsController.isClosed) unawaited(_errorsController.close());
     final metricsInstance = _metricsInstance;
     _metricsInstance = null;
     if (metricsInstance != null) {
@@ -958,7 +971,8 @@ mixin _EventBusHandlersMixin on EventBusMixin {
   @override
   RequestProbe probeRequest<T>(EventKey<T> key, T data) {
     _checkNotDisposed();
-    final tier = _resolveTierWithData(EventKey<Object?>(key.address.value), data);
+    final tier =
+        _resolveTierWithData(EventKey<Object?>(key.address.value), data);
     final handlers = tier?.candidates.length ?? 0;
     final available = tier?.candidates
             .where((candidate) => candidate.subscription.hasRequestCapacity)

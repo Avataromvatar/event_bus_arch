@@ -174,6 +174,29 @@ void main() {
     );
   });
 
+  test('a drop fails a pending request that has no timeout', () async {
+    final adapter = _Adapter();
+    await adapter.start();
+
+    final pending = adapter.request('int.sensor', Uint8List(0));
+    adapter.handleDrop();
+
+    await expectLater(pending, throwsA(isA<TransportConnectionException>()));
+    await adapter.close();
+  });
+
+  test('close fails a pending request', () async {
+    final adapter = _Adapter();
+    await adapter.start();
+
+    final pending = adapter.request('int.sensor', Uint8List(0));
+    final expectation =
+        expectLater(pending, throwsA(isA<TransportConnectionException>()));
+
+    await adapter.close();
+    await expectation;
+  });
+
   test('messages published by the same origin are filtered out', () {
     final adapter = _Adapter(originId: 'self');
     final seen = <TransportMessage>[];

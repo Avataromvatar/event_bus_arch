@@ -118,7 +118,8 @@ after that delivery. The next `listen`/`fire` for the key creates a new node and
 type. Otherwise it publishes the request with a reply subject and waits for the first response.
 `timeout` and `CancelToken` cancel the caller: the future fails with `RequestCanceledException`
 while the underlying broker request keeps running until its own timeout, and a late response is
-ignored. A node that receives a message with `replyTo` validates that subject with the address
+ignored. If the connection drops or closes, every pending request fails with
+`TransportConnectionException` instead of waiting forever. A node that receives a message with `replyTo` validates that subject with the address
 mapper, invokes the local handler through the core `handleIncomingRequest` and publishes the
 encoded result back. An invalid reply subject is reported as an error and nothing is published.
 The response always goes to the reply subject; a subject returned by the encoder is ignored for

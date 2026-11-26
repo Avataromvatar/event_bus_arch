@@ -33,7 +33,9 @@ interest rules are defined in ADR-0005.
 5. A request that was in flight when a worker died fails; it is not retried or rerouted. A handler
    `StateError` reaches the caller unchanged; `BusyException` is reserved for a worker that is not
    ready/disposed or a pool with no capacity.
-6. `waitInit` completes when every worker is ready. A worker initialization failure fails the pool;
+6. A worker that dies during the initial start window makes `waitInit` fail; the pool must not
+   become ready with a dead slot. `waitInit` completes when every worker is ready. A worker
+   initialization failure fails the pool;
    `waitReady` waits for a restart to finish. `waitInit`/`waitReady` must not hang on a dead or hung
    worker (ADR-0005's timeout and exit listener apply to each worker).
 7. `WorkerPoolMetrics` exposes pool state, worker readiness, fired/accepted/dropped, request and

@@ -362,7 +362,8 @@ class EventSubscription<T> {
     final view = _view;
     _view = null;
     if (view != null && !view.isClosed) {
-      await view.close();
+      // A paused .stream listener must not block cancellation forever.
+      unawaited(view.close());
     }
     onCancel();
   }
@@ -376,7 +377,8 @@ class EventSubscription<T> {
     final view = _view;
     _view = null;
     if (view != null && !view.isClosed) {
-      await view.close();
+      // A paused .stream listener must not block node disposal forever.
+      unawaited(view.close());
     }
     onDone?.call();
   }
@@ -496,15 +498,13 @@ class EventSubscription<T> {
     onBusError(EventBusError(
       kind: EventBusErrorKind.bufferOverflow,
       topic: address,
-      error: EventBusException(
-          'listener buffer overflow for "$address"'),
+      error: EventBusException('listener buffer overflow for "$address"'),
       context: {'capacity': '$capacity', 'dropped': '$_dropped'},
     ));
   }
 
   @override
-  String toString() =>
-      'EventSubscription<$T>($address, buffered=$buffered, '
+  String toString() => 'EventSubscription<$T>($address, buffered=$buffered, '
       'dropped=$dropped, delivered=$delivered, inFlight=$inFlight)';
 }
 
@@ -710,8 +710,8 @@ class _RequestEntry {
       _reportOutcome(RequestOutcome.completed);
     } catch (error, stackTrace) {
       if (!completer.isCompleted) completer.completeError(error, stackTrace);
-      onBusError?.call(_errorEnvelope(
-          EventBusErrorKind.handler, error, stackTrace));
+      onBusError
+          ?.call(_errorEnvelope(EventBusErrorKind.handler, error, stackTrace));
       _reportOutcome(RequestOutcome.errored);
     } finally {
       _finished = true;

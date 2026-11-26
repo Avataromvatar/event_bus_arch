@@ -37,8 +37,9 @@ the shared transport package, not to each adapter.
 5. `request` uses a local handler that accepts the data first. Otherwise both encoder and decoder
    are required; the request is published with a reply subject and the first response is decoded.
    `CancelToken` cancels the caller-side future with `RequestCanceledException`; the underlying
-   broker request continues until its own timeout and a late response is ignored. There is no
-   broker-side cancel message in 4.1.1.
+   broker request continues until its own timeout and a late response is ignored. A connection
+   drop or close fails every pending request with `TransportConnectionException`, so a request
+   without a timeout cannot await forever. There is no broker-side cancel message in 4.1.1.
 6. An incoming request resolves exactly one answering registration through
    `handlerAddressFor(address, data)`, invokes the core `handleIncomingRequest`, encodes the result
    and publishes it to the incoming `replyTo`. Overlapping exact/pattern nodes cannot both answer.

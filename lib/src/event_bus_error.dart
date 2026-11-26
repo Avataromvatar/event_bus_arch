@@ -218,6 +218,8 @@ class EventBusErrorMonitor {
     for (final subscription in subscriptions) {
       await subscription.cancel();
     }
-    await _controller.close();
+    // Do not await a broadcast close: a paused monitor listener would hang
+    // dispose forever.
+    if (!_controller.isClosed) unawaited(_controller.close());
   }
 }

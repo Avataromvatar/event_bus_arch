@@ -387,7 +387,7 @@ class _IsolateLink {
     } else if (message is _IsolateDeleteSelector) {
       _host._removeSelectorLocally(message.selector);
     } else if (message is _IsolateDeleteAddress) {
-      _host.removeAddress(message.address);
+      _host._removeAddressLocally(message.address);
     }
     // any other message (including late replies) is ignored
   }
@@ -928,6 +928,12 @@ class _EventBusForIsolate extends EventBusImpl {
   final SendPort _sendPort;
   late final _IsolateLink _link = _IsolateLink(this);
   Timer? _watchdog;
+  bool _watchdogChecking = false;
+  int _watchdogMisses = 0;
+
+  static const Duration _watchdogInterval = Duration(seconds: 5);
+  static const Duration _watchdogTimeout = Duration(seconds: 5);
+  static const int _watchdogMaxMisses = 3;
 
   _EventBusForIsolate(super._isModelBus, this._receivePort, this._sendPort) {
     _link.sendPort = _sendPort;
@@ -935,15 +941,34 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   ///A worker cannot be notified when its parent isolate dies. It pings the
-  ///parent and kills itself when no pong comes; its own child then does the
-  ///same, so a dead parent tears the whole subtree down.
+  ///parent and kills itself only after several consecutive missed pings; a
+  ///parent isolate blocked by a long synchronous operation is alive and must
+  ///not lose its worker. A dead parent tears the whole subtree down after the
+  ///grace window.
   void _startParentWatchdog() {
-    _watchdog = Timer.periodic(const Duration(seconds: 1), (_) async {
-      if (await _link.ping(const Duration(milliseconds: 500))) return;
+    _watchdog = Timer.periodic(_watchdogInterval, (_) {
+      unawaited(_checkParent());
+    });
+  }
+
+  Future<void> _checkParent() async {
+    if (_watchdog == null || _watchdogChecking) return;
+    _watchdogChecking = true;
+    try {
+      final alive = await _link.ping(_watchdogTimeout);
+      if (_watchdog == null) return;
+      if (alive) {
+        _watchdogMisses = 0;
+        return;
+      }
+      _watchdogMisses++;
+      if (_watchdogMisses < _watchdogMaxMisses) return;
       _watchdog?.cancel();
       _watchdog = null;
       Isolate.current.kill(priority: Isolate.immediate);
-    });
+    } finally {
+      _watchdogChecking = false;
+    }
   }
 
   ///Reports a failure of a lower layer locally and forwards it up the chain.

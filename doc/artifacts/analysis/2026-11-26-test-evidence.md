@@ -3,6 +3,26 @@
 Environment: Linux (WSL2), Dart SDK 3.14.1 stable (downloaded to /tmp/dart-sdk-install),
 `dart pub get` resolved 65 dependencies.
 
+## Status update — 2026-11-27 (v4.2.0 merged)
+
+`master` advanced to v4.2.0 (`59641bd`); the analysis branch was merged with it and the checks
+were re-run on the merged tree:
+
+- Tests: core **292/292**, patterns **21/21**, transport **41/41**, NATS **34/34** and MQTT
+  **27/27** with real brokers; Chrome smoke 6/6.
+- `dart analyze`: 23 infos, 0 warnings, 0 errors.
+- Coverage: **86.3%** (1860/2155); `event_dto.dart` 50.0%, `event_probe.dart` 57.9%,
+  `event_bus_logger.dart` 57.1%.
+- `dart format`: 22 of 107 files would change (was 53 of 108 at 4.1.0).
+- `dart doc`: 5 warnings, 0 errors.
+- pub.dev still serves 4.1.0; v4.2.0 is tagged but not published.
+- The three independent reproductions now pass: `removeAddress` echo = **1 call** (was 5,892),
+  paused-listener dispose **3/3 pass**, sync reentrancy **2/2 pass**. R-01, R-02, R-03, R-04, R-05,
+  R-11, R-16 and R-17 are fixed in the repository.
+
+The tables below record the 4.1.0 baseline; the numbers above supersede them for the merged
+branch.
+
 ## Static analysis
 
 `dart analyze` over the workspace: **19 info-level lints, 0 warnings, 0 errors**.

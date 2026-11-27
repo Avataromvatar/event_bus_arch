@@ -1,19 +1,71 @@
 # event_bus_arch — product and production-readiness analysis
 
-- Date: 2026-11-26
-- Revision: master @ 9a0cb35, published core 4.1.0 (2026-11-23)
+- Date: 2026-11-26; status update 2026-11-27
+- Revision reviewed: master @ `9a0cb35` (4.1.0); merged state: **v4.2.0 @ `59641bd`**
+- Published core: 4.1.0 (4.2.0 is tagged but not yet on pub.dev)
 - Scope: five packages (`event_bus_arch`, `_patterns`, `_transport`, `_nats`, `_mqtt`),
   documentation, tests, packaging and publication state
 - Companion evidence: [2026-11-26-test-evidence.md](2026-11-26-test-evidence.md)
-- Status: analysis; no code changed
+- Status: analysis; no production code changed by this branch
+
+---
+
+## Status update — 2026-11-27 (v4.2.0 merged)
+
+While this analysis was being reviewed, `master` advanced to **v4.2.0** (`59641bd`). The release
+fixes both blockers and all five high findings. I merged `origin/master` into this analysis branch
+and re-ran the independent reproductions against the merged tree:
+
+| Finding | At 9a0cb35 | At v4.2.0 |
+|---|---|---|
+| R-01 `removeAddress` echo | 5,892 calls in 300 ms | **1 call** — fixed |
+| R-16 paused-listener dispose hang | 3 of 3 hang | **3 of 3 pass** — fixed |
+| R-17 sync reentrancy | `ConcurrentModificationError` / `StateError` | **2 of 2 pass** — fixed |
+| R-02 worker watchdog | kills after ~1.5 s | fixed per CHANGELOG (3 missed 5 s pings, ~30 s) + test |
+| R-03 pool-start death | ready pool with a dead slot | fixed per CHANGELOG + test |
+| R-04 MQTT `ws://`/`wss://` | documented but broken | fixed; `ws://` upgrade test added |
+| R-05 transport request hang | hangs without a timeout | fixed: pending requests fail on drop/close |
+
+Verification of the merged tree (Dart 3.14.1):
+
+- core **292/292**, patterns **21/21**, transport **41/41**, NATS **34/34**, MQTT **27/27** with
+  real NATS 2.10 and Mosquitto 2; Chrome smoke 6/6.
+- `dart analyze`: 23 infos, 0 warnings, 0 errors.
+- Coverage 86.3%; `dart doc` 5 warnings; 22 of 107 files are not formatted by the stable formatter.
+- v4.2.0 is tagged in git but **not yet published on pub.dev** (latest there is 4.1.0).
+
+Still open on the merged tree (checked):
+
+- F-01 no CI; F-02/F-20 formatting (22 files) and no gate.
+- F-03 packaging: `packages/` and dev scripts still ship; no `.pubignore`.
+- F-04 NATS/MQTT descriptions still below 50 chars (core is fixed).
+- F-05 core example still misspelled; patterns/transport still lack a recognised example.
+- F-06 23 analyzer infos (1 library name, 14 part-of, 2 super parameters, 4 benchmark braces,
+  2 test equality).
+- F-07 repository URL still the old `dart_event_bus`; no topics/homepage.
+- F-08 publisher not verified; F-10 SDK floors still disagree; F-12 5 dartdoc warnings.
+- F-13 guarantees document still missing (a migration guide was added).
+- F-14/F-15 API surface and typed `request` are proposed in ADR-0011/0012, not implemented.
+- F-16 deprecated `have*` remain; the test-only legacy facade is gone (partial).
+- F-17 web badge still blocked by the unconditional `dart:isolate` import.
+- F-18 coverage gaps: `event_dto.dart` 50%, `event_probe.dart` 57.9%, `event_bus_logger.dart` 57.1%.
+- F-19 sub-packages still 0.x; cadence is now 4.1.0 → 4.1.1 → 4.2.0 within five days.
+- F-21 no community files; F-22 obfuscation check still not committed.
+- R-06…R-15 (except R-11, fixed in 4.1.1) and R-18…R-30 were not all re-audited; treat them as open
+  until the re-audit.
+
+**Revised verdict:** the two blockers are closed in the repository, but the release is not on
+pub.dev, has no CI, and still carries the publication/API/docs gaps above. Production readiness is
+now gated by Q1/Q2/Q4/Q5 plus a short re-audit of the remaining medium/low findings. Revised
+estimate: **Q3 3–5 d (re-audit + remaining fixes); total ~16–25 person-days, 3–5 weeks.**
 
 ---
 
 ## 1. Verdict
 
 The product is a genuinely differentiated event bus, and the 4.x code is in better shape than
-most solo-maintained Dart packages: 380 tests pass (397 including real NATS and MQTT brokers),
-the analyzer is clean apart from 19 infos, core line coverage is 87%, the benchmarks show
+most solo-maintained Dart packages: at v4.2.0 **415 tests pass** with real NATS and MQTT brokers,
+the analyzer is clean apart from 23 infos, line coverage is 86.3%, the benchmarks show
 ~100,000 events/s without loss or duplication, and the documentation is unusually thorough.
 
 It is **not yet production-ready for broad adoption**, because production readiness for a library
@@ -33,20 +85,15 @@ impact:
 5. **No adoption engine** — 4 likes, 401 downloads/30 days, 3 GitHub stars, no example app, no
    launch, no external users feeding back issues.
 
-On top of the systemic gaps, the independent review found **two release blockers**: the isolate
-bridge echoes `removeAddress` between isolates (R-01 — reproduced at 5,892 calls in 300 ms), and
-`dispose`/`cancel` hang forever when any stream listener is paused (R-16 — reproduced for the bus,
-a subscription and the error monitor). Five high findings follow: the worker watchdog kills a live
-worker on one missed pong (R-02), a death during pool start is not supervised (R-03), a sync
-listener that mutates the bus crashes `fire` (R-17), MQTT `ws://`/`wss://` is documented but
-broken (R-04), and a transport request without a timeout can hang across a disconnect (R-05). The
-core routing model and the NATS/TCP paths are otherwise usable; the defects cluster in lifecycle
-edges, not in the product idea.
+On top of the systemic gaps, the independent review found **two release blockers** (R-01, R-16)
+and five high findings (R-02…R-05, R-17). **v4.2.0 fixed all of them**, and the re-run of the
+independent reproductions on the merged tree confirms it (see the status update above). §4.3 keeps
+the findings as the review record; they are no longer open in the repository.
 
-Recommended verdict: **technical preview today, with those blockers named in the README; production
-release after a focused 5–6 week push** (epics Q1–Q5, ~22–33 person-days including the lifecycle
-fixes), then growth work (A1–A3). The code does not need a rewrite; it needs release discipline, a
-stability contract, the lifecycle fixes and distribution.
+Revised verdict: **technical preview today; production release after a focused 3–5 week push**
+(epics Q1–Q5, ~16–25 person-days, with Q3 reduced to a re-audit of the remaining medium/low
+findings), then growth work (A1–A3). The code does not need a rewrite; it needs release
+engineering, publication, a stability contract and distribution.
 
 ---
 
@@ -151,6 +198,9 @@ a baseline, not proof of users. The product has no feedback loop yet.
 
 ### 3.1 Evidence
 
+Numbers below are for the reviewed 4.1.0 revision (`9a0cb35`); the merged v4.2.0 numbers are in
+the status update at the top.
+
 | Check | Result | Source |
 |---|---|---|
 | Static analysis | 19 infos, 0 warnings, 0 errors | `dart analyze` |
@@ -174,11 +224,11 @@ a baseline, not proof of users. The product has no feedback loop yet.
 - **Coherent architecture.** The 4.x address/key model is documented, decided in an ADR and
   covered by tests; patterns and transports are separate packages; the core stays a routing
   library.
-- **Test discipline.** 403 test declarations and 971 assertions (380 runnable on the VM, 17
-  broker-gated, 6 web); there is almost no real sleeping in the suite, so tests use controlled
-  fakes rather than delays; regression tests exist for the defects found by the third-party
-  review; `naming_test.dart` treats public parameter names as part of the contract and breaks the
-  build if one is renamed.
+- **Test discipline.** At v4.2.0, 415 tests pass with real brokers (292 core, 21 patterns, 41
+  transport, 34 NATS, 27 MQTT) plus 6 Chrome smoke tests; there is almost no real sleeping in the
+  suite, so tests use controlled fakes rather than delays; regression tests exist for the defects
+  found by the third-party review and for R-01/R-02/R-03/R-16/R-17; `naming_test.dart` treats
+  public parameter names as part of the contract and breaks the build if one is renamed.
 - **Documentation depth.** Seven user documents, Mermaid diagrams, an API reference, package
   READMEs, a migration tool from 3.x, and benchmark methodology. This is above the Dart OSS
   average.
@@ -200,9 +250,9 @@ a baseline, not proof of users. The product has no feedback loop yet.
 
 | Area | Verdict | Why |
 |---|---|---|
-| Core correctness | **Red–amber** | Two verified blockers (R-16 shutdown hang with a paused listener; R-17 sync reentrancy crash) and three medium lifecycle/observability defects; 280 green tests and 87% coverage did not cover these windows. The routing model itself is sound |
-| Isolates / workers | **Red–amber** | Two verified high defects (watchdog kills a live worker on one missed pong; a death during pool start is not supervised) and one blocker in `removeAddress` across the bridge; strong tests otherwise, but the tested scenarios miss these windows. VM-only, port-queue backpressure is unbounded, protocol has no version field |
-| Transport adapters | **Amber** | The full integration suites pass against real NATS 2.10 and Mosquitto 2 (34/34 and 26/26), but a request without a timeout can hang across a disconnect, MQTT `ws://`/`wss://` is documented but broken, CI does not run broker tests, and per-adapter guarantees are under-documented |
+| Core correctness | **Amber** | The two blockers (R-16, R-17) are fixed in v4.2.0 and verified; the routing model is sound. Medium/low lifecycle and observability findings (R-18…R-30) remain to be re-audited; coverage 86.3%, `event_dto.dart` 50% |
+| Isolates / workers | **Amber** | R-01/R-02/R-03 are fixed in v4.2.0 with new tests; strong suite otherwise. VM-only, port-queue backpressure is unbounded, the protocol has no version field, and no soak test exists |
+| Transport adapters | **Amber** | R-04/R-05 are fixed; the full integration suites pass against real NATS 2.10 and Mosquitto 2 (34/34 and 27/27). CI still does not run broker tests, and per-adapter guarantees are under-documented |
 | API stability | **Amber–red** | 41 public types, several implementation types exposed; `request` returns `dynamic`; deprecated `have*` has no date; sub-packages at 0.x; breaking cadence is fast |
 | Packaging / publication | **Red** | 130–150/160 points; archive contains the whole workspace and dev scripts; no example recognised; no verified publisher; stale repository URL; descriptions out of range |
 | Release engineering | **Red** | No CI, no formatting gate, no release automation, no coverage or broker jobs, no branch protection |
@@ -210,9 +260,9 @@ a baseline, not proof of users. The product has no feedback loop yet.
 | Web story | **Amber** | Runtime works (compile + Chrome tests pass), but pub.dev marks Web unsupported because the entry library imports `dart:isolate`; no platform badge |
 | Community / support | **Red** | No CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue templates, discussions, roadmap or release notes; no visible external users |
 
-Reading the table: a green suite is not a green product. R-01, R-02 and R-03 all pass the
-existing tests because the tests do not exercise those windows. The verdicts reflect what an
-adopter would hit, not how many tests exist.
+Reading the table: at 9a0cb35, R-01, R-02 and R-03 passed the suite because the tests did not
+exercise those windows; v4.2.0 added tests for them. A green suite is still not a green product —
+the verdicts reflect what an adopter would hit, not how many tests exist.
 
 ### 3.4 Risks to the plan
 
@@ -221,7 +271,7 @@ adopter would hit, not how many tests exist.
 | Solo-maintainer capacity | Five packages × three OS targets × two SDK floors × two brokers is not manually verifiable; the first regression that ships will cost the early adopters | Q1 first: automate everything before adding scope |
 | Scope creep | Adding a third transport or a new pattern before the base is trustworthy spreads the same effort thinner | Freeze the adapter list; depth before breadth (A2 acceptance rule) |
 | Breaking-change cadence | 3.0 → 4.0 → 4.1 in five weeks tells adopters the API is not settled; another major soon would burn the first users | Stability policy, ship 4.2 as the production release, batch the breaking cleanup into 5.0 (Q4) |
-| Lifecycle edges are under-tested | Two blockers and three highs passed 280 tests because the suite does not cover paused listeners, sync reentrancy, reconnects or start-window deaths | Q3 adds targeted regression tests for each; Q1 runs them on every change |
+| Lifecycle edges are under-tested | At 9a0cb35 two blockers and three highs passed 280 tests because the suite did not cover paused listeners, sync reentrancy, reconnects or start-window deaths; v4.2.0 added targeted tests | Keep the pattern for every remaining window; Q1 runs the tests on every change |
 | Documentation drift | Excellent docs are a liability if snippets stop compiling; there is no doc test today | Compile examples and quick starts in CI (Q1/Q5) |
 | No feedback loop | With zero external users, the roadmap is guesswork and the value proposition is unvalidated | Launch after Q2/Q5, then interview the first ten users; measure downloads, issues, likes |
 
@@ -342,11 +392,11 @@ The coordinator reproduced its blocker and its high finding; the rest are code-r
 the test-only `legacy_compat.dart` facade, so the public API (buffer 1024, named parameters) is
 less proven than the legacy path.
 
-**Review verdict:** request changes. R-01 and R-16 are release blockers; R-02/R-03/R-17 are
-serious. Transport is usable with a documented deadline requirement (R-05); MQTT is usable only
-over `mqtt://`/`mqtts://` until R-04 is fixed. These findings do not invalidate the product idea;
-they confirm that Q3 is the gating epic and that the 5–6 week estimate must absorb roughly 1.5
-weeks of lifecycle and concurrency fixes.
+**Review verdict at 9a0cb35:** request changes — R-01 and R-16 were release blockers, R-02/R-03/
+R-17 serious, and MQTT was usable only over `mqtt://`/`mqtts://` until R-04. **v4.2.0 fixed all
+seven findings** and added tests; the verdict for the merged tree is in the status update at the
+top. These findings did not invalidate the product idea; they confirmed that lifecycle and
+concurrency edges were the gating work, and they are now closed in the repository.
 
 ---
 
@@ -368,10 +418,11 @@ points and remove the most visible signs of an unmaintained package.
 | 7 | Add README sections "When not to use" and "Delivery guarantees" (short, honest) | Fewer mismatched adopters, clearer promise | 3 h |
 
 The register contains 22 product/infrastructure findings and 30 independent-review findings; every
-one is assigned to an epic through the `Closes` field below. Each epic has a goal, the reason it
-matters, scope, acceptance criteria and an estimate in person-days for one experienced Dart
-developer, including tests and docs. These are proposals, not yet registered records;
-formalisation through the product process is the next step after the human approves the priorities.
+one is assigned to an epic through the `Closes` field below. v4.2.0 closed 8 of the 30 review
+findings; Q3 re-audits the rest. Each epic has a goal, the reason it matters, scope, acceptance
+criteria and an estimate in person-days for one experienced Dart developer, including tests and
+docs. These are proposals, not yet registered records; formalisation through the product process is
+the next step after the human approves the priorities.
 
 ### Q1 — Release engineering and CI
 
@@ -417,18 +468,21 @@ formalisation through the product process is the next step after the human appro
 
 ### Q3 — Correctness and delivery guarantees
 
-- **Priority:** P0 · **Estimate:** 9–13 d (both blockers and the three high findings are now sized) ·
-  **Closes:** F-13, F-18, F-22, R-01…R-30
+- **Priority:** P1 · **Estimate:** 3–5 d (v4.2.0 closed R-01…R-05, R-11, R-16 and R-17; this
+  covers the re-audit and the remaining medium/low findings) · **Closes:** F-13, F-18, F-22, and
+  the remaining R-items after re-audit
 - **Goal:** no known production defect, and every guarantee a consumer relies on is written down
   and tested.
 - **Why:** users adopt a library for what it promises; unwritten promises become incidents.
 - **Scope:**
-  - Fix all P0/P1 findings from the independent review; each gets a failing regression test first.
-    Start with R-16 (shutdown hang on paused listeners) and R-01 (`removeAddress` echo), then R-17
-    (sync reentrancy) and R-02/R-03 (watchdog and pool-start death), then R-04 (MQTT WebSocket
-    claim) and R-05 (request deadline across reconnects).
+  - Re-audit R-06…R-15 and R-18…R-30 against v4.2.0; mark each fixed, obsolete or open with
+    evidence. R-11 was fixed in 4.1.1; R-01…R-05, R-16 and R-17 are fixed in 4.2.0.
+  - Fix the medium/low findings that can still hit a user: handler-cursor and monitor growth
+    (R-18, R-19), probe contract (R-20), dispose contract (R-21), `fromJson` validation (R-23),
+    histogram boundary and sampling (R-24, R-25), listener/handler state after cancel (R-27), and
+    throwing callbacks (R-30).
   - Decide and document the `DispatchStrategy.single` contract (strict serialisation vs
-    opportunistic standby); align code and docs.
+    opportunistic standby); align code and docs (R-08).
   - Close coverage gaps in `event_dto.dart`, `event_probe.dart`, `event_bus_logger.dart` and any
     new untested branch; target ≥90% core.
   - Write a "Delivery guarantees and limits" document: local fire semantics, listener vs handler,
@@ -563,7 +617,7 @@ before talking to users.
 | Phase | Window | Work | Exit gate |
 |---|---|---|---|
 | 0. Hygiene | Days 1–3 | Q2 publication fixes, `.pubignore`, descriptions, example, analyzer infos, verified publisher; Q1 CI skeleton | All packages 160/160; CI green on analysis/tests/format |
-| 1. Hardening | Week 1–2 | Q1 complete (broker, coverage, docs jobs); Q3: R-16 and R-01 first, then R-17, R-02…R-10 with regression tests, guarantees document; nightly stress | Zero P0/P1; guarantees documented; broker tests in CI |
+| 1. Hardening | Week 1–2 | Q1 complete (broker, coverage, docs jobs); Q3 re-audit of v4.2.0 and remaining medium/low fixes, guarantees document; nightly stress | Zero P0/P1; guarantees documented; broker tests in CI |
 | 2. Stabilisation | Week 3–4 | Q4 stability policy, 5.0 plan, sub-package 1.0, web badge; Q5 README/docs site/example app; release 4.2 or 5.0 | All 160/160; docs site live; release published and announced |
 | 3. Launch | Week 4–5 | A1 positioning, articles, community launches; A2 first reference app | Launch executed; metrics baseline recorded |
 | 4. Growth | Ongoing | A2/A3, feedback loop, roadmap, external adopters | 90-day metric targets |
@@ -607,18 +661,16 @@ These change the roadmap and cannot be answered from the repository.
    "production" release after Q1–Q5 (no breaking changes), and put the breaking API cleanup into
    a later 5.0. Alternative: make the production release 5.0 immediately, which is cleaner but
    delays launch and asks users to adopt a brand-new major.
-8. **MQTT WebSocket.** R-04 is a documented-but-broken feature. Recommendation: fix it (1–2 days,
-   including a WS broker in the integration job) because WebSocket MQTT is how browser and
-   restrictive-network users connect. Alternative: remove `ws://`/`wss://` from README/CHANGELOG
-   and `doc/07-platforms.md` until someone needs it. Which is it?
+8. **MQTT WebSocket — resolved in v4.2.0.** R-04 is fixed (full URI, no TCP-only `secure` flag)
+   and a `ws://` upgrade test was added. Remaining action: run a real WebSocket broker in CI, not
+   just the local upgrade check.
 9. **`DispatchStrategy.single` contract.** The code switches to standby on saturation; the docs
    imply "one active worker". Recommendation: make it strict (saturation → `BusyException`/`false`)
    because that is the reason to choose `single`; add a separate `failover` strategy if
    opportunistic standby is wanted. Alternative: keep the code and document the current behaviour.
-10. **Shutdown semantics (R-16).** Recommendation: do not await the `done` delivery in
-    `dispose`/`cancel` (fast, deterministic shutdown; document that a paused listener may not see
-    `done`). Alternatives: track raw subscriptions and cancel/resume them on dispose (guarantees
-    `done`, more machinery), or a bounded wait (compromise, still slow in the worst case).
+10. **Shutdown semantics (R-16) — resolved in v4.2.0.** `dispose`/`cancel` no longer await
+    broadcast-controller close; a paused listener cannot hang cleanup. Remaining action: state in
+    the docs that a paused listener may not observe `done`.
 11. **Probe contract (R-20).** Recommendation: make `localListeners`/`localAvailableHandlers`
     accurate for paused and rejecting subscriptions, and define `accepted` explicitly as "a
     candidate exists" rather than "`fire` would return true" — or align the docs to a pure routing

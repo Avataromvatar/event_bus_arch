@@ -1,12 +1,12 @@
 ## 0.2.0
 
-- Targets `event_bus_arch` `^4.1.0` and `event_bus_arch_transport` `^0.2.0`.
+- Targets `event_bus_arch` `^4.2.0` and `event_bus_arch_transport` `^0.2.0`.
 - `EventDTO.correlationId` travels as an MQTT 5 user property and is attached to incoming DTOs;
   request responses carry it too.
 - `EventBusMqtt` accepts `ObservabilityConfig` and forwards it to `TransportEventBus`.
 - The shipped `MqttServerConnection` uses the VM `MqttServerClient`; `ws://`/`wss://` work on the
   VM. For the browser, `mqtt5_client` provides `MqttBrowserClient`, which can be wrapped in a
-  custom `TransportConnection` (no browser adapter ships in 4.1.0).
+  custom `TransportConnection` (no browser adapter ships in 4.1.1).
 - Inherits the 0.2.0 transport behavior: local-first `fire`, keyed node cleanup, `replyTo`
   validation and caller-side request cancellation.
 

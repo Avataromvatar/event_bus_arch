@@ -32,6 +32,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
   final _statusController = StreamController<TransportStatus>.broadcast();
   final _errorController = StreamController<Object>.broadcast();
   final Map<int, _TransportRegistration> _registrations = {};
+  final Map<int, Completer<TransportMessage>> _pendingRequests = {};
   final Set<int> _active = {};
 
   Timer? _reconnectTimer;
@@ -41,6 +42,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
   bool _disposed = false;
   int _attempt = 0;
   int _nextId = 0;
+  int _nextRequestId = 0;
 
   // ---------------------------------------------------------------------------
   // Adapter hooks
@@ -147,7 +149,9 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
     }
 
     final replySubject = newReplySubject();
+    final requestId = _nextRequestId++;
     final completer = Completer<TransportMessage>();
+    _pendingRequests[requestId] = completer;
     final subscription = subscribe(replySubject, (message) {
       if (!completer.isCompleted) completer.complete(message);
     });
@@ -162,6 +166,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
         replyTo: replySubject,
       );
     } catch (_) {
+      _pendingRequests.remove(requestId);
       await subscription.cancel();
       rethrow;
     }
@@ -170,6 +175,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
       final response = completer.future;
       return timeout == null ? await response : await response.timeout(timeout);
     } finally {
+      _pendingRequests.remove(requestId);
       await subscription.cancel();
     }
   }
@@ -196,6 +202,7 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
     _disposed = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _failPendingRequests(TransportConnectionException('connection is closed'));
 
     for (final registration in _registrations.values) {
       registration.cancelled = true;
@@ -226,7 +233,21 @@ abstract class ReconnectingTransportConnection implements TransportConnection {
       return;
     }
     _setStatus(TransportStatus.disconnected);
+    _failPendingRequests(TransportConnectionException(
+        'connection lost while waiting for a response'));
     unawaited(_detachAndReconnect());
+  }
+
+  ///Fails requests that were waiting for a reply when the connection dropped
+  ///or closed. Without this, a request without a timeout would await forever.
+  void _failPendingRequests(Object error) {
+    if (_pendingRequests.isEmpty) return;
+    final pending =
+        List<Completer<TransportMessage>>.of(_pendingRequests.values);
+    _pendingRequests.clear();
+    for (final completer in pending) {
+      if (!completer.isCompleted) completer.completeError(error);
+    }
   }
 
   ///Delivers a broker message to the registration that owns it, applying the

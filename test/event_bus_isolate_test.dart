@@ -1,6 +1,5 @@
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 void main() {
   group('EventBusIsolate', () {
@@ -23,7 +22,8 @@ void main() {
       final isolateBus = EventBusIsolate(
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
-          bus.subscribeEventsLegacy<String>(handler: (dto, lastData) async {
+          bus.subscribe(EventKey<String>('String'),
+              handler: (dto, lastData) async {
             return 'Processed: ${dto.data}';
           });
         },
@@ -32,7 +32,8 @@ void main() {
       await isolateBus.waitInit;
 
       // Send an event and expect a response
-      final result = await isolateBus.requestLegacy<String>('test message');
+      final result =
+          await isolateBus.request(EventKey<String>('String'), 'test message');
       expect(result, 'Processed: test message');
     });
 
@@ -57,7 +58,7 @@ void main() {
       final isolateBus = EventBusIsolate(
         onInit: (bus, initialData) {
           // Set up a handler in the isolate
-          bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
+          bus.subscribe(EventKey<int>('int'), handler: (dto, lastData) async {
             return dto.data * 2;
           });
         },
@@ -67,9 +68,9 @@ void main() {
 
       // Send multiple events
       final results = await Future.wait<dynamic>([
-        isolateBus.requestLegacy<int>(1),
-        isolateBus.requestLegacy<int>(2),
-        isolateBus.requestLegacy<int>(3),
+        isolateBus.request(EventKey<int>('int'), 1),
+        isolateBus.request(EventKey<int>('int'), 2),
+        isolateBus.request(EventKey<int>('int'), 3),
       ]);
 
       expect(results, [2, 4, 6]);

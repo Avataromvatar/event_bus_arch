@@ -231,6 +231,7 @@ class WorkerPool {
   bool _closing = false;
   bool _failed = false;
   bool _started = false;
+  Object? _startupError;
   WorkerPoolState _state = WorkerPoolState.starting;
   Future<void>? _closeFuture;
 
@@ -485,6 +486,14 @@ class WorkerPool {
     try {
       await Future.wait(_slots.map(_spawn));
       if (_closing) return;
+      final startupError = _startupError;
+      if (startupError != null) throw startupError;
+      for (final slot in _slots) {
+        if (!slot.ready || slot.bus == null) {
+          throw EventBusException(
+              'worker ${slot.index} is not ready at startup');
+        }
+      }
       _started = true;
       _updateState();
       if (!_initialReady.isCompleted) _initialReady.complete();
@@ -536,10 +545,7 @@ class WorkerPool {
   }
 
   void _handleDeath(_WorkerSlot slot, EventBusIsolate bus) {
-    if (_closing || _failed) return;
-    // During the initial start the failure is owned by _start; supervision
-    // applies to a pool that was ready at least once.
-    if (!_started || slot.restarting) return;
+    if (_closing || _failed || slot.restarting) return;
 
     slot.ready = false;
     slot.bus = null;
@@ -547,6 +553,14 @@ class WorkerPool {
     slot.errorSub = null;
     unawaited(sub?.cancel());
     unawaited(bus.dispose());
+    if (!_started) {
+      // A pool must not become ready with a worker that died in the start
+      // window. _start turns this into a failed waitInit.
+      _startupError ??=
+          EventBusException('worker ${slot.index} died during startup');
+      _updateState();
+      return;
+    }
     _updateState();
     _scheduleRestart(slot);
   }

@@ -41,7 +41,10 @@ events sent right after `await waitInit` see the subscriptions made in `onInit`.
 
 The worker is spawned paused and the exit listener is registered before it is resumed, so a worker
 that dies during `onInit` fails `waitInit` rather than hanging it. `initTimeout` (30 seconds by
-default, `null` disables it) fails `waitInit` when `onInit` never finishes.
+default, `null` disables it) fails `waitInit` when `onInit` never finishes. A timeout aborts the
+initialization generation: pending link work is failed, the receive port is closed, the isolate is
+killed, and a late ready message from the old worker is ignored. `restart()` can then start a fresh
+worker.
 
 ```mermaid
 sequenceDiagram
@@ -93,6 +96,9 @@ retained even without a listener.
   Pending requests fail; a generation counter ignores late messages from the old worker.
 - `ping()` checks liveness, not readiness.
 - `dispose()` cancels pending work, closes the ports and kills the worker.
+- A worker watches its parent with a ping watchdog. The watchdog tolerates a blocked parent for
+  about 30 seconds (three missed five-second pings) before killing the worker, so a long synchronous
+  operation on the main isolate does not destroy a live worker.
 
 Only sendable objects cross the boundary. Keys, `arguments` and `correlationId` travel with the
 DTO; a handler error is rethrown at the caller.

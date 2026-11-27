@@ -17,7 +17,6 @@ import 'dart:isolate';
 import 'dart:math';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
-import '../test/legacy_compat.dart';
 
 ///One event delivered through the bus. `sentAtUs` is main-isolate stopwatch
 ///time, so the worker needs a calibrated offset to interpret it.
@@ -67,7 +66,7 @@ Future<void> _workerInit(EventBus bus, Object? initialData) async {
   var fireReceived = 0;
   int? offsetUs;
 
-  bus.listenLegacy<_FireEvent>().listen((event) {
+  bus.listen(EventKey<_FireEvent>('_FireEvent')).listen((event) {
     fireReceived++;
     fireSeqs.add(event.seq);
     final offset = offsetUs;
@@ -78,19 +77,23 @@ Future<void> _workerInit(EventBus bus, Object? initialData) async {
     fireLatencies.add(latency);
   });
 
-  bus.subscribeEventsLegacy<_RequestEvent>(
+  bus.subscribe(
+    EventKey<_RequestEvent>('_RequestEvent'),
     handler: (dto, lastData) async => dto.data.seq,
   );
-  bus.subscribeEventsLegacy<_CalibrateRequest>(
+  bus.subscribe(
+    EventKey<_CalibrateRequest>('_CalibrateRequest'),
     handler: (dto, lastData) async => workerClock.elapsedMicroseconds,
   );
-  bus.subscribeEventsLegacy<_SetOffsetRequest>(
+  bus.subscribe(
+    EventKey<_SetOffsetRequest>('_SetOffsetRequest'),
     handler: (dto, lastData) async {
       offsetUs = dto.data.offsetUs;
       return null;
     },
   );
-  bus.subscribeEventsLegacy<_ResetFireRequest>(
+  bus.subscribe(
+    EventKey<_ResetFireRequest>('_ResetFireRequest'),
     handler: (dto, lastData) async {
       fireLatencies.clear();
       fireSeqs.clear();
@@ -98,13 +101,16 @@ Future<void> _workerInit(EventBus bus, Object? initialData) async {
       return null;
     },
   );
-  bus.subscribeEventsLegacy<_CountFireRequest>(
+  bus.subscribe(
+    EventKey<_CountFireRequest>('_CountFireRequest'),
     handler: (dto, lastData) async => fireReceived,
   );
-  bus.subscribeEventsLegacy<_CollectFireRequest>(
+  bus.subscribe(
+    EventKey<_CollectFireRequest>('_CollectFireRequest'),
     handler: (dto, lastData) async => List<int>.of(fireLatencies),
   );
-  bus.subscribeEventsLegacy<_FireIntegrityRequest>(
+  bus.subscribe(
+    EventKey<_FireIntegrityRequest>('_FireIntegrityRequest'),
     handler: (dto, lastData) async => <int>[fireReceived, fireSeqs.length],
   );
 }
@@ -267,7 +273,7 @@ Future<_Result> _localFire(
   final seen = <int>{};
   var sent = 0;
   var rejected = 0;
-  final sub = bus.listenLegacy<_FireEvent>().listen((event) {
+  final sub = bus.listen(EventKey<_FireEvent>('_FireEvent')).listen((event) {
     seen.add(event.seq);
     final latency = clock.elapsedMicroseconds - event.sentAtUs;
     samples.add(latency < 0 ? 0 : latency);
@@ -278,7 +284,8 @@ Future<_Result> _localFire(
     rate: 1000,
     duration: options.warmup,
     clock: clock,
-    send: (seq, at) => bus.fireLegacy(_FireEvent(seq, at)),
+    send: (seq, at) =>
+        bus.fire(EventKey<_FireEvent>('_FireEvent'), _FireEvent(seq, at)),
   );
   await _waitUntil(() => samples.length >= warmupSent);
   samples.clear();
@@ -292,7 +299,8 @@ Future<_Result> _localFire(
     duration: options.duration,
     clock: clock,
     send: (seq, at) {
-      if (!bus.fireLegacy(_FireEvent(seq, at))) rejected++;
+      if (!bus.fire(EventKey<_FireEvent>('_FireEvent'), _FireEvent(seq, at)))
+        rejected++;
     },
   );
   generationUs = clock.elapsedMicroseconds - start;
@@ -319,7 +327,8 @@ Future<_Result> _localRequest(
   Stopwatch clock,
 ) async {
   final bus = EventBus();
-  bus.subscribeEventsLegacy<_RequestEvent>(
+  bus.subscribe(
+    EventKey<_RequestEvent>('_RequestEvent'),
     handler: (dto, lastData) async => dto.data.seq,
   );
   final samples = <int>[];
@@ -327,7 +336,9 @@ Future<_Result> _localRequest(
   var errors = 0;
 
   Future<void> one(int seq, int sentAt) {
-    return bus.requestLegacy<_RequestEvent>(_RequestEvent(seq)).then(
+    return bus
+        .request(EventKey<_RequestEvent>('_RequestEvent'), _RequestEvent(seq))
+        .then(
       (value) {
         seen.add(value as int);
         samples.add(max(0, clock.elapsedMicroseconds - sentAt));
@@ -384,7 +395,8 @@ Future<int> _calibrate(EventBusIsolate iso, Stopwatch clock) async {
   var bestOffset = 0;
   for (var i = 0; i < 7; i++) {
     final t0 = clock.elapsedMicroseconds;
-    final workerAt = (await iso.requestLegacy<_CalibrateRequest>(
+    final workerAt = (await iso.request(
+      EventKey<_CalibrateRequest>('_CalibrateRequest'),
       const _CalibrateRequest(),
     )) as int;
     final t1 = clock.elapsedMicroseconds;
@@ -395,13 +407,14 @@ Future<int> _calibrate(EventBusIsolate iso, Stopwatch clock) async {
     }
     await Future<void>.delayed(const Duration(milliseconds: 2));
   }
-  await iso.requestLegacy<_SetOffsetRequest>(_SetOffsetRequest(bestOffset));
+  await iso.request(EventKey<_SetOffsetRequest>('_SetOffsetRequest'),
+      _SetOffsetRequest(bestOffset));
   return bestOffset;
 }
 
 Future<int> _workerCount(EventBusIsolate iso) async {
-  return (await iso.requestLegacy<_CountFireRequest>(const _CountFireRequest()))
-      as int;
+  return (await iso.request(EventKey<_CountFireRequest>('_CountFireRequest'),
+      const _CountFireRequest())) as int;
 }
 
 Future<_Result> _isolateFire(
@@ -411,17 +424,20 @@ Future<_Result> _isolateFire(
   Stopwatch clock,
 ) async {
   await _calibrate(iso, clock);
-  await iso.requestLegacy<_ResetFireRequest>(const _ResetFireRequest());
+  await iso.request(EventKey<_ResetFireRequest>('_ResetFireRequest'),
+      const _ResetFireRequest());
 
   // Warm-up.
   final warmupSent = await _drive(
     rate: 1000,
     duration: options.warmup,
     clock: clock,
-    send: (seq, at) => iso.fireLegacy(_FireEvent(seq, at)),
+    send: (seq, at) =>
+        iso.fire(EventKey<_FireEvent>('_FireEvent'), _FireEvent(seq, at)),
   );
   await _waitForWorker(iso, warmupSent);
-  await iso.requestLegacy<_ResetFireRequest>(const _ResetFireRequest());
+  await iso.request(EventKey<_ResetFireRequest>('_ResetFireRequest'),
+      const _ResetFireRequest());
 
   var rejected = 0;
   final start = clock.elapsedMicroseconds;
@@ -430,15 +446,18 @@ Future<_Result> _isolateFire(
     duration: options.duration,
     clock: clock,
     send: (seq, at) {
-      if (!iso.fireLegacy(_FireEvent(seq, at))) rejected++;
+      if (!iso.fire(EventKey<_FireEvent>('_FireEvent'), _FireEvent(seq, at)))
+        rejected++;
     },
   );
   final generationUs = clock.elapsedMicroseconds - start;
 
   await _waitForWorker(iso, sent);
-  final raw = (await iso
-      .requestLegacy<_CollectFireRequest>(const _CollectFireRequest())) as List<int>;
-  final integrity = (await iso.requestLegacy<_FireIntegrityRequest>(
+  final raw = (await iso.request(
+      EventKey<_CollectFireRequest>('_CollectFireRequest'),
+      const _CollectFireRequest())) as List<int>;
+  final integrity = (await iso.request(
+    EventKey<_FireIntegrityRequest>('_FireIntegrityRequest'),
     const _FireIntegrityRequest(),
   )) as List<int>;
   final negatives = raw.where((value) => value < 0).length;
@@ -481,7 +500,9 @@ Future<_Result> _isolateRequest(
   var errors = 0;
 
   Future<void> one(int seq, int sentAt) {
-    return iso.requestLegacy<_RequestEvent>(_RequestEvent(seq)).then(
+    return iso
+        .request(EventKey<_RequestEvent>('_RequestEvent'), _RequestEvent(seq))
+        .then(
       (value) {
         seen.add(value as int);
         samples.add(max(0, clock.elapsedMicroseconds - sentAt));

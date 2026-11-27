@@ -3,7 +3,6 @@ import 'dart:isolate';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 // --- functions that run IN THE WORKER (top-level only) ---
 
@@ -11,48 +10,50 @@ void silentWorker(EventBus bus, Object? initialData) {}
 
 ///A handler for int with no listener: it must not count for `fire` (D14).
 void doublingWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEventsLegacy<int>(handler: (dto, lastData) async => dto.data * 2);
+  bus.subscribe(EventKey<int>('int'),
+      handler: (dto, lastData) async => dto.data * 2);
 }
 
 ///Listens to 'in' and echoes every event to 'seen'.
 void listenerWorker(EventBus bus, Object? initialData) {
-  bus.subscribeLegacy<String>(
-      paths: ['in'],
-      onData: (e) => bus.fireLegacy<String>('seen: $e', paths: ['seen']));
+  bus
+      .listen(EventKey<String>('String.in'))
+      .listen((e) => bus.fire(EventKey<String>('String.seen'), 'seen: $e'));
 }
 
 ///Echoes to the same path. With local delivery on the bridge this would be an
 ///endless loop: the listener would receive its own echo and fire again.
 void sameTopicEchoWorker(EventBus bus, Object? initialData) {
-  bus.subscribeLegacy<String>(
-      paths: ['in'],
-      onData: (e) => bus.fireLegacy<String>('echo: $e', paths: ['in']));
+  bus
+      .listen(EventKey<String>('String.in'))
+      .listen((e) => bus.fire(EventKey<String>('String.in'), 'echo: $e'));
 }
 
 ///The same listener, but created after an asynchronous onInit delay.
 Future<void> slowListenerWorker(EventBus bus, Object? initialData) async {
   await Future<void>.delayed(const Duration(milliseconds: 50));
-  bus.subscribeLegacy<String>(
-      paths: ['in'],
-      onData: (e) => bus.fireLegacy<String>('seen: $e', paths: ['seen']));
+  bus
+      .listen(EventKey<String>('String.in'))
+      .listen((e) => bus.fire(EventKey<String>('String.seen'), 'seen: $e'));
 }
 
 ///A pattern listener: interest for every topic of the type.
 void patternEchoWorker(EventBus bus, Object? initialData) {
-  bus.subscribeLegacy<String>(
-      paths: ['*'], onData: (e) => bus.fireLegacy<String>('echo: $e'));
+  bus
+      .listen(EventPatternKey<String>('String.*'))
+      .listen((e) => bus.fire(EventKey<String>('String'), 'echo: $e'));
 }
 
 void pathWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEventsLegacy<int>(
-      paths: ['counter'], handler: (dto, lastData) async => dto.data * 2);
+  bus.subscribe(EventKey<int>('int.counter'),
+      handler: (dto, lastData) async => dto.data * 2);
 }
 
 ///Answers once and then removes its own handler.
 void oneShotHandlerWorker(EventBus bus, Object? initialData) {
   late EventSubscription<int> subscription;
-  subscription = bus.subscribeEventsLegacy<int>(
-      paths: ['once'], handler: (dto, lastData) async {
+  subscription =
+      bus.subscribe(EventKey<int>('int.once'), handler: (dto, lastData) async {
     await subscription.cancel();
     return dto.data;
   });
@@ -60,8 +61,8 @@ void oneShotHandlerWorker(EventBus bus, Object? initialData) {
 
 ///A slow handler that reports every invocation to 'ran'.
 void queuedWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEventsLegacy<int>(paths: ['work'], handler: (dto, lastData) async {
-    bus.fireLegacy<int>(dto.data, paths: ['ran']);
+  bus.subscribe(EventKey<int>('int.work'), handler: (dto, lastData) async {
+    bus.fire(EventKey<int>('int.ran'), dto.data);
     await Future<void>.delayed(const Duration(milliseconds: 200));
     return dto.data;
   });
@@ -69,14 +70,13 @@ void queuedWorker(EventBus bus, Object? initialData) {
 
 ///A slow handler plus a path that kills the worker.
 void slowThenDieWorker(EventBus bus, Object? initialData) {
-  bus.subscribeEventsLegacy<int>(
-      paths: ['work', 'slow'], handler: (dto, lastData) async {
+  bus.subscribe(EventKey<int>('int.work.slow'), handler: (dto, lastData) async {
     await Future<void>.delayed(const Duration(seconds: 5));
     return dto.data;
   });
-  bus.subscribeLegacy<String>(
-      paths: ['die'],
-      onData: (_) => Isolate.current.kill(priority: Isolate.immediate));
+  bus
+      .listen(EventKey<String>('String.die'))
+      .listen((_) => Isolate.current.kill(priority: Isolate.immediate));
 }
 
 void main() {
@@ -85,7 +85,7 @@ void main() {
       final iso = EventBusIsolate(onInit: silentWorker);
       await iso.waitInit;
 
-      expect(iso.fireLegacy<String>('hi', paths: ['in']), isFalse);
+      expect(iso.fire(EventKey<String>('String.in'), 'hi'), isFalse);
 
       await iso.dispose();
     });
@@ -94,11 +94,11 @@ void main() {
       final iso = EventBusIsolate(onInit: silentWorker);
       await iso.waitInit;
       final local = <String>[];
-      final sub = iso.subscribeLegacy<String>(paths: ['in'], onData: local.add);
+      final sub = iso.listen(EventKey<String>('String.in')).listen(local.add);
 
       // there is a local listener, but it is an inbound listener: the worker
       // has no interest, so the fire goes nowhere and returns false
-      expect(iso.fireLegacy<String>('hi', paths: ['in']), isFalse);
+      expect(iso.fire(EventKey<String>('String.in'), 'hi'), isFalse);
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       expect(local, isEmpty);
@@ -109,11 +109,12 @@ void main() {
     test('a local handler alone does not make fire true', () async {
       final iso = EventBusIsolate(onInit: silentWorker);
       await iso.waitInit;
-      final sub = iso.subscribeEventsLegacy<int>(handler: (dto, lastData) async {
+      final sub =
+          iso.subscribe(EventKey<int>('int'), handler: (dto, lastData) async {
         return dto.data;
       });
 
-      expect(iso.fireLegacy<int>(1), isFalse);
+      expect(iso.fire(EventKey<int>('int'), 1), isFalse);
 
       await sub.cancel();
       await iso.dispose();
@@ -123,9 +124,9 @@ void main() {
       final iso = EventBusIsolate(onInit: doublingWorker);
       await iso.waitInit;
 
-      expect(iso.fireLegacy<int>(1), isFalse);
+      expect(iso.fire(EventKey<int>('int'), 1), isFalse);
       // the handler is still reachable by a request
-      expect(await iso.requestLegacy<int>(1), 2);
+      expect(await iso.request(EventKey<int>('int'), 1), 2);
 
       await iso.dispose();
     });
@@ -134,9 +135,9 @@ void main() {
       final iso = EventBusIsolate(onInit: listenerWorker);
       await iso.waitInit;
       final seen = <String>[];
-      final sub = iso.subscribeLegacy<String>(paths: ['seen'], onData: seen.add);
+      final sub = iso.listen(EventKey<String>('String.seen')).listen(seen.add);
 
-      expect(iso.fireLegacy<String>('hi', paths: ['in']), isTrue);
+      expect(iso.fire(EventKey<String>('String.in'), 'hi'), isTrue);
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
       expect(seen, ['seen: hi']);
@@ -149,9 +150,9 @@ void main() {
       final iso = EventBusIsolate(onInit: sameTopicEchoWorker);
       await iso.waitInit;
       final seen = <String>[];
-      final sub = iso.subscribeLegacy<String>(paths: ['in'], onData: seen.add);
+      final sub = iso.listen(EventKey<String>('String.in')).listen(seen.add);
 
-      expect(iso.fireLegacy<String>('hi', paths: ['in']), isTrue);
+      expect(iso.fire(EventKey<String>('String.in'), 'hi'), isTrue);
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
       // only the worker's echo crossed back; the main-side fire itself was
@@ -166,11 +167,11 @@ void main() {
       final iso = EventBusIsolate(onInit: patternEchoWorker);
       await iso.waitInit;
       final echoed = <String>[];
-      final sub = iso.subscribeLegacy<String>(onData: echoed.add);
+      final sub = iso.listen(EventKey<String>('String')).listen(echoed.add);
 
       // no local listener for "x": true is only possible through the pattern
       // interest of the worker
-      expect(iso.fireLegacy<String>('hi', paths: ['x']), isTrue);
+      expect(iso.fire(EventKey<String>('String.x'), 'hi'), isTrue);
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
       expect(echoed, ['echo: hi']);
@@ -183,11 +184,10 @@ void main() {
     test('a local handler answers before the worker handler', () async {
       final iso = EventBusIsolate(onInit: pathWorker);
       await iso.waitInit;
-      final local = iso.subscribeEventsLegacy<int>(
-          paths: ['counter'],
+      final local = iso.subscribe(EventKey<int>('int.counter'),
           handler: (dto, lastData) async => dto.data + 1000);
 
-      expect(await iso.requestLegacy<int>(21, paths: ['counter']), 1021);
+      expect(await iso.request(EventKey<int>('int.counter'), 21), 1021);
 
       await local.cancel();
       await iso.dispose();
@@ -199,7 +199,9 @@ void main() {
       await iso.waitInit;
 
       await expectLater(
-        iso.requestLegacy<String>('nobody').timeout(const Duration(seconds: 1)),
+        iso
+            .request(EventKey<String>('String'), 'nobody')
+            .timeout(const Duration(seconds: 1)),
         throwsA(isA<NoHandlerException>()),
       );
       await iso.dispose();
@@ -210,11 +212,13 @@ void main() {
       final iso = EventBusIsolate(onInit: oneShotHandlerWorker);
       await iso.waitInit;
 
-      expect(await iso.requestLegacy<int>(7, paths: ['once']), 7);
+      expect(await iso.request(EventKey<int>('int.once'), 7), 7);
       // the interest withdrawal is sent before the response, so it is already
       // known when the first request completes
       await expectLater(
-        iso.requestLegacy<int>(8, paths: ['once']).timeout(const Duration(seconds: 1)),
+        iso
+            .request(EventKey<int>('int.once'), 8)
+            .timeout(const Duration(seconds: 1)),
         throwsA(isA<NoHandlerException>()),
       );
       await iso.dispose();
@@ -227,19 +231,19 @@ void main() {
       await iso.waitInit;
       final ran = <int>[];
       final firstStarted = Completer<void>();
-      final sub = iso.subscribeLegacy<int>(paths: ['ran'], onData: (value) {
+      final sub = iso.listen(EventKey<int>('int.ran')).listen((value) {
         ran.add(value);
         if (value == 1 && !firstStarted.isCompleted) {
           firstStarted.complete();
         }
       });
 
-      final first = iso.requestLegacy<int>(1, paths: ['work']);
+      final first = iso.request(EventKey<int>('int.work'), 1);
       await firstStarted.future.timeout(const Duration(seconds: 1));
 
       final token = CancelToken();
       final second =
-          iso.requestLegacy<int>(2, paths: ['work'], cancelToken: token);
+          iso.request(EventKey<int>('int.work'), 2, cancelToken: token);
       final canceled =
           expectLater(second, throwsA(isA<RequestCanceledException>()));
       // the second request reaches the worker and is queued behind the first
@@ -261,19 +265,19 @@ void main() {
       await iso.waitInit;
       final ran = <int>[];
       final firstStarted = Completer<void>();
-      final sub = iso.subscribeLegacy<int>(paths: ['ran'], onData: (value) {
+      final sub = iso.listen(EventKey<int>('int.ran')).listen((value) {
         ran.add(value);
         if (value == 1 && !firstStarted.isCompleted) {
           firstStarted.complete();
         }
       });
 
-      final first = iso.requestLegacy<int>(1, paths: ['work']);
+      final first = iso.request(EventKey<int>('int.work'), 1);
       await firstStarted.future.timeout(const Duration(seconds: 1));
 
       await expectLater(
-        iso.requestLegacy<int>(2,
-            paths: ['work'], timeout: const Duration(milliseconds: 50)),
+        iso.request(EventKey<int>('int.work'), 2,
+            timeout: const Duration(milliseconds: 50)),
         throwsA(isA<RequestTimeoutException>()),
       );
 
@@ -290,10 +294,10 @@ void main() {
       final iso = EventBusIsolate(onInit: slowListenerWorker);
       await iso.waitInit;
       final seen = <String>[];
-      final sub = iso.subscribeLegacy<String>(paths: ['seen'], onData: seen.add);
+      final sub = iso.listen(EventKey<String>('String.seen')).listen(seen.add);
 
       // fired immediately after waitInit: the worker interest is already known
-      expect(iso.fireLegacy<String>('hi', paths: ['in']), isTrue);
+      expect(iso.fire(EventKey<String>('String.in'), 'hi'), isTrue);
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
       expect(seen, ['seen: hi']);
@@ -305,17 +309,17 @@ void main() {
       final iso = EventBusIsolate(onInit: listenerWorker);
       await iso.waitInit;
       final seen = <String>[];
-      final sub = iso.subscribeLegacy<String>(paths: ['seen'], onData: seen.add);
+      final sub = iso.listen(EventKey<String>('String.seen')).listen(seen.add);
 
-      expect(iso.fireLegacy<String>('one', paths: ['in']), isTrue);
+      expect(iso.fire(EventKey<String>('String.in'), 'one'), isTrue);
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(seen, ['seen: one']);
 
-      iso.removeTopicLegacy<String>(paths: ['in']);
+      iso.remove(EventKey<String>('String.in'));
       // the delete and the interest withdrawal travel through the same port
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
-      expect(iso.fireLegacy<String>('two', paths: ['in']), isFalse);
+      expect(iso.fire(EventKey<String>('String.in'), 'two'), isFalse);
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(seen, ['seen: one']);
       await sub.cancel();
@@ -324,30 +328,32 @@ void main() {
   });
 
   group('EventBusIsolate: worker death', () {
-    test('a dead worker is reported and the bus stops accepting work', () async {
+    test('a dead worker is reported and the bus stops accepting work',
+        () async {
       final iso = EventBusIsolate(onInit: slowThenDieWorker);
       await iso.waitInit;
       final death = iso.errors
           .firstWhere((error) => error.kind == EventBusErrorKind.isolateDeath)
           .timeout(const Duration(seconds: 2));
 
-      expect(iso.fireLegacy<String>('now', paths: ['die']), isTrue);
+      expect(iso.fire(EventKey<String>('String.die'), 'now'), isTrue);
       await death;
 
       expect(iso.isInit, isFalse);
       expect(await iso.ping(), isFalse);
       // the stale remote interest is gone; the bus is not ready any more
-      expect(() => iso.fireLegacy<String>('x', paths: ['die']), throwsStateError);
+      expect(() => iso.fire(EventKey<String>('String.die'), 'x'),
+          throwsStateError);
       await expectLater(iso.dispose(), completes);
     });
 
     test('a pending request fails when the worker dies', () async {
       final iso = EventBusIsolate(onInit: slowThenDieWorker);
       await iso.waitInit;
-      final pending = iso.requestLegacy<int>(1, paths: ['work', 'slow']);
+      final pending = iso.request(EventKey<int>('int.work.slow'), 1);
       final failed = expectLater(pending, throwsA(isA<EventBusException>()));
 
-      expect(iso.fireLegacy<String>('now', paths: ['die']), isTrue);
+      expect(iso.fire(EventKey<String>('String.die'), 'now'), isTrue);
       await failed;
       await iso.dispose();
     });

@@ -1,6 +1,5 @@
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:test/test.dart';
-import 'legacy_compat.dart';
 
 ///A bus that records the address passed to [createNode] and can opt into
 ///creating a node on send for every address.
@@ -27,7 +26,8 @@ void main() {
   group('EventBus: node creation hooks', () {
     test('listen passes the topic to createNode', () async {
       final bus = HookedBus();
-      final subscription = bus.listenLegacy<String>(paths: ['a', 'b']).listen((_) {});
+      final subscription =
+          bus.listen(EventKey<String>('String.a.b')).listen((_) {});
       addTearDown(bus.dispose);
 
       expect(bus.createdAddresses.single, 'String.a.b');
@@ -38,7 +38,7 @@ void main() {
       final bus = HookedBus();
       addTearDown(bus.dispose);
 
-      bus.subscribeEventsLegacy<int>(paths: ['x'], handler: (dto, last) async {});
+      bus.subscribe(EventKey<int>('int.x'), handler: (dto, last) async {});
 
       expect(bus.createdAddresses.single, 'int.x');
     });
@@ -49,20 +49,20 @@ void main() {
 
       // The node is created and stores the value, but no listener accepted it,
       // so fire reports false on a common bus (D14).
-      expect(bus.fireLegacy<String>('v', paths: ['x']), isFalse);
+      expect(bus.fire(EventKey<String>('String.x'), 'v'), isFalse);
       await Future<void>.delayed(Duration.zero);
 
       expect(bus.createdAddresses.single, 'String.x');
-      expect(bus.currentDataLegacy<String>(paths: ['x']), 'v');
+      expect(bus.currentData(EventKey<String>('String.x')), 'v');
     });
 
     test('fire does not create a node by default', () {
       final bus = HookedBus();
       addTearDown(bus.dispose);
 
-      expect(bus.fireLegacy<String>('v', paths: ['x']), isFalse);
+      expect(bus.fire(EventKey<String>('String.x'), 'v'), isFalse);
       expect(bus.createdAddresses, isEmpty);
-      expect(bus.currentDataLegacy<String>(paths: ['x']), isNull);
+      expect(bus.currentData(EventKey<String>('String.x')), isNull);
     });
   });
 }

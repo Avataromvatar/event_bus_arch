@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:isolate';
 
 import 'package:event_bus_arch/event_bus_arch.dart';
@@ -18,6 +19,20 @@ void stateErrorWorker(EventBus bus, Object? initialData) {
     if (dto.data == 0) throw StateError('handler boom');
     return dto.data;
   });
+}
+
+///Worker 0 dies after sending ready; worker 1 keeps the pool in its start
+///window while that happens.
+void startupDeathWorker(EventBus bus, Object? initialData) {
+  final index = initialData as int;
+  if (index == 0) {
+    Timer(const Duration(milliseconds: 30), () {
+      Isolate.current.kill(priority: Isolate.immediate);
+    });
+    return;
+  }
+  final end = DateTime.now().add(const Duration(milliseconds: 300));
+  while (DateTime.now().isBefore(end)) {}
 }
 
 ///Kills the isolate while handling data 0.
@@ -62,6 +77,19 @@ void main() {
       // The worker is still ready: the pool did not mistake a handler error
       // for a routing failure.
       expect(await pool.request(workerKey, 7), 7);
+      await pool.close();
+    });
+
+    test('a worker death in the start window fails initialization', () async {
+      final pool = WorkerPool(
+        onInit: startupDeathWorker,
+        workers: 2,
+        initialDataFor: (index) => index,
+      );
+
+      await expectLater(pool.waitInit, throwsA(isA<EventBusException>()));
+      expect(pool.state, WorkerPoolState.failed);
+
       await pool.close();
     });
 

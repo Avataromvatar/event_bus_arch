@@ -92,6 +92,12 @@ class TransportEventBus extends EventBusImpl {
       _codecs.resolve(key.address)?.canEncode == true;
 
   @override
+  bool probeRequestsKey<T>(EventKey<T> key) {
+    final codec = _codecs.resolve(key.address);
+    return codec?.canEncode == true && codec?.canDecode == true;
+  }
+
+  @override
   bool shouldRemoveSendNode(EventNode node) => node is TransportKeyEventNode;
 
   @override

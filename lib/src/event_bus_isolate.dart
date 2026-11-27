@@ -387,7 +387,7 @@ class _IsolateLink {
     } else if (message is _IsolateDeleteSelector) {
       _host._removeSelectorLocally(message.selector);
     } else if (message is _IsolateDeleteAddress) {
-      _host.removeAddress(message.address);
+      _host._removeAddressLocally(message.address);
     }
     // any other message (including late replies) is ignored
   }
@@ -743,6 +743,27 @@ class EventBusIsolate extends EventBusImpl {
     }
   }
 
+  ///Invalidates the current initialization generation and releases its worker.
+  ///
+  ///This must run before `waitInit` is completed with an error: a late
+  ///ready/exit message from the aborted worker must not be able to make the
+  ///bridge usable after the caller has already observed the failure.
+  void _abortInitGeneration(Object reason) {
+    _initTimer?.cancel();
+    _initTimer = null;
+    _generation++;
+    _workerGone = true;
+    _ready = false;
+    _link.failAllPending(reason);
+    _link.sendPort = null;
+    final port = _receivePort;
+    _receivePort = null;
+    port?.close();
+    final isolate = _isolate;
+    _isolate = null;
+    isolate?.kill(priority: Isolate.immediate);
+  }
+
   Future<void> _init() async {
     if (isDisposed) return;
     final generation = ++_generation;
@@ -752,8 +773,15 @@ class EventBusIsolate extends EventBusImpl {
     if (initTimeout != null) {
       _initTimer = Timer(initTimeout!, () {
         if (generation != _generation || _completerInit.isCompleted) return;
-        _completeInitError(EventBusException(
-            'worker initialization timed out after $initTimeout'));
+        final error = EventBusException(
+            'worker initialization timed out after $initTimeout');
+        _abortInitGeneration(error);
+        reportError(EventBusError(
+          kind: EventBusErrorKind.isolateInit,
+          source: EventBusErrorSource.isolate,
+          error: error,
+        ));
+        _completeInitError(error);
       });
     }
     try {
@@ -802,26 +830,16 @@ class EventBusIsolate extends EventBusImpl {
           _ready = true;
           _completeInitResult(true);
         } else if (message is _IsolateInitError) {
-          _ready = false;
+          final error =
+              EventBusException('worker onInit failed: ${message.error}');
+          _abortInitGeneration(error);
           reportError(EventBusError(
             kind: EventBusErrorKind.isolateInit,
             source: EventBusErrorSource.isolate,
             error: message.error,
             stackTrace: message.stackTrace,
           ));
-          _completeInitError(
-              EventBusException('worker onInit failed: ${message.error}'),
-              message.stackTrace);
-          // Kill the idle worker but keep this bus usable for a restart. The
-          // owner (pool, Layers supervisor, or the user) decides whether to
-          // retry; a plain user should dispose the bus.
-          _workerGone = true;
-          final port = _receivePort;
-          _receivePort = null;
-          port?.close();
-          final isolate = _isolate;
-          _isolate = null;
-          isolate?.kill(priority: Isolate.immediate);
+          _completeInitError(error, message.stackTrace);
         } else if (message == _isolateExitMessage) {
           _onWorkerGone();
           if (identical(_receivePort, receivePort)) {
@@ -910,6 +928,12 @@ class _EventBusForIsolate extends EventBusImpl {
   final SendPort _sendPort;
   late final _IsolateLink _link = _IsolateLink(this);
   Timer? _watchdog;
+  bool _watchdogChecking = false;
+  int _watchdogMisses = 0;
+
+  static const Duration _watchdogInterval = Duration(seconds: 5);
+  static const Duration _watchdogTimeout = Duration(seconds: 5);
+  static const int _watchdogMaxMisses = 3;
 
   _EventBusForIsolate(super._isModelBus, this._receivePort, this._sendPort) {
     _link.sendPort = _sendPort;
@@ -917,15 +941,34 @@ class _EventBusForIsolate extends EventBusImpl {
   }
 
   ///A worker cannot be notified when its parent isolate dies. It pings the
-  ///parent and kills itself when no pong comes; its own child then does the
-  ///same, so a dead parent tears the whole subtree down.
+  ///parent and kills itself only after several consecutive missed pings; a
+  ///parent isolate blocked by a long synchronous operation is alive and must
+  ///not lose its worker. A dead parent tears the whole subtree down after the
+  ///grace window.
   void _startParentWatchdog() {
-    _watchdog = Timer.periodic(const Duration(seconds: 1), (_) async {
-      if (await _link.ping(const Duration(milliseconds: 500))) return;
+    _watchdog = Timer.periodic(_watchdogInterval, (_) {
+      unawaited(_checkParent());
+    });
+  }
+
+  Future<void> _checkParent() async {
+    if (_watchdog == null || _watchdogChecking) return;
+    _watchdogChecking = true;
+    try {
+      final alive = await _link.ping(_watchdogTimeout);
+      if (_watchdog == null) return;
+      if (alive) {
+        _watchdogMisses = 0;
+        return;
+      }
+      _watchdogMisses++;
+      if (_watchdogMisses < _watchdogMaxMisses) return;
       _watchdog?.cancel();
       _watchdog = null;
       Isolate.current.kill(priority: Isolate.immediate);
-    });
+    } finally {
+      _watchdogChecking = false;
+    }
   }
 
   ///Reports a failure of a lower layer locally and forwards it up the chain.

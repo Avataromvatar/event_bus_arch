@@ -12,7 +12,7 @@ The core package stays a routing library; it does not export these types.
 
 ```yaml
 dependencies:
-  event_bus_arch: ^4.1.0
+  event_bus_arch: ^4.2.0
   event_bus_arch_patterns: ^0.1.0
 ```
 

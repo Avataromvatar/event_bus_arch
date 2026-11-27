@@ -204,6 +204,8 @@ void main() {
 
       final probe = bus.probeRequest(orderKey, Order('A'));
       expect(probe.localHandlers, 0);
+      expect(probe.transportRequests, isFalse);
+      expect(probe.canRequest, isFalse);
       expect(bus.metrics.snapshot().fired, 0);
       expect(events, isEmpty);
 

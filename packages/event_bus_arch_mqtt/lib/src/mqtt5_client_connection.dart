@@ -44,7 +44,6 @@ class MqttServerConnection extends ReconnectingTransportConnection {
   ///Whether the current client completed a successful handshake.
   bool _established = false;
 
-  bool get _secure => broker.scheme == 'mqtts' || broker.scheme == 'wss';
   bool get _webSocket => broker.scheme == 'ws' || broker.scheme == 'wss';
 
   int get _defaultPort => switch (broker.scheme) {
@@ -66,14 +65,18 @@ class MqttServerConnection extends ReconnectingTransportConnection {
 
   @override
   Future<void> connectClient() async {
+    // mqtt5_client's server WebSocket connection expects the full URI, not
+    // just the host. For wss the WebSocket layer performs TLS itself; setting
+    // `secure` would force the client back to a TLS TCP socket.
+    final server = _webSocket ? broker.toString() : broker.host;
     final client = mqtt_server.MqttServerClient.withPort(
-      broker.host,
+      server,
       _clientId,
       broker.hasPort ? broker.port : _defaultPort,
       maxConnectionAttempts: 1,
     );
     _client = client;
-    client.secure = _secure;
+    client.secure = broker.scheme == 'mqtts';
     client.useWebSocket = _webSocket;
     client.autoReconnect = false;
     client.resubscribeOnAutoReconnect = false;

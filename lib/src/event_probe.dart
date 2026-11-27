@@ -51,6 +51,7 @@ class RequestProbe {
     required this.localListeners,
     required this.hasRawListener,
     required this.remoteHandlerInterest,
+    this.transportRequests = false,
   });
 
   ///Handlers in the resolved tier that accept the data.
@@ -68,8 +69,18 @@ class RequestProbe {
   ///Whether the other side of an isolate bridge has a typed handler interest.
   final bool remoteHandlerInterest;
 
-  ///Whether a handler could answer now (locally or remotely).
+  ///Whether a transport codec can route this key as a request.
+  ///
+  ///A transport request needs both an encoder and a decoder. Like
+  ///[FireProbe.transportPublishes], this reports codec capability, not a live
+  ///connection or a broker subscriber.
+  final bool transportRequests;
+
+  ///Whether a local or remote handler is known.
   bool get hasHandler => localHandlers > 0 || remoteHandlerInterest;
+
+  ///Whether the request has a route: a local/remote handler or a transport.
+  bool get canRequest => hasHandler || transportRequests;
 
   ///A local handler exists but none has capacity now.
   bool get isBusy => localHandlers > 0 && localAvailableHandlers == 0;
@@ -77,5 +88,5 @@ class RequestProbe {
   @override
   String toString() => 'RequestProbe(handlers: $localHandlers, '
       'available: $localAvailableHandlers, listeners: $localListeners, '
-      'remote: $remoteHandlerInterest)';
+      'remote: $remoteHandlerInterest, transport: $transportRequests)';
 }

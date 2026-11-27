@@ -9,15 +9,17 @@ import 'dart:typed_data';
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_mqtt/event_bus_arch_mqtt.dart';
 import 'package:test/test.dart';
-import '../../../test/legacy_compat.dart';
-import 'legacy_mqtt.dart';
 
 EventDTO<int> _decode(
   Uint8List data,
   String topic, {
   Map<String, String>? arguments,
 }) {
-  return EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)), arguments: arguments);
+  return EventDTO.withKey(
+    EventKey<int>(topic),
+    int.parse(utf8.decode(data)),
+    arguments: arguments,
+  );
 }
 
 void main() {
@@ -31,22 +33,18 @@ void main() {
     late EventBusMqtt busB;
 
     setUp(() async {
-      final serializers = {
-        'int': (EventDTO dto) =>
-            (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
-      };
-      final deserializers = {'int': _decode};
+      final codec = EventCodec(
+        encode: (dto) => (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+        decode: (data, address, {arguments}) =>
+            _decode(data, address.value, arguments: arguments),
+      );
+      final codecs = EventCodecRegistry(
+        exact: {EventAddress('int'): codec},
+        patterns: {EventPattern('int.>'): codec},
+      );
 
-      busA = legacyMqtt(
-        Uri.parse(url!),
-        serializers: serializers,
-        deserializers: deserializers,
-      );
-      busB = legacyMqtt(
-        Uri.parse(url),
-        serializers: serializers,
-        deserializers: deserializers,
-      );
+      busA = EventBusMqtt.keys(Uri.parse(url!), codecs: codecs);
+      busB = EventBusMqtt.keys(Uri.parse(url), codecs: codecs);
       await Future.wait([
         busA.waitConnected(timeout: const Duration(seconds: 5)),
         busB.waitConnected(timeout: const Duration(seconds: 5)),
@@ -63,19 +61,19 @@ void main() {
     test('a message published by one bus reaches the other', () async {
       final received = Completer<int>();
       busB
-          .listenLegacy<int>(paths: ['sensor', 'temp'])
+          .listen(EventKey<int>('int.sensor.temp'))
           .listen((value) => received.complete(value));
 
-      busA.fireLegacy<int>(42, paths: ['sensor', 'temp']);
+      busA.fire(EventKey<int>('int.sensor.temp'), 42);
 
       expect(await received.future.timeout(const Duration(seconds: 5)), 42);
     });
 
     test('the publisher does not receive its own echo', () async {
       final received = <int>[];
-      busA.listenLegacy<int>(paths: ['sensor', 'temp']).listen(received.add);
+      busA.listen(EventKey<int>('int.sensor.temp')).listen(received.add);
 
-      busA.fireLegacy<int>(1, paths: ['sensor', 'temp']);
+      busA.fire(EventKey<int>('int.sensor.temp'), 1);
       await Future<void>.delayed(const Duration(milliseconds: 500));
 
       expect(received, [1]);
@@ -83,11 +81,11 @@ void main() {
 
     test('a wildcard listener receives a concrete topic', () async {
       final received = Completer<int>();
-      busB.listenLegacy<int>(paths: ['sensor', '*']).listen((value) {
+      busB.listen(EventPatternKey<int>('int.sensor.*')).listen((value) {
         received.complete(value);
       });
 
-      busA.fireLegacy<int>(7, paths: ['sensor', 'humidity']);
+      busA.fire(EventKey<int>('int.sensor.humidity'), 7);
 
       expect(await received.future.timeout(const Duration(seconds: 5)), 7);
     });
@@ -95,18 +93,18 @@ void main() {
     test('a request is answered and reaches listeners once', () async {
       final values = <int>[];
       final subscription = busB
-          .listenLegacy<int>(paths: ['sensor', '*'])
+          .listen(EventPatternKey<int>('int.sensor.*'))
           .listen(values.add);
       addTearDown(subscription.cancel);
-      busB.subscribeEventsLegacy<int>(
-        paths: ['sensor', 'double'],
+      busB.subscribe(
+        EventKey<int>('int.sensor.double'),
         handler: (dto, lastData) async => dto.data * 2,
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
-      final result = await busA.requestLegacy<int>(
+      final result = await busA.request(
+        EventKey<int>('int.sensor.double'),
         21,
-        paths: ['sensor', 'double'],
         timeout: const Duration(seconds: 5),
       );
       await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -118,18 +116,18 @@ void main() {
     test('overlapping subscriptions deliver a fire once per node', () async {
       final values = <int>[];
       final subscription = busB
-          .listenLegacy<int>(paths: ['sensor', '*'])
+          .listen(EventPatternKey<int>('int.sensor.*'))
           .listen(values.add);
       addTearDown(subscription.cancel);
       // An exact node next to the pattern node: both filters match, but a
       // listener on the pattern node must see the event once.
-      busB.subscribeEventsLegacy<int>(
-        paths: ['sensor', 'temp'],
+      busB.subscribe(
+        EventKey<int>('int.sensor.temp'),
         handler: (dto, lastData) async => dto.data,
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
-      busA.fireLegacy<int>(5, paths: ['sensor', 'temp']);
+      busA.fire(EventKey<int>('int.sensor.temp'), 5);
       await Future<void>.delayed(const Duration(milliseconds: 500));
 
       expect(values, [5]);
@@ -137,9 +135,9 @@ void main() {
 
     test('a remote request times out when nobody answers', () async {
       await expectLater(
-        busA.requestLegacy<int>(
+        busA.request(
+          EventKey<int>('int.sensor.nobody'),
           1,
-          paths: ['sensor', 'nobody'],
           timeout: const Duration(milliseconds: 200),
         ),
         throwsA(isA<TimeoutException>()),
@@ -148,21 +146,35 @@ void main() {
 
     test('arguments travel with the event', () async {
       final received = Completer<Map<String, String>?>();
-      final busC = legacyMqtt(
+      final busC = EventBusMqtt.keys(
         Uri.parse(url!),
-        deserializers: {
-          'int': (data, topic, {arguments}) {
-            received.complete(arguments);
-            return EventDTO.withKey(EventKey<int>(topic), 0);
+        codecs: EventCodecRegistry(
+          exact: {
+            EventAddress('int'): EventCodec(
+              decode: (data, address, {arguments}) =>
+                  ((data, topic, {arguments}) {
+                    received.complete(arguments);
+                    return EventDTO.withKey(EventKey<int>(topic), 0);
+                  })(data, address.value, arguments: arguments),
+            ),
           },
-        },
+          patterns: {
+            EventPattern('int.>'): EventCodec(
+              decode: (data, address, {arguments}) =>
+                  ((data, topic, {arguments}) {
+                    received.complete(arguments);
+                    return EventDTO.withKey(EventKey<int>(topic), 0);
+                  })(data, address.value, arguments: arguments),
+            ),
+          },
+        ),
       );
       addTearDown(busC.dispose);
       await busC.waitConnected(timeout: const Duration(seconds: 5));
-      busC.listenLegacy<int>(paths: ['args']).listen((_) {});
+      busC.listen(EventKey<int>('int.args')).listen((_) {});
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
-      busA.fireLegacy<int>(1, paths: ['args'], arguments: {'tenant': 'acme'});
+      busA.fire(EventKey<int>('int.args'), 1, arguments: {'tenant': 'acme'});
 
       expect(await received.future.timeout(const Duration(seconds: 5)), {
         'tenant': 'acme',

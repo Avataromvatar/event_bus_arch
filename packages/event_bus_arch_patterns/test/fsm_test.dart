@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_patterns/event_bus_arch_patterns.dart';
 import 'package:test/test.dart';
-import '../../../test/legacy_compat.dart';
 
 enum TestState { a, b, c }
 
@@ -19,9 +18,9 @@ class TestMachine with FSM<TestState> {
     addFSMTransition<EventA>(TestState.a, TestState.b,
         selector: EventKey<EventA>('EventA'),
         handler: (current, last, event, ignored) async {
-          log.add('$last->$current');
-          return null;
-        });
+      log.add('$last->$current');
+      return null;
+    });
     addFSMTransition<EventB>(TestState.b, TestState.c,
         selector: EventKey<EventB>('EventB'),
         filter: (current, last, event) => true,
@@ -38,7 +37,7 @@ void main() {
       final bus = EventBus();
       final machine = TestMachine(bus);
 
-      bus.fireLegacy(EventA());
+      bus.fire(EventKey<EventA>('EventA'), EventA());
       await pumpEventQueue();
 
       expect(machine.state, TestState.b);
@@ -50,13 +49,13 @@ void main() {
     test('dispose unsubscribes the machine from the bus', () async {
       final bus = EventBus();
       final machine = TestMachine(bus);
-      bus.fireLegacy(EventA());
+      bus.fire(EventKey<EventA>('EventA'), EventA());
       await pumpEventQueue();
       expect(machine.state, TestState.b);
 
       machine.dispose();
       machine.changeState(TestState.a);
-      bus.fireLegacy(EventA());
+      bus.fire(EventKey<EventA>('EventA'), EventA());
       await pumpEventQueue();
 
       expect(machine.state, TestState.a);
@@ -69,7 +68,7 @@ void main() {
       final machine = TestMachine(bus);
       machine.initFSM(bus, TestState.a);
 
-      bus.fireLegacy(EventA());
+      bus.fire(EventKey<EventA>('EventA'), EventA());
       await pumpEventQueue();
 
       expect(machine.log.length, 1);
@@ -90,10 +89,10 @@ void main() {
       machine.initFSM(bus, TestState.a);
 
       machine.changeState(TestState.a);
-      bus.fireLegacy(EventB());
+      bus.fire(EventKey<EventB>('EventB'), EventB());
       await Future<void>.delayed(const Duration(milliseconds: 5));
-      bus.fireLegacy(EventB());
-      bus.fireLegacy(EventB());
+      bus.fire(EventKey<EventB>('EventB'), EventB());
+      bus.fire(EventKey<EventB>('EventB'), EventB());
       // the transition handler waits 30 ms of real time
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
@@ -116,9 +115,9 @@ void main() {
           throw StateError('handler failed');
         });
 
-        bus.fireLegacy(EventA());
+        bus.fire(EventKey<EventA>('EventA'), EventA());
         await pumpEventQueue();
-        bus.fireLegacy(EventB());
+        bus.fire(EventKey<EventB>('EventB'), EventB());
         await pumpEventQueue();
         await bus.dispose();
       }, (error, stackTrace) => errors.add(error));

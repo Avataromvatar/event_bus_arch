@@ -6,8 +6,6 @@ import 'package:event_bus_arch/event_bus_arch.dart';
 import 'package:event_bus_arch_transport/event_bus_arch_transport.dart';
 import 'package:event_bus_arch_transport/testing.dart';
 import 'package:test/test.dart';
-import '../../../test/legacy_compat.dart';
-import 'legacy_codecs.dart';
 
 class _TestGrammar extends SubjectGrammar {
   const _TestGrammar();
@@ -29,29 +27,32 @@ class _TestGrammar extends SubjectGrammar {
       {required bool isFirst, required bool isLast}) {}
 }
 
-(String?, Uint8List) _encode(EventDTO dto) =>
-    (null, Uint8List.fromList(utf8.encode('${dto.data}')));
-
-EventDTO _decode(Uint8List data, String topic,
-        {Map<String, String>? arguments}) =>
-    EventDTO.withKey(EventKey<int>(topic), int.parse(utf8.decode(data)));
+EventCodec _intCodec() => EventCodec(
+      encode: (dto) => (null, Uint8List.fromList(utf8.encode('${dto.data}'))),
+      decode: (data, address, {arguments}) => EventDTO<int>.withKey(
+        EventKey<int>(address.value),
+        int.parse(utf8.decode(data)),
+      ),
+    );
 
 void main() {
   test('correlation id and metrics cross the transport seam', () async {
     final connection = FakeTransportConnection();
-    final bus = legacyTransportBus(
+    final bus = TransportEventBus.keys(
       connection: connection,
-      grammar: const _TestGrammar(),
-      serializers: {'int': _encode},
-      deserializers: {'int': _decode},
+      addresses: EventAddressMapper(grammar: const _TestGrammar()),
+      codecs: EventCodecRegistry(exact: {
+        EventAddress('int.a'): _intCodec(),
+        EventAddress('int.b'): _intCodec(),
+      }),
       originId: 'origin',
       observability: const ObservabilityConfig(enabled: true),
     );
     await bus.waitConnected();
 
     String? seen;
-    final sub = bus.subscribeEventsLegacy<int>(
-        paths: ['a'], handler: (dto, lastData) async {
+    final sub =
+        bus.subscribe(EventKey<int>('int.a'), handler: (dto, lastData) async {
       seen = dto.correlationId;
       return 7;
     });
@@ -65,21 +66,20 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 20));
 
     expect(seen, 'corr-in');
-    final response =
-        connection.publishes.singleWhere((publish) => publish.subject == '_INBOX.1');
+    final response = connection.publishes
+        .singleWhere((publish) => publish.subject == '_INBOX.1');
     expect(response.correlationId, 'corr-in');
 
-    expect(bus.fireLegacy<int>(5, paths: ['a'], correlationId: 'corr-fire'), isTrue);
+    expect(bus.fire(EventKey<int>('int.a'), 5, correlationId: 'corr-fire'),
+        isTrue);
     final published = connection.publishes
         .where((publish) => publish.subject == 'int.a')
         .toList();
     expect(published, hasLength(1));
     expect(published.single.correlationId, 'corr-fire');
 
-    final pending = bus.requestLegacy<int>(6,
-        paths: ['b'],
-        correlationId: 'corr-req',
-        timeout: const Duration(milliseconds: 20));
+    final pending = bus.request(EventKey<int>('int.b'), 6,
+        correlationId: 'corr-req', timeout: const Duration(milliseconds: 20));
     expect(connection.requests, hasLength(1));
     expect(connection.requests.single.correlationId, 'corr-req');
     await expectLater(pending, throwsA(isA<TimeoutException>()));
